@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/gitopedia/researcher/internal/llm"
 	"github.com/gitopedia/researcher/internal/search"
 	gh "github.com/google/go-github/v57/github"
 )
@@ -18,12 +19,14 @@ func (m *MockGitHub) GetResearchRequests() ([]*gh.Issue, error) {
 }
 func (m *MockGitHub) CreateBranch(base, new string) error  { return nil }
 func (m *MockGitHub) CreateFile(b, p, msg, c string) error { return nil }
+func (m *MockGitHub) UpdateFile(b, p, msg, c, s string) error { return nil }
 func (m *MockGitHub) CreatePullRequest(t, b, h, base string) (*gh.PullRequest, error) {
 	num := 100
 	url := "http://pr"
 	return &gh.PullRequest{Number: &num, HTMLURL: &url}, nil
 }
 func (m *MockGitHub) CommentOnIssue(n int, b string) error { return nil }
+func (m *MockGitHub) GetFile(ref, path string) (string, string, error) { return "[]", "sha123", nil }
 
 type MockSearch struct{}
 
@@ -35,6 +38,10 @@ type MockLLM struct{}
 
 func (m *MockLLM) GenerateArticle(ctx context.Context, t, c string) (string, error) {
 	return "# Article\nContent", nil
+}
+
+func (m *MockLLM) ExtractEntities(ctx context.Context, content string) ([]llm.ExtractedEntity, error) {
+	return []llm.ExtractedEntity{}, nil
 }
 
 func TestAgentRun(t *testing.T) {

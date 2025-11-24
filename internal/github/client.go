@@ -73,6 +73,17 @@ func (c *Client) CreateFile(branch, path, message, content string) error {
 	return err
 }
 
+func (c *Client) UpdateFile(branch, path, message, content, sha string) error {
+	opts := &github.RepositoryContentFileOptions{
+		Message: github.String(message),
+		Content: []byte(content),
+		Branch:  github.String(branch),
+		SHA:     github.String(sha),
+	}
+	_, _, err := c.client.Repositories.CreateFile(c.ctx, c.owner, c.repo, path, opts)
+	return err
+}
+
 func (c *Client) CreatePullRequest(title, body, head, base string) (*github.PullRequest, error) {
 	newPR := &github.NewPullRequest{
 		Title: github.String(title),
@@ -91,4 +102,22 @@ func (c *Client) CommentOnIssue(issueNumber int, body string) error {
 	}
 	_, _, err := c.client.Issues.CreateComment(c.ctx, c.owner, c.repo, issueNumber, comment)
 	return err
+}
+
+func (c *Client) GetFile(ref, path string) (string, string, error) {
+	opts := &github.RepositoryContentGetOptions{
+		Ref: ref,
+	}
+	fileContent, _, _, err := c.client.Repositories.GetContents(c.ctx, c.owner, c.repo, path, opts)
+	if err != nil {
+		return "", "", err
+	}
+	if fileContent == nil {
+		return "", "", fmt.Errorf("file content is nil")
+	}
+	content, err := fileContent.GetContent()
+	if err != nil {
+		return "", "", err
+	}
+	return content, fileContent.GetSHA(), nil
 }

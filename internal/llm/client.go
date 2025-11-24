@@ -2,8 +2,10 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/sashabaranov/go-openai"
 )
@@ -83,4 +85,55 @@ Use the following research context to inform your writing:
 	}
 
 	return resp.Choices[0].Message.Content, nil
+}
+
+func (c *Client) ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error) {
+	prompt := fmt.Sprintf(`
+Analyze the following article text and extract key entities.
+Return the result as a valid JSON array of objects.
+Each object should have:
+- "name": The exact name of the entity as mentioned.
+- "type": One of "person", "org", "place", "topic".
+
+**Text:**
+%s
+
+**JSON Output:**
+`, content)
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.model,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: "You are an entity extraction system. You output strictly JSON arrays.",
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: prompt,
+				},
+			},
+			Temperature: 0.0, // Deterministic
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := resp.Choices[0].Message.Content
+	// Clean up markdown code blocks if present
+	jsonStr = strings.TrimPrefix(jsonStr, "```json")
+	jsonStr = strings.TrimPrefix(jsonStr, "```")
+	jsonStr = strings.TrimSuffix(jsonStr, "```")
+	jsonStr = strings.TrimSpace(jsonStr)
+
+	var entities []ExtractedEntity
+	if err := json.Unmarshal([]byte(jsonStr), &entities); err != nil {
+		return nil, fmt.Errorf("failed to parse entities JSON: %w", err)
+	}
+
+	return entities, nil
 }
