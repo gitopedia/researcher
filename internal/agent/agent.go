@@ -96,17 +96,33 @@ func (a *Agent) processIssue(ctx context.Context, issue *gh.Issue) error {
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
 	date := time.Now().Format("2006-01-02")
 
-	frontMatter := fmt.Sprintf(`---
+	var fullContent string
+	if strings.HasPrefix(strings.TrimSpace(content), "---") {
+		// Inject system fields into existing front matter
+		lines := strings.Split(content, "\n")
+		if len(lines) > 1 {
+			systemFields := fmt.Sprintf("id: %s\nslug: \"%s\"\ncreated: %s\nauthor: \"Gitopedia Bot\"", id, slug, date)
+			// Insert after the first "---" line
+			newLines := append([]string{lines[0], systemFields}, lines[1:]...)
+			fullContent = strings.Join(newLines, "\n")
+		} else {
+			fullContent = fmt.Sprintf("---\nid: %s\ntitle: \"%s\"\nslug: \"%s\"\ncreated: %s\nauthor: \"Gitopedia Bot\"\ntags: []\nsummary: \"\"\n---\n\n%s", id, topic, slug, date, content)
+		}
+	} else {
+		// Fallback if LLM didn't generate front matter
+		frontMatter := fmt.Sprintf(`---
 id: %s
 title: "%s"
 slug: "%s"
 created: %s
+author: "Gitopedia Bot"
 tags: []
+summary: ""
 ---
 
 `, id, topic, slug, date)
-
-	fullContent := frontMatter + content
+		fullContent = frontMatter + content
+	}
 
 	// Create PR
 	branchName := fmt.Sprintf("research/issue-%d-%s", *issue.Number, slug)

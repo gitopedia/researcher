@@ -43,7 +43,13 @@ Use the following research context to inform your writing:
 
 **Format Requirements:**
 - Use Markdown.
-- Start with a Level 1 heading (# Title).
+- Start with a YAML front matter block enclosed by "---" lines.
+- In the front matter, include:
+  - "title": The article title.
+  - "summary": A concise 2-3 sentence summary.
+  - "tags": A list of relevant topic tags (e.g. ["Technology", "AI"]).
+- Do not include "id", "created", or "author" in the front matter (these will be added automatically).
+- After the front matter, start the article body with a Level 1 heading (# Title).
 - Include an "Overview" section.
 - Include a "History" or "Background" section if applicable.
 - Cite sources from the context using bracketed numbers like [1], [2].
