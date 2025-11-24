@@ -1,0 +1,21 @@
+services:
+  # Ollama - Self-hosted LLM (DeepSeek)
+  # Exposes OpenAI-compatible API at http://localhost:11434/v1
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # To use GPU, uncomment the following (requires nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  ollama_data:
