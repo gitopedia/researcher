@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/google/go-github/v57/github"
 	"golang.org/x/oauth2"
@@ -39,7 +40,7 @@ func NewClient(ctx context.Context) (*Client, error) {
 func (c *Client) GetResearchRequests() ([]*github.Issue, error) {
 	opts := &github.IssueListByRepoOptions{
 		State:  "open",
-		Labels: []string{"research request"},
+		Labels: []string{"research-category"}, // Changed to new label
 	}
 	issues, _, err := c.client.Issues.ListByRepo(c.ctx, c.owner, c.repo, opts)
 	return issues, err
@@ -120,4 +121,36 @@ func (c *Client) GetFile(ref, path string) (string, string, error) {
 		return "", "", err
 	}
 	return content, fileContent.GetSHA(), nil
+}
+
+func (c *Client) ListAllFiles(path string) ([]string, error) {
+	// Get default branch SHA
+	repo, _, err := c.client.Repositories.Get(c.ctx, c.owner, c.repo)
+	if err != nil {
+		return nil, err
+	}
+	defaultBranch := repo.GetDefaultBranch()
+
+	tree, _, err := c.client.Git.GetTree(c.ctx, c.owner, c.repo, defaultBranch, true)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, entry := range tree.Entries {
+		if entry.GetType() == "blob" && strings.HasPrefix(entry.GetPath(), path) {
+			files = append(files, entry.GetPath())
+		}
+	}
+	return files, nil
+}
+
+func (c *Client) CreateIssue(title, body string, labels []string) (*github.Issue, error) {
+	req := &github.IssueRequest{
+		Title:  github.String(title),
+		Body:   github.String(body),
+		Labels: &labels,
+	}
+	issue, _, err := c.client.Issues.Create(c.ctx, c.owner, c.repo, req)
+	return issue, err
 }

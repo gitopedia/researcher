@@ -12,6 +12,8 @@ type GitHubClient interface {
 	CreatePullRequest(title, body, head, base string) (*github.PullRequest, error)
 	CommentOnIssue(issueNumber int, body string) error
 	GetFile(ref, path string) (string, string, error)
+	ListAllFiles(path string) ([]string, error)
+	CreateIssue(title, body string, labels []string) (*github.Issue, error)
 }
 
 // Ensure Client implements GitHubClient

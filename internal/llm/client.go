@@ -137,3 +137,54 @@ Each object should have:
 
 	return entities, nil
 }
+
+func (c *Client) SuggestTopics(ctx context.Context, category string, existingTopics []string) ([]string, error) {
+	prompt := fmt.Sprintf(`
+You are a research editor for Gitopedia.
+The current category is "%s".
+We want to expand our coverage.
+
+Here is a list of EXISTING articles in our database (do not suggest these):
+%s
+
+Suggest 20-30 new, significant encyclopedic topics related to "%s" that are missing.
+Return ONLY a JSON array of strings. e.g. ["Topic A", "Topic B"]
+
+**Output:**
+`, category, strings.Join(existingTopics, ", "), category)
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.model,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: "You are a helpful editor. You output strictly JSON arrays.",
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: prompt,
+				},
+			},
+			Temperature: 0.8,
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := resp.Choices[0].Message.Content
+	jsonStr = strings.TrimPrefix(jsonStr, "```json")
+	jsonStr = strings.TrimPrefix(jsonStr, "```")
+	jsonStr = strings.TrimSuffix(jsonStr, "```")
+	jsonStr = strings.TrimSpace(jsonStr)
+
+	var topics []string
+	if err := json.Unmarshal([]byte(jsonStr), &topics); err != nil {
+		return nil, fmt.Errorf("failed to parse topics JSON: %w", err)
+	}
+
+	return topics, nil
+}

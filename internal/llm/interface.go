@@ -21,6 +21,7 @@ type ExtractedEntity struct {
 type Generator interface {
 	GenerateArticle(ctx context.Context, topic, contextData string) (string, error)
 	ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error)
+	SuggestTopics(ctx context.Context, category string, existingTopics []string) ([]string, error)
 }
 
 // Ensure Client implements Generator
