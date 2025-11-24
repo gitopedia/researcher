@@ -80,15 +80,38 @@ func (a *Agent) processIssue(ctx context.Context, issue *gh.Issue) error {
 
 	// 2. Research
 	log.Printf("Researching '%s'...", topic)
-	results, err := a.search.Search(topic + " encyclopedia facts")
-	if err != nil {
-		log.Printf("Search failed: %v", err)
-		// Continue even if search fails (LLM might know enough)
+	queries := []string{
+		topic + " encyclopedia facts",
+		topic + " history context",
+		topic + " summary overview",
+	}
+
+	var results []search.Result
+	seenURLs := make(map[string]bool)
+
+	for _, q := range queries {
+		log.Printf("Searching for: %s", q)
+		res, err := a.search.Search(q)
+		if err != nil {
+			log.Printf("Search failed for '%s': %v", q, err)
+			continue
+		}
+		for _, r := range res {
+			if !seenURLs[r.Href] {
+				results = append(results, r)
+				seenURLs[r.Href] = true
+			}
+		}
+		time.Sleep(1 * time.Second) // polite delay between queries
+	}
+
+	if len(results) == 0 {
+		log.Printf("Warning: No search results found for topic '%s'", topic)
 	}
 
 	contextData := ""
-	for _, r := range results {
-		contextData += fmt.Sprintf("Source: %s (%s)\nSummary: %s\n\n", r.Title, r.Href, r.Body)
+	for i, r := range results {
+		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nSummary: %s\n\n", i+1, r.Title, r.Href, r.Body)
 	}
 
 	// 3. Draft Content

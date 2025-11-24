@@ -54,8 +54,8 @@ Use the following research context to inform your writing:
 - After the front matter, start the article body with a Level 1 heading (# Title).
 - Include an "Overview" section.
 - Include a "History" or "Background" section if applicable.
-- Cite sources from the context using bracketed numbers like [1], [2].
-- At the end, include a "References" section listing the URLs.
+- Cite sources from the context using bracketed numbers like [1], [2] corresponding to the provided source list.
+- At the end, include a "References" section listing the sources used.
 
 **Style:**
 - Neutral, objective tone.
