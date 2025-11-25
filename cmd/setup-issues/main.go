@@ -40,7 +40,7 @@ func main() {
 	// But the client doesn't expose ListAllIssues.
 	// For this script, we'll assume if we don't see it in GetResearchRequests, we create it.
 	// Better: we should check if an issue with the title exists.
-	
+
 	existing, err := client.GetResearchRequests()
 	if err != nil {
 		log.Fatalf("Failed to get existing requests: %v", err)
@@ -61,7 +61,7 @@ func main() {
 		log.Printf("Creating issue '%s'...", title)
 		body := "Tracking issue for expanding the category: " + cat
 		labels := []string{"research category"}
-		
+
 		if _, err := client.CreateIssue(title, body, labels); err != nil {
 			log.Printf("Failed to create issue '%s': %v", title, err)
 		} else {
@@ -69,4 +69,3 @@ func main() {
 		}
 	}
 }
-

@@ -176,7 +176,7 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 	if len(prTitle) > 200 {
 		prTitle = fmt.Sprintf("Expand %s: %d new articles", category, len(createdArticles))
 	}
-	
+
 	prBody := fmt.Sprintf("Automated expansion for category **%s**.\n\nAdded articles:\n", category)
 	for _, art := range createdArticles {
 		prBody += fmt.Sprintf("- %s\n", art)
@@ -300,7 +300,7 @@ summary: "Source material for %s"
 	if err != nil {
 		log.Printf("Warning: entity extraction failed: %v", err)
 	}
-	
+
 	// Add Category as a topic if missing
 	foundCat := false
 	for _, e := range extracted {

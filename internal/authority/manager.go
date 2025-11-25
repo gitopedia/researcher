@@ -177,4 +177,3 @@ func (m *Manager) GetUpdates() (map[string]FileUpdate, error) {
 	}
 	return updates, nil
 }
-
