@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -198,6 +199,8 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 }
 
 func (a *Agent) processTopic(ctx context.Context, topic, category, branchName string, authMgr *authority.Manager) error {
+	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
+
 	// Research
 	queries := []string{
 		topic + " encyclopedia facts",
@@ -255,6 +258,30 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		processedCount++
 		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nContent: %s\n\n", processedCount, r.Title, r.Href, content)
 		references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", processedCount, r.Title, r.Href))
+
+		// Save source summary
+		if u, err := url.Parse(r.Href); err == nil {
+			domain := strings.ReplaceAll(u.Host, ".", "-")
+			sourceID := ulid.Make().String()
+			sourcePath := fmt.Sprintf("Compendium/_incoming/sources/%s--%s-%d.md", slug, domain, processedCount)
+			sourceContent := fmt.Sprintf(`---
+id: %s
+title: "Source: %s"
+url: "%s"
+type: source
+related_article: "%s"
+created: %s
+tags: ["Source"]
+summary: "Source material for %s"
+---
+
+%s
+`, sourceID, r.Title, r.Href, slug, time.Now().Format("2006-01-02"), topic, content)
+
+			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+r.Title, sourceContent); err != nil {
+				log.Printf("Failed to save source %s: %v", sourcePath, err)
+			}
+		}
 	}
 
 	// Draft
@@ -295,7 +322,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 
 	// Front Matter
 	id := ulid.Make()
-	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
+	// slug is already defined at start of function
 	date := time.Now().Format("2006-01-02")
 
 	var tags []string
