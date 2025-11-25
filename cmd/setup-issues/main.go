@@ -34,7 +34,7 @@ func main() {
 	}
 
 	// Check existing issues
-	// Since client.GetResearchRequests only gets open ones with label 'research-category',
+	// Since client.GetResearchRequests only gets open ones with label 'Research Category',
 	// we should probably list ALL issues to avoid duplicates if they are closed or have different labels?
 	// Or just trust the label.
 	// But the client doesn't expose ListAllIssues.
@@ -60,7 +60,7 @@ func main() {
 
 		log.Printf("Creating issue '%s'...", title)
 		body := "Tracking issue for expanding the category: " + cat
-		labels := []string{"research-category"}
+		labels := []string{"Research Category"}
 		
 		if _, err := client.CreateIssue(title, body, labels); err != nil {
 			log.Printf("Failed to create issue '%s': %v", title, err)

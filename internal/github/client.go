@@ -40,7 +40,7 @@ func NewClient(ctx context.Context) (*Client, error) {
 func (c *Client) GetResearchRequests() ([]*github.Issue, error) {
 	opts := &github.IssueListByRepoOptions{
 		State:  "open",
-		Labels: []string{"research-category"}, // Changed to new label
+		Labels: []string{"Research Category"},
 	}
 	issues, _, err := c.client.Issues.ListByRepo(c.ctx, c.owner, c.repo, opts)
 	return issues, err
