@@ -123,16 +123,11 @@ Each object should have:
 		return nil, err
 	}
 
-	jsonStr := resp.Choices[0].Message.Content
-	// Clean up markdown code blocks if present
-	jsonStr = strings.TrimPrefix(jsonStr, "```json")
-	jsonStr = strings.TrimPrefix(jsonStr, "```")
-	jsonStr = strings.TrimSuffix(jsonStr, "```")
-	jsonStr = strings.TrimSpace(jsonStr)
+	jsonStr := extractJSONArray(resp.Choices[0].Message.Content)
 
 	var entities []ExtractedEntity
 	if err := json.Unmarshal([]byte(jsonStr), &entities); err != nil {
-		return nil, fmt.Errorf("failed to parse entities JSON: %w", err)
+		return nil, fmt.Errorf("failed to parse entities JSON: %w (input: %q)", err, jsonStr)
 	}
 
 	return entities, nil
@@ -148,7 +143,8 @@ Here is a list of EXISTING articles in our database (do not suggest these):
 %s
 
 Suggest 20-30 new, significant encyclopedic topics related to "%s" that are missing.
-Return ONLY a JSON array of strings. e.g. ["Topic A", "Topic B"]
+Return ONLY a valid JSON array of strings. Do NOT return objects.
+Example: ["Topic 1", "Topic 2", "Topic 3"]
 
 **Output:**
 `, category, strings.Join(existingTopics, ", "), category)
@@ -175,16 +171,22 @@ Return ONLY a JSON array of strings. e.g. ["Topic A", "Topic B"]
 		return nil, err
 	}
 
-	jsonStr := resp.Choices[0].Message.Content
-	jsonStr = strings.TrimPrefix(jsonStr, "```json")
-	jsonStr = strings.TrimPrefix(jsonStr, "```")
-	jsonStr = strings.TrimSuffix(jsonStr, "```")
-	jsonStr = strings.TrimSpace(jsonStr)
+	jsonStr := extractJSONArray(resp.Choices[0].Message.Content)
 
 	var topics []string
 	if err := json.Unmarshal([]byte(jsonStr), &topics); err != nil {
-		return nil, fmt.Errorf("failed to parse topics JSON: %w", err)
+		return nil, fmt.Errorf("failed to parse topics JSON: %w (input: %q)", err, jsonStr)
 	}
 
 	return topics, nil
+}
+
+// extractJSONArray finds the first '[' and last ']' to extract the JSON array.
+func extractJSONArray(s string) string {
+	start := strings.Index(s, "[")
+	end := strings.LastIndex(s, "]")
+	if start == -1 || end == -1 || start > end {
+		return s // Return original if pattern not found
+	}
+	return s[start : end+1]
 }

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,6 +92,7 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 			existingTitles = append(existingTitles, name)
 		}
 	}
+	log.Printf("Found %d existing articles.", len(existingTitles))
 
 	// 2. Discovery
 	log.Printf("Asking LLM for missing topics in '%s'...", category)
@@ -97,12 +100,21 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 	if err != nil {
 		return fmt.Errorf("topic suggestion failed: %w", err)
 	}
+	log.Printf("LLM suggested %d topics.", len(candidates))
 
-	// Select top 10
-	if len(candidates) > 10 {
-		candidates = candidates[:10]
+	// Determine max topics to process
+	maxTopics := 10
+	if envVal := os.Getenv("MAX_TOPICS_PER_RUN"); envVal != "" {
+		if val, err := strconv.Atoi(envVal); err == nil && val > 0 {
+			maxTopics = val
+		}
 	}
-	log.Printf("Selected topics: %v", candidates)
+
+	// Select top N
+	if len(candidates) > maxTopics {
+		candidates = candidates[:maxTopics]
+	}
+	log.Printf("Selected topics (limited to %d): %v", maxTopics, candidates)
 
 	if len(candidates) == 0 {
 		log.Println("No new topics suggested.")
