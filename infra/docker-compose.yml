@@ -17,5 +17,17 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
+  researcher:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: researcher
+    depends_on:
+      - ollama
+    env_file:
+      - ../.env
+    environment:
+      - OPENAI_BASE_URL=http://ollama:11434/v1
+
 volumes:
   ollama_data:

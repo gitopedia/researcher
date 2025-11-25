@@ -2,10 +2,16 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/go-github/v57/github"
 	"golang.org/x/oauth2"
 )
@@ -18,9 +24,22 @@ type Client struct {
 }
 
 func NewClient(ctx context.Context) (*Client, error) {
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		return nil, fmt.Errorf("GITHUB_TOKEN environment variable not set")
+	var token string
+	var err error
+
+	// Try GitHub App authentication first
+	appID := os.Getenv("GITHUB_APP_ID")
+	if appID != "" {
+		token, err = getAppInstallationToken(ctx, appID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get app installation token: %w", err)
+		}
+	} else {
+		// Fall back to PAT
+		token = os.Getenv("GITHUB_TOKEN")
+		if token == "" {
+			return nil, fmt.Errorf("either GITHUB_APP_ID or GITHUB_TOKEN environment variable must be set")
+		}
 	}
 
 	ts := oauth2.StaticTokenSource(
@@ -35,6 +54,139 @@ func NewClient(ctx context.Context) (*Client, error) {
 		owner:  "gitopedia", // Default, can be made configurable
 		repo:   "gitopedia",
 	}, nil
+}
+
+func getAppInstallationToken(ctx context.Context, appID string) (string, error) {
+	// Read private key
+	keyPath := os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+	var keyBytes []byte
+	var err error
+
+	if keyPath != "" {
+		keyBytes, err = os.ReadFile(keyPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read private key from %s: %w", keyPath, err)
+		}
+	} else {
+		// Try reading from environment variable directly
+		keyContent := os.Getenv("GITHUB_APP_PRIVATE_KEY")
+		if keyContent == "" {
+			return "", fmt.Errorf("GITHUB_APP_PRIVATE_KEY_PATH or GITHUB_APP_PRIVATE_KEY must be set")
+		}
+		// Handle escaped newlines in environment variable (common when pasting keys)
+		keyContent = strings.ReplaceAll(keyContent, "\\n", "\n")
+		keyBytes = []byte(keyContent)
+	}
+
+	// Generate JWT
+	jwtToken, err := generateJWT(appID, keyBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate JWT: %w", err)
+	}
+
+	// Get installation ID
+	installID := os.Getenv("GITHUB_APP_INSTALLATION_ID")
+	if installID == "" {
+		// Auto-detect installation ID
+		installID, err = getInstallationID(ctx, jwtToken)
+		if err != nil {
+			return "", fmt.Errorf("failed to get installation ID: %w", err)
+		}
+	}
+
+	// Get installation token
+	token, err := fetchInstallationToken(ctx, jwtToken, installID)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch installation token: %w", err)
+	}
+
+	return token, nil
+}
+
+func generateJWT(appID string, keyBytes []byte) (string, error) {
+	key, err := jwt.ParseRSAPrivateKeyFromPEM(keyBytes)
+	if err != nil {
+		return "", err
+	}
+
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"iat": now.Add(-60 * time.Second).Unix(),
+		"exp": now.Add(10 * time.Minute).Unix(),
+		"iss": appID,
+	}
+
+	t := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	return t.SignedString(key)
+}
+
+func getInstallationID(ctx context.Context, jwtToken string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/app/installations", nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var installations []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(body, &installations); err != nil {
+		return "", err
+	}
+
+	if len(installations) == 0 {
+		return "", fmt.Errorf("no installations found for this app")
+	}
+
+	// Return the first installation ID
+	return strconv.FormatInt(installations[0].ID, 10), nil
+}
+
+func fetchInstallationToken(ctx context.Context, jwtToken, installID string) (string, error) {
+	url := fmt.Sprintf("https://api.github.com/app/installations/%s/access_tokens", installID)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var res struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return "", err
+	}
+	return res.Token, nil
 }
 
 func (c *Client) GetResearchRequests() ([]*github.Issue, error) {

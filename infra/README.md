@@ -1,32 +1,39 @@
 # Self-Hosted Infrastructure for Researcher
 
-This directory contains the Docker Compose setup to run the local "brain" of the Researcher agent.
+This directory contains the Docker Compose setup to run the local "brain" of the Researcher agent and the agent itself.
 
 ## Services
 
 1.  **Ollama**: Hosts the DeepSeek (or other) LLM locally. Exposes an OpenAI-compatible API at `http://localhost:11434/v1`.
+2.  **Researcher**: Runs the researcher agent in a container with headless Chrome (Chromium) for "Deep Research" capabilities.
 
 ## Setup
 
-1.  **Start the stack**:
+1.  **Configure Environment**:
+    Copy `env.example` to `.env` in the `researcher` root directory and fill in your GitHub credentials.
+    ```bash
+    cp ../env.example ../.env
+    # Edit ../.env
+    ```
+
+2.  **Start the stack**:
     ```bash
     cd researcher/infra
     docker compose up -d
     ```
+    This will build the researcher image and start both Ollama and the Researcher.
 
-2.  **Pull the DeepSeek model** (once Ollama is running):
+3.  **Pull the DeepSeek model** (if not already done):
     ```bash
-    docker exec -it ollama ollama pull deepseek-coder:6.7b
-    # Or deepseek-llm:67b if you have the VRAM!
+    docker exec -it ollama ollama pull deepseek-llm:7b
     ```
 
-3.  **Configure the Researcher**:
-    Set these environment variables when running the Researcher script:
+4.  **Run the Researcher**:
+    The researcher container will start and run the agent. You can view logs:
     ```bash
-    export OPENAI_BASE_URL="http://localhost:11434/v1"
-    export OPENAI_API_KEY="ollama"  # Value doesn't matter for Ollama
-    export OPENAI_MODEL="deepseek-coder:6.7b"
+    docker compose logs -f researcher
     ```
+    Note: The researcher is configured to run immediately on container start.
 
 ## GPU Support
 
