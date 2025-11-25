@@ -9,4 +9,10 @@ This repository is part of the Gitopedia multi-repo project.
 
 For full context and up-to-date guidance, always refer to the main Gitopedia README and docs.
 
+## Running the Researcher
+
+To run the Researcher with full "Deep Research" capabilities (web scraping via headless Chrome), it is recommended to use the Docker Compose setup.
+
+See [infra/README.md](infra/README.md) for instructions on setting up the Docker environment with Ollama and the Researcher agent.
+
 
