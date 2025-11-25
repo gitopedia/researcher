@@ -214,6 +214,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 			log.Printf("Search warning for '%s': %v", q, err)
 			continue
 		}
+		log.Printf("Search '%s' returned %d results", q, len(res))
 		for _, r := range res {
 			if !seenURLs[r.Href] {
 				results = append(results, r)
@@ -223,15 +224,48 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	contextData := ""
-	for i, r := range results {
-		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nSummary: %s\n\n", i+1, r.Title, r.Href, r.Body)
+	// Deep Research: Fetch content for top results
+	contextData := "Sources:\n"
+	var references []string
+
+	limit := 5
+	if len(results) < limit {
+		limit = len(results)
+	}
+
+	processedCount := 0
+	for _, r := range results {
+		if processedCount >= limit {
+			break
+		}
+		// Skip PDF or non-text if possible (FetchContent might fail or return garbage)
+		if strings.HasSuffix(r.Href, ".pdf") {
+			continue
+		}
+
+		content, err := a.search.FetchContent(r.Href)
+		if err != nil {
+			log.Printf("Failed to fetch %s: %v", r.Href, err)
+			continue
+		}
+		if len(content) < 100 {
+			continue // Skip thin content
+		}
+
+		processedCount++
+		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nContent: %s\n\n", processedCount, r.Title, r.Href, content)
+		references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", processedCount, r.Title, r.Href))
 	}
 
 	// Draft
 	content, err := a.llm.GenerateArticle(ctx, topic, contextData)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)
+	}
+
+	// Append References
+	if len(references) > 0 {
+		content += "\n\n## References\n\n" + strings.Join(references, "\n")
 	}
 
 	// Entities

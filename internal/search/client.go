@@ -1,11 +1,13 @@
 package search
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 type Client struct {
@@ -26,55 +28,87 @@ func NewClient() *Client {
 	}
 }
 
-// Search performs a DuckDuckGo search
+// Search performs a DuckDuckGo search via HTML scraping
 func (c *Client) Search(query string) ([]Result, error) {
 	fmt.Printf("Searching for: %s\n", query)
 
-	// Use DDG Instant Answer API
-	u := fmt.Sprintf("%s?q=%s&format=json", c.apiBaseURL, url.QueryEscape(query))
-	resp, err := c.httpClient.Get(u)
+	// Sleep slightly to be polite
+	time.Sleep(1 * time.Second)
+
+	u := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+	req, _ := http.NewRequest("GET", u, nil)
+	// Use a generic User-Agent to avoid being blocked immediately
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var ddgResp struct {
-		AbstractText  string `json:"AbstractText"`
-		AbstractURL   string `json:"AbstractURL"`
-		RelatedTopics []struct {
-			Text     string `json:"Text"`
-			FirstURL string `json:"FirstURL"`
-		} `json:"RelatedTopics"`
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bad status: %s", resp.Status)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&ddgResp); err != nil {
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
 		return nil, err
 	}
 
 	var results []Result
-
-	// If we have an abstract, that's a great primary source
-	if ddgResp.AbstractText != "" {
-		results = append(results, Result{
-			Title: query + " - Abstract",
-			Href:  ddgResp.AbstractURL,
-			Body:  ddgResp.AbstractText,
-		})
-	}
-
-	// Add related topics as results
-	for i, topic := range ddgResp.RelatedTopics {
-		if i >= 3 {
-			break
+	doc.Find(".result").Each(func(i int, s *goquery.Selection) {
+		if len(results) >= 5 {
+			return
 		}
-		if topic.Text != "" {
-			results = append(results, Result{
-				Title: "Related: " + topic.Text, // Simplification
-				Href:  topic.FirstURL,
-				Body:  topic.Text,
-			})
+		link := s.Find(".result__title .result__a")
+		title := strings.TrimSpace(link.Text())
+		href, _ := link.Attr("href")
+		snippet := strings.TrimSpace(s.Find(".result__snippet").Text())
+
+		if href != "" && title != "" {
+			// Handle DDG redirects if necessary (usually /l/?kh=...)
+			// We'll just keep the link as is for now; FetchContent will follow redirects if it's a valid URL.
+			// If it's relative, we prepend host.
+			if strings.HasPrefix(href, "/") {
+				href = "https://html.duckduckgo.com" + href
+			}
+			results = append(results, Result{Title: title, Href: href, Body: snippet})
 		}
-	}
+	})
 
 	return results, nil
+}
+
+func (c *Client) FetchContent(url string) (string, error) {
+	fmt.Printf("Fetching content: %s\n", url)
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	// Extract readable text (paragraphs)
+	var textBuilder strings.Builder
+	doc.Find("p").Each(func(i int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		if text != "" {
+			textBuilder.WriteString(text + "\n\n")
+		}
+	})
+
+	text := textBuilder.String()
+	// Limit to 5000 chars
+	if len(text) > 5000 {
+		text = text[:5000] + "..."
+	}
+	return strings.TrimSpace(text), nil
 }
