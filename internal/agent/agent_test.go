@@ -17,17 +17,17 @@ func (m *MockGitHub) GetResearchRequests() ([]*gh.Issue, error) {
 	number := 1
 	return []*gh.Issue{{Title: &title, Number: &number}}, nil
 }
-func (m *MockGitHub) CreateBranch(base, new string) error  { return nil }
-func (m *MockGitHub) CreateFile(b, p, msg, c string) error { return nil }
+func (m *MockGitHub) CreateBranch(base, new string) error     { return nil }
+func (m *MockGitHub) CreateFile(b, p, msg, c string) error    { return nil }
 func (m *MockGitHub) UpdateFile(b, p, msg, c, s string) error { return nil }
 func (m *MockGitHub) CreatePullRequest(t, b, h, base string) (*gh.PullRequest, error) {
 	num := 100
 	url := "http://pr"
 	return &gh.PullRequest{Number: &num, HTMLURL: &url}, nil
 }
-func (m *MockGitHub) CommentOnIssue(n int, b string) error { return nil }
+func (m *MockGitHub) CommentOnIssue(n int, b string) error             { return nil }
 func (m *MockGitHub) GetFile(ref, path string) (string, string, error) { return "[]", "sha123", nil }
-func (m *MockGitHub) ListAllFiles(path string) ([]string, error) { return []string{}, nil }
+func (m *MockGitHub) ListAllFiles(path string) ([]string, error)       { return []string{}, nil }
 func (m *MockGitHub) CreateIssue(title, body string, labels []string) (*gh.Issue, error) {
 	num := 1
 	return &gh.Issue{Number: &num}, nil
@@ -37,6 +37,10 @@ type MockSearch struct{}
 
 func (m *MockSearch) Search(q string) ([]search.Result, error) {
 	return []search.Result{{Title: "Res", Body: "Content"}}, nil
+}
+
+func (m *MockSearch) FetchContent(url string) (string, error) {
+	return "Mock content from URL", nil
 }
 
 type MockLLM struct{}
