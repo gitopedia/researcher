@@ -285,7 +285,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 	if strings.HasPrefix(strings.TrimSpace(content), "---") {
 		lines := strings.Split(content, "\n")
 		if len(lines) > 1 {
-			systemFields := fmt.Sprintf("id: %s\nslug: \"%s\"\ncreated: %s\nauthor: \"Gitopedia Bot\"", id, slug, date)
+			systemFields := fmt.Sprintf("id: %s\nslug: \"%s\"\ncreated: %s", id, slug, date)
 			var cleanedLines []string
 			for _, line := range lines {
 				if strings.HasPrefix(strings.TrimSpace(line), "tags:") {
@@ -305,7 +305,6 @@ id: %s
 title: "%s"
 slug: "%s"
 created: %s
-author: "Gitopedia Bot"
 tags: %s
 %ssummary: ""
 ---
