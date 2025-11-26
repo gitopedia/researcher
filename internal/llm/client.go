@@ -1,21 +1,35 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"text/template"
 
 	"github.com/sashabaranov/go-openai"
 )
 
+//go:embed prompts/*.txt
+var promptsFS embed.FS
+
 type Client struct {
-	client *openai.Client
-	model  string
+	client                           *openai.Client
+	model                            string
+	generateArticleSystemTemplate    *template.Template
+	generateArticleUserTemplate      *template.Template
+	extractEntitiesSystemTemplate    *template.Template
+	extractEntitiesUserTemplate      *template.Template
+	suggestTopicsSystemTemplate      *template.Template
+	suggestTopicsUserTemplate        *template.Template
+	summarizeSourceSystemTemplate    *template.Template
+	summarizeSourceUserTemplate      *template.Template
 }
 
-func NewClient() *Client {
+func NewClient() (*Client, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	baseUrl := os.Getenv("OPENAI_BASE_URL")
 	model := os.Getenv("OPENAI_MODEL")
@@ -29,38 +43,85 @@ func NewClient() *Client {
 		config.BaseURL = baseUrl
 	}
 
-	return &Client{
-		client: openai.NewClientWithConfig(config),
-		model:  model,
+	// Load prompt templates
+	generateArticleSystem, err := loadTemplate("prompts/generate_article_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_article_system template: %w", err)
 	}
+
+	generateArticleUser, err := loadTemplate("prompts/generate_article_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_article_user template: %w", err)
+	}
+
+	extractEntitiesSystem, err := loadTemplate("prompts/extract_entities_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load extract_entities_system template: %w", err)
+	}
+
+	extractEntitiesUser, err := loadTemplate("prompts/extract_entities_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load extract_entities_user template: %w", err)
+	}
+
+	suggestTopicsSystem, err := loadTemplate("prompts/suggest_topics_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load suggest_topics_system template: %w", err)
+	}
+
+	suggestTopicsUser, err := loadTemplate("prompts/suggest_topics_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load suggest_topics_user template: %w", err)
+	}
+
+	summarizeSourceSystem, err := loadTemplate("prompts/summarize_source_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load summarize_source_system template: %w", err)
+	}
+
+	summarizeSourceUser, err := loadTemplate("prompts/summarize_source_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load summarize_source_user template: %w", err)
+	}
+
+	return &Client{
+		client:                        openai.NewClientWithConfig(config),
+		model:                         model,
+		generateArticleSystemTemplate: generateArticleSystem,
+		generateArticleUserTemplate:   generateArticleUser,
+		extractEntitiesSystemTemplate: extractEntitiesSystem,
+		extractEntitiesUserTemplate:   extractEntitiesUser,
+		suggestTopicsSystemTemplate:   suggestTopicsSystem,
+		suggestTopicsUserTemplate:     suggestTopicsUser,
+		summarizeSourceSystemTemplate: summarizeSourceSystem,
+		summarizeSourceUserTemplate:   summarizeSourceUser,
+	}, nil
+}
+
+func loadTemplate(path string) (*template.Template, error) {
+	content, err := promptsFS.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return template.New(path).Parse(string(content))
 }
 
 func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string) (string, error) {
-	prompt := fmt.Sprintf(`
-You are an expert encyclopedia author for Gitopedia.
-Write a comprehensive article about "%s".
+	// Execute system template
+	var systemBuf bytes.Buffer
+	if err := c.generateArticleSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute system template: %w", err)
+	}
 
-Use the following research context to inform your writing:
-%s
-
-**Format Requirements:**
-- Use Markdown.
-- Start with a YAML front matter block enclosed by "---" lines.
-- In the front matter, include:
-  - "title": The article title.
-  - "summary": A concise 2-3 sentence summary.
-  - "tags": A list of relevant topic tags (e.g. ["Technology", "AI"]).
-- Do not include "id", "created", or "author" in the front matter (these will be added automatically).
-- After the front matter, start the article body with a Level 1 heading (# Title).
-- Include an "Overview" section.
-- Include a "History" or "Background" section if applicable.
-- Cite sources from the context using standard Markdown footnotes like [^1], [^2] corresponding to the provided source numbers.
-- Do NOT create a "References" section manually; just use the footnotes in the text. The system will append the reference list.
-
-**Style:**
-- Neutral, objective tone.
-- Clear and concise.
-`, topic, contextData)
+	// Execute user template
+	data := map[string]interface{}{
+		"Topic":       topic,
+		"ContextData": contextData,
+	}
+	var userBuf bytes.Buffer
+	if err := c.generateArticleUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute user template: %w", err)
+	}
 
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
@@ -69,11 +130,11 @@ Use the following research context to inform your writing:
 			Messages: []openai.ChatCompletionMessage{
 				{
 					Role:    openai.ChatMessageRoleSystem,
-					Content: "You are a helpful and rigorous encyclopedia assistant.",
+					Content: systemBuf.String(),
 				},
 				{
 					Role:    openai.ChatMessageRoleUser,
-					Content: prompt,
+					Content: userBuf.String(),
 				},
 			},
 			Temperature: 0.7,
@@ -88,18 +149,20 @@ Use the following research context to inform your writing:
 }
 
 func (c *Client) ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error) {
-	prompt := fmt.Sprintf(`
-Analyze the following article text and extract key entities.
-Return the result as a valid JSON array of objects.
-Each object should have:
-- "name": The exact name of the entity as mentioned.
-- "type": One of "person", "org", "place", "topic".
+	// Execute system template
+	var systemBuf bytes.Buffer
+	if err := c.extractEntitiesSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute system template: %w", err)
+	}
 
-**Text:**
-%s
-
-**JSON Output:**
-`, content)
+	// Execute user template
+	data := map[string]interface{}{
+		"Content": content,
+	}
+	var userBuf bytes.Buffer
+	if err := c.extractEntitiesUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute user template: %w", err)
+	}
 
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
@@ -108,11 +171,11 @@ Each object should have:
 			Messages: []openai.ChatCompletionMessage{
 				{
 					Role:    openai.ChatMessageRoleSystem,
-					Content: "You are an entity extraction system. You output strictly JSON arrays.",
+					Content: systemBuf.String(),
 				},
 				{
 					Role:    openai.ChatMessageRoleUser,
-					Content: prompt,
+					Content: userBuf.String(),
 				},
 			},
 			Temperature: 0.0, // Deterministic
@@ -134,20 +197,21 @@ Each object should have:
 }
 
 func (c *Client) SuggestTopics(ctx context.Context, category string, existingTopics []string) ([]string, error) {
-	prompt := fmt.Sprintf(`
-You are a research editor for Gitopedia.
-The current category is "%s".
-We want to expand our coverage.
+	// Execute system template
+	var systemBuf bytes.Buffer
+	if err := c.suggestTopicsSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute system template: %w", err)
+	}
 
-Here is a list of EXISTING articles in our database (do not suggest these):
-%s
-
-Suggest 20-30 new, significant encyclopedic topics related to "%s" that are missing.
-Return ONLY a valid JSON array of strings. Do NOT return objects.
-Example: ["Topic 1", "Topic 2", "Topic 3"]
-
-**Output:**
-`, category, strings.Join(existingTopics, ", "), category)
+	// Execute user template
+	data := map[string]interface{}{
+		"Category":       category,
+		"ExistingTopics": strings.Join(existingTopics, ", "),
+	}
+	var userBuf bytes.Buffer
+	if err := c.suggestTopicsUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute user template: %w", err)
+	}
 
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
@@ -156,11 +220,11 @@ Example: ["Topic 1", "Topic 2", "Topic 3"]
 			Messages: []openai.ChatCompletionMessage{
 				{
 					Role:    openai.ChatMessageRoleSystem,
-					Content: "You are a helpful editor. You output strictly JSON arrays.",
+					Content: systemBuf.String(),
 				},
 				{
 					Role:    openai.ChatMessageRoleUser,
-					Content: prompt,
+					Content: userBuf.String(),
 				},
 			},
 			Temperature: 0.8,
@@ -181,6 +245,61 @@ Example: ["Topic 1", "Topic 2", "Topic 3"]
 	return topics, nil
 }
 
+// SummarizeSource compresses a single source page into a focused summary and
+// decides whether it is relevant enough to include.
+func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error) {
+	// Execute system template
+	var systemBuf bytes.Buffer
+	if err := c.summarizeSourceSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return SourceSummary{}, fmt.Errorf("failed to execute summarize system template: %w", err)
+	}
+
+	// Execute user template
+	data := map[string]interface{}{
+		"Topic":   topic,
+		"URL":     urlStr,
+		"Content": content,
+	}
+	var userBuf bytes.Buffer
+	if err := c.summarizeSourceUserTemplate.Execute(&userBuf, data); err != nil {
+		return SourceSummary{}, fmt.Errorf("failed to execute summarize user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.model,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: systemBuf.String(),
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: userBuf.String(),
+				},
+			},
+			Temperature: 0.1, // keep summarization highly deterministic for JSON output
+		},
+	)
+	if err != nil {
+		return SourceSummary{}, err
+	}
+
+	raw := strings.TrimSpace(resp.Choices[0].Message.Content)
+	// Extract JSON object from response (in case LLM adds extra text)
+	jsonStr := extractJSONObject(raw)
+
+	var summary SourceSummary
+	summary.Raw = raw
+	if err := json.Unmarshal([]byte(jsonStr), &summary); err != nil {
+		// Return summary with Raw populated so callers can debug, but still surface error.
+		return summary, fmt.Errorf("failed to parse source summary JSON: %w (input: %q)", err, raw)
+	}
+
+	return summary, nil
+}
+
 // extractJSONArray finds the first '[' and last ']' to extract the JSON array.
 func extractJSONArray(s string) string {
 	start := strings.Index(s, "[")
@@ -189,4 +308,28 @@ func extractJSONArray(s string) string {
 		return s // Return original if pattern not found
 	}
 	return s[start : end+1]
+}
+
+// extractJSONObject finds the first '{' and matching '}' to extract the JSON object.
+func extractJSONObject(s string) string {
+	start := strings.Index(s, "{")
+	if start == -1 {
+		return s // Return original if no opening brace found
+	}
+	
+	// Find matching closing brace by counting braces
+	depth := 0
+	for i := start; i < len(s); i++ {
+		if s[i] == '{' {
+			depth++
+		} else if s[i] == '}' {
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	
+	// If no matching brace found, return from start to end
+	return s[start:]
 }

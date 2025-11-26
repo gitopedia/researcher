@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gitopedia/researcher/internal/authority"
@@ -32,10 +33,15 @@ func NewAgent(ctx context.Context) (*Agent, error) {
 		return nil, err
 	}
 
+	llmClient, err := llm.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LLM client: %w", err)
+	}
+
 	return &Agent{
 		gh:     ghClient,
 		search: search.NewClient(),
-		llm:    llm.NewClient(),
+		llm:    llmClient,
 	}, nil
 }
 
@@ -201,11 +207,34 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 func (a *Agent) processTopic(ctx context.Context, topic, category, branchName string, authMgr *authority.Manager) error {
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
 
-	// Research
-	queries := []string{
+	// Research - generate multiple search queries for variety
+	numQueries := 5
+	if envVal := os.Getenv("SEARCH_NUM_QUERIES"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			numQueries = v
+		}
+	}
+
+	baseQueries := []string{
 		topic + " encyclopedia facts",
 		topic + " history context",
 		topic + " summary overview",
+		topic + " definition explanation",
+		topic + " applications uses",
+		topic + " current research",
+		topic + " key concepts",
+		topic + " notable examples",
+	}
+
+	queries := baseQueries
+	if numQueries < len(baseQueries) {
+		queries = baseQueries[:numQueries]
+	} else if numQueries > len(baseQueries) {
+		// Extend with variations if more queries requested
+		extra := numQueries - len(baseQueries)
+		for i := 0; i < extra; i++ {
+			queries = append(queries, fmt.Sprintf("%s information", topic))
+		}
 	}
 
 	var results []search.Result
@@ -231,35 +260,141 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 	contextData := "Sources:\n"
 	var references []string
 
-	limit := 5
+	limit := 30
+	if envVal := os.Getenv("SEARCH_MAX_SOURCES"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			limit = v
+		}
+	}
 	if len(results) < limit {
 		limit = len(results)
 	}
 
-	processedCount := 0
+	// Prepare targets
+	var targets []search.Result
 	for _, r := range results {
-		if processedCount >= limit {
+		if len(targets) >= limit {
 			break
 		}
-		// Skip PDF or non-text if possible (FetchContent might fail or return garbage)
-		if strings.HasSuffix(r.Href, ".pdf") {
+		if !strings.HasSuffix(r.Href, ".pdf") {
+			targets = append(targets, r)
+		}
+	}
+
+	// Fetch content in parallel
+	type fetchResult struct {
+		index   int
+		content string
+		err     error
+	}
+	resultsChan := make(chan fetchResult, len(targets))
+	var wg sync.WaitGroup
+
+	// Use a semaphore to limit concurrency if needed (configurable, default 3)
+	semSize := 3
+	if envVal := os.Getenv("SEARCH_MAX_FETCH_CONCURRENCY"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			semSize = v
+		}
+	}
+	sem := make(chan struct{}, semSize)
+
+	for i, r := range targets {
+		wg.Add(1)
+		go func(i int, urlStr string) {
+			defer wg.Done()
+			sem <- struct{}{}        // Acquire
+			defer func() { <-sem }() // Release
+
+			content, err := a.search.FetchContent(urlStr)
+			resultsChan <- fetchResult{i, content, err}
+		}(i, r.Href)
+	}
+
+	wg.Wait()
+	close(resultsChan)
+
+	// Collect fetched page contents
+	fetchedContents := make(map[int]string)
+	for res := range resultsChan {
+		if res.err == nil && len(res.content) >= 100 {
+			fetchedContents[res.index] = res.content
+		} else if res.err != nil {
+			log.Printf("Failed to fetch %s: %v", targets[res.index].Href, res.err)
+		}
+	}
+
+	processedCount := 0
+
+	// Optional debug mode: when enabled, save raw fetched pages and LLM outputs
+	debugSources := false
+	if v := os.Getenv("RESEARCH_DEBUG_SOURCES"); strings.EqualFold(v, "1") || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") {
+		debugSources = true
+	}
+	for i, r := range targets {
+		content, ok := fetchedContents[i]
+		if !ok {
 			continue
 		}
 
-		content, err := a.search.FetchContent(r.Href)
+		// If debug is enabled, save the raw fetched page content for inspection.
+		if debugSources {
+			if u, err := url.Parse(r.Href); err == nil {
+				domain := strings.ReplaceAll(u.Host, ".", "-")
+				rawPath := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d-raw.txt", slug, domain, i+1)
+				if err := a.gh.CreateFile(branchName, rawPath, "Add debug raw source: "+r.Title, content); err != nil {
+					log.Printf("Failed to save debug raw source %s: %v", rawPath, err)
+				}
+			}
+		}
+
+		// Summarize and filter source using LLM
+		summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
 		if err != nil {
-			log.Printf("Failed to fetch %s: %v", r.Href, err)
+			log.Printf("Failed to summarize %s: %v", r.Href, err)
+			// If we have the raw LLM output, save it for debugging.
+			if debugSources && summary.Raw != "" {
+				if u, errParse := url.Parse(r.Href); errParse == nil {
+					domain := strings.ReplaceAll(u.Host, ".", "-")
+					llmPath := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d-llm.txt", slug, domain, i+1)
+					if errSave := a.gh.CreateFile(branchName, llmPath, "Add debug LLM output (error): "+r.Title, summary.Raw); errSave != nil {
+						log.Printf("Failed to save debug LLM output %s: %v", llmPath, errSave)
+					}
+				}
+			}
 			continue
 		}
-		if len(content) < 100 {
-			continue // Skip thin content
+		if !summary.Relevant {
+			log.Printf("Skipping source as not relevant: %s (reason: %s)", r.Href, summary.Reason)
+			continue
+		}
+
+		// In debug mode, also save the successful LLM output for the source.
+		if debugSources && summary.Raw != "" {
+			if u, err := url.Parse(r.Href); err == nil {
+				domain := strings.ReplaceAll(u.Host, ".", "-")
+				llmPath := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d-llm.txt", slug, domain, i+1)
+				if err := a.gh.CreateFile(branchName, llmPath, "Add debug LLM output: "+r.Title, summary.Raw); err != nil {
+					log.Printf("Failed to save debug LLM output %s: %v", llmPath, err)
+				}
+			}
+		}
+
+		// Validate summary length (must be at least 800 words, target 1200-2000)
+		wordCount := len(strings.Fields(summary.Summary))
+		if wordCount < 800 {
+			log.Printf("Skipping source %s: summary too short (%d words, minimum 800)", r.Href, wordCount)
+			continue
+		}
+		if wordCount < 1200 {
+			log.Printf("Warning: summary for %s is shorter than target (%d words, target 1200-2000)", r.Href, wordCount)
 		}
 
 		processedCount++
-		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nContent: %s\n\n", processedCount, r.Title, r.Href, content)
+		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nSummary: %s\n\n", processedCount, r.Title, r.Href, summary.Summary)
 		references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", processedCount, r.Title, r.Href))
 
-		// Save source summary
+		// Save source summary (compressed, relevant-only)
 		if u, err := url.Parse(r.Href); err == nil {
 			domain := strings.ReplaceAll(u.Host, ".", "-")
 			sourceID := ulid.Make().String()
@@ -272,11 +407,11 @@ type: source
 related_article: "%s"
 created: %s
 tags: ["Source"]
-summary: "Source material for %s"
+summary: "Summarized source material for %s"
 ---
 
 %s
-`, sourceID, r.Title, r.Href, slug, time.Now().Format("2006-01-02"), topic, content)
+`, sourceID, r.Title, r.Href, slug, time.Now().Format("2006-01-02"), topic, summary.Summary)
 
 			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+r.Title, sourceContent); err != nil {
 				log.Printf("Failed to save source %s: %v", sourcePath, err)

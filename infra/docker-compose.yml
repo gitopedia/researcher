@@ -8,14 +8,18 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # To use GPU, uncomment the following (requires nvidia-container-toolkit):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+    environment:
+      # Context size (number of tokens). Default is 4096, increase for longer context.
+      # DeepSeek models support up to 32k tokens. Recommended: 8192-16384 for research tasks.
+      - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-32768}
+    # GPU support (requires nvidia-container-toolkit)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   researcher:
     build:

@@ -1,0 +1,11 @@
+Analyze the following article text and extract key entities.
+Return the result as a valid JSON array of objects.
+Each object should have:
+- "name": The exact name of the entity as mentioned.
+- "type": One of "person", "org", "place", "topic".
+
+**Text:**
+{{.Content}}
+
+**JSON Output:**
+

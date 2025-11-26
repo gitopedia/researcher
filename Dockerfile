@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR /app
 
@@ -19,10 +19,9 @@ RUN apk add --no-cache chromium
 # Set up app
 WORKDIR /app
 COPY --from=builder /app/researcher .
-COPY env.example .
 
-# Environment variables should be provided at runtime
-# ENV GITHUB_TOKEN=...
+# Environment variables are provided at runtime via docker-compose.yml
+# The .env file is loaded by docker-compose using env_file directive
 
 CMD ["./researcher"]
 
