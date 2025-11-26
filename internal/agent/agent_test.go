@@ -57,6 +57,15 @@ func (m *MockLLM) SuggestTopics(ctx context.Context, cat string, exist []string)
 	return []string{"Topic 1", "Topic 2"}, nil
 }
 
+func (m *MockLLM) SummarizeSource(ctx context.Context, topic, urlStr, content string) (llm.SourceSummary, error) {
+	return llm.SourceSummary{
+		Relevant: true,
+		Reason:   "mock",
+		Summary:  "Mock summary content for testing.",
+		Model:    "mock-llm",
+	}, nil
+}
+
 func TestAgentRun(t *testing.T) {
 	agent := NewAgentWithDeps(&MockGitHub{}, &MockSearch{}, &MockLLM{})
 	if err := agent.Run(context.Background()); err != nil {

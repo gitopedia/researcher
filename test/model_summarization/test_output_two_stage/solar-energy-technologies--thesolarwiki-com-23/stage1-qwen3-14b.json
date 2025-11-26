@@ -1,0 +1,9 @@
+{
+  "duration_ms": 26344,
+  "model": "qwen3:14b",
+  "relevant": false,
+  "summary": "NOT_RELEVANT\n\nThe provided page content contains minimal substantive information, consisting primarily of promotional statements, generic headlines, and a single external resource recommendation (\"The Solar Wiki\"). There are no technical details, historical context, statistical data, or encyclopedic content about solar energy technologies or related topics. The text lacks depth, factual claims, or educational value beyond vague marketing language.",
+  "topic": "Solar Energy Technologies",
+  "url": "https://earth.org/solar-energy/",
+  "word_count": 57
+}

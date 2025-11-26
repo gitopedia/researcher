@@ -1,0 +1,6 @@
+Convert this summary into JSON format. Copy the content exactly into the "summary" field and derive topics from the headings and main sections.
+
+Summary to convert:
+{{.Content}}
+
+

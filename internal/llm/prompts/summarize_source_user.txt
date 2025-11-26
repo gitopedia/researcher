@@ -1,33 +1,15 @@
-You are helping write an encyclopedia article about "{{.Topic}}".
-You are given the content of a single web page.
+You are extracting informative content from a web page. The page was found while researching "{{.Topic}}", but your extraction should capture ALL useful encyclopedia-worthy information, not just content about that specific topic.
 
-Your tasks:
-1. Decide whether this page is relevant and useful for the topic.
-2. If it is relevant, write a concise, topic-focused summary that captures the key facts, history, concepts, and examples from this page that are useful for the article.
+**When to skip extraction (output "NOT_RELEVANT" only):**
+- The page is mostly ads, spam, or promotional content
+- The page has minimal actual content (just links, navigation, or stubs)
+- The content is very low quality or incoherent
+- The page is a paywall, login page, or error page
 
-Guidelines:
-- Focus ONLY on information that is directly about the topic "{{.Topic}}".
-- Ignore navigation text, unrelated sections, ads, cookie notices, and boilerplate.
-- If the page is mostly off-topic, very low quality, or duplicates information from other typical sources (e.g., generic definitions), mark it as not relevant.
-
-**Summary Length Requirement (MANDATORY):**
-- If the page is relevant, the summary MUST be 1200-2000 words long.
-- This is NOT a brief summary or overview - it must be a comprehensive, detailed extraction of all useful information from the page.
-- Include: key facts, dates, historical context, definitions, examples, statistics, notable people/events, technical details, applications, and any other substantive information.
-- Write in neutral, encyclopedic style with full sentences and paragraphs.
-- Do NOT truncate or abbreviate - use the full word count to capture as much detail as possible.
-- Aim for the higher end (1500-2000 words) when the source has substantial content.
-
-CRITICAL: You MUST output ONLY valid JSON. No explanatory text before or after. No markdown code blocks. Just the raw JSON object.
-
-Output JSON ONLY in the following exact form:
-{
-  "relevant": true or false,
-  "reason": "short explanation of why it is or is not relevant",
-  "summary": "if relevant, the summarized content focused on the topic; if not relevant, use an empty string"
-}
+If the page has useful content, extract it comprehensively (1200-2000 words).
 
 Page URL: {{.URL}}
 
 Page Content:
 {{.Content}}
+

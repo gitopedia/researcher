@@ -1,0 +1,12 @@
+{
+  "converter_model": "gemma3:12b",
+  "duration_ms": 9997,
+  "json_valid": true,
+  "language": "en",
+  "parse_error": "",
+  "raw_output": "```json\n{\n  \"relevant\": true,\n  \"reason\": \"The content provides a comprehensive overview of solar energy, its historical development, applications, and technologies.\",\n  \"summary\": \"Solar energy has evolved from ancient practices to modern technologies, with applications spanning heating, cooling, electricity, and indirect forms like wind and hydropower. Passive and active systems coexist, with the latter enabling higher efficiency and versatility. The push for renewable energy, driven by environmental and security concerns, positions solar energy as a cornerstone of future sustainable systems.\",\n  \"language\": \"en\",\n  \"topics\": [\"Historical Context\", \"Applications of Solar Energy\", \"Solar Heating and Cooling Systems\", \"Broader Context of Renewable Energy\", \"Current Adoption\"]\n}\n```",
+  "reason": "The content provides a comprehensive overview of solar energy, its historical development, applications, and technologies.",
+  "relevant": true,
+  "source_model": "qwen3-14b",
+  "summary_length": 419
+}

@@ -399,6 +399,17 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 			domain := strings.ReplaceAll(u.Host, ".", "-")
 			sourceID := ulid.Make().String()
 			sourcePath := fmt.Sprintf("Compendium/_incoming/sources/%s--%s-%d.md", slug, domain, processedCount)
+
+			// Build front matter with optional fields
+			modelField := ""
+			if summary.Model != "" {
+				modelField = fmt.Sprintf("model: \"%s\"\n", summary.Model)
+			}
+			languageField := ""
+			if summary.Language != "" {
+				languageField = fmt.Sprintf("language: \"%s\"\n", summary.Language)
+			}
+
 			sourceContent := fmt.Sprintf(`---
 id: %s
 title: "Source: %s"
@@ -408,10 +419,10 @@ related_article: "%s"
 created: %s
 tags: ["Source"]
 summary: "Summarized source material for %s"
----
+%s%s---
 
 %s
-`, sourceID, r.Title, r.Href, slug, time.Now().Format("2006-01-02"), topic, summary.Summary)
+`, sourceID, r.Title, r.Href, slug, time.Now().Format("2006-01-02"), topic, modelField, languageField, summary.Summary)
 
 			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+r.Title, sourceContent); err != nil {
 				log.Printf("Failed to save source %s: %v", sourcePath, err)

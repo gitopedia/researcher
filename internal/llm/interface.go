@@ -23,6 +23,8 @@ type SourceSummary struct {
 	Relevant bool   `json:"relevant"`
 	Reason   string `json:"reason,omitempty"`
 	Summary  string `json:"summary"`
+	Language string `json:"language,omitempty"` // Detected language code (e.g., "en", "es", "fr")
+	Model    string `json:"model,omitempty"`   // Model used for summarization
 	// Raw contains the raw LLM response used for debugging and logging.
 	// It is not part of the JSON contract with the model.
 	Raw string `json:"-"`

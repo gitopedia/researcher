@@ -1,0 +1,52 @@
+# Solar Energy Technologies
+
+# Historical Context
+- Solar energy technologies have roots dating back to 700 BC, though widespread commercialization only began approximately 40 years ago.
+- Developing countries, despite optimal sunlight exposure, have experienced slow growth in solar energy adoption due to a lack of investment and climate debt.
+- Developed nations, including the US, Australia, and China, have become leaders in solar power generation.
+
+# Solar Resource & Potential
+- The Earth receives an immense amount of solar energy – an hour and a half’s worth could power the planet for an entire year.
+- This abundance suggests the potential to entirely replace fossil fuels with solar energy.
+
+# Growth & Adoption Rates
+- In 2010, solar energy accounted for only 0.06% of the global energy mix.
+- By 2019, solar’s share had risen to 1.11%, and it comprised 10.3% of the growth in renewable energy.
+- Global solar power capacity increased by 22% in 2020, with renewable output more than doubling since 2015.
+
+# Environmental Impact & Emissions
+- Solar power generation itself does not produce greenhouse gas emissions.
+- Life-cycle emissions, including manufacturing, transportation, and decommissioning, are minimal, ranging from 0.07 to 0.18 pounds of carbon dioxide equivalent per kilowatt-hour.
+- Solar power plants require land use – approximately 32 acres for a facility serving 1,000 homes, or 0.8% of the US landmass to meet national energy needs.
+- Solar thermal plants require water, and improper disposal of hazardous materials can pose environmental risks.
+
+# Current Global Production
+- In 2020, solar PV power generation grew by a record 156 TWh, reaching 921 TWh – a 23% increase from 2019.
+- Solar PV accounted for 3.1% of global electricity generation in 2020.
+- China was responsible for 75% of the increase in annual solar PV installations from 2019 to 2020.
+
+# Longevity & Cost Trends
+- Solar power plants can last at least 40 years, with panels easily replaceable and upgradable.
+- Solar costs are projected to decline by 15% to 35% by 2024, driving further growth.
+- In 2020, solar power became the cheapest form of electricity in history, cheaper than coal and gas in many countries.
+- Australia has a high rate of household solar panel adoption – nearly one-third of homes have panels.
+
+# Major Solar Installations
+- The Noor Complex in Morocco is the world’s largest concentrated solar power (CSP) plant, with a 580-megawatt capacity.
+
+# Regional Leaders & Goals
+- China is rapidly expanding its solar capacity and aims to reach 1,200GW of wind and solar capacity by 2026.
+- India has pledged to increase its renewable energy sources to 50% by 2030 and install 100GW of grid-connected solar power plants.
+
+# Supply Chain Challenges
+- The COVID-19 pandemic has disrupted global supply chains, increasing costs for raw materials, shipping, and potentially hindering solar energy growth.
+
+# Technological Advancements
+- Global PV sector has grown over 40% in the last eight years, driven by automation, manufacturing, and throughput improvements.
+- Modern solar panels convert 15% to 20% of sunlight into electricity, with efficiency consistently improving.
+- Panel durability has also increased, with average lifespans exceeding three decades with minimal efficiency loss.
+
+# Future Innovations
+- Scientists are exploring the feasibility of building solar power stations in space.
+- Space-based solar panels would have continuous, direct exposure to sunlight, potentially generating up to 2,000 gigawatts of power – nearly 40 times more than ground-based panels annually.
+- Space-based solar power is considered more efficient, clean, and has no land-use impact.

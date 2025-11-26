@@ -1,0 +1,66 @@
+## Informative Content Extracted from Earth.org/solar-energy/
+
+Here's a comprehensive extraction of informative content from the provided webpage, organized into categories and aiming for encyclopedia-worthy detail.
+
+**I. Overview & Introduction**
+
+*   **Purpose of the Page:** The page aims to provide information about solar energy, including its history, current applications, and how to get started with solar installations. It positions EnergySage as a marketplace connecting consumers with solar installers.
+*   **EnergySage's Role:** EnergySage acts as a marketplace, vetting installers and providing consumers with quotes and unbiased advice. They do not charge consumers, but installers pay a fee to participate.
+*   **Emphasis on Objectivity:** The site emphasizes providing objective information and data-driven insights to help consumers make informed decisions.
+
+**II. History of Solar Energy**
+
+*   **Ancient Uses (Pre-Photovoltaics):**
+    *   **7th Century B.C.:** Humans used sunlight to light fires with magnifying glasses.
+    *   **3rd Century B.C.:** Greeks and Romans used mirrors to light torches for religious ceremonies ("burning mirrors").
+    *   **20 A.D.:** Chinese civilization also used mirrors for the same purpose.
+    *   **1700s-1800s:** Sunlight used to power ovens for voyages and solar-powered steamboats.
+    *   **Sunrooms:** Ancient Romans utilized sunrooms (massive windows) to direct sunlight into buildings.
+    *   **Anasazi (Pueblo Native Americans):** Built homes on cliffs facing south to capture sunlight for warmth.
+*   **Early Scientific Discoveries:**
+    *   **Edmond Becquerel (1839):** Discovered the photovoltaic effect – light increases electricity generation in a conducting solution.
+    *   **William Grylls Adams & Richard Evans Day (1876):** Demonstrated electricity generation from selenium exposed to sunlight.
+    *   **Charles Fritts (1883):** Created the first selenium solar cell, considered the first photovoltaic device.
+*   **Modern Developments:**
+    *   **1956:** Hoffman Electronics improved photovoltaic efficiency from 8% to 14%.
+    *   **1973:** Construction of the first solar building, "Solar One," incorporating both solar thermal and photovoltaic power.
+    *   **1985:** University of New South Wales achieved 20% efficiency for silicon cells.
+    *   **1999:** National Renewable Energy Laboratory achieved 33.3% efficiency.
+    *   **2016:** University of New South Wales broke the efficiency record with 34.5%.
+*   **Notable Projects:**
+    *   **1981:** Solar Challenger aircraft flew across the English Channel powered by solar energy.
+    *   **1998:** Pathfinder aircraft reached 80,000 feet.
+    *   **2001:** NASA aircraft reached 96,000 feet.
+    *   **2016:** Solar Impulse 2 completed the first zero-emissions flight worldwide.
+*   **Government Involvement:**
+    *   **1979:** President Jimmy Carter installed solar panels on the White House.
+    *   **2010:** President Barack Obama requested the reinstallation of solar panels on the White House.
+*   **Cost Trends:** Solar panel costs have decreased significantly over time, dropping from roughly $300 per watt in 1956 to under $0.50 per watt today.
+
+**III. Current Applications & Technologies**
+
+*   **Photovoltaic (PV) Cells:** The primary technology discussed, converting sunlight directly into electricity.
+*   **Solar Thermal:** Mentioned in the context of "Solar One," using sunlight to heat water or air.
+*   **Building-Integrated Photovoltaics (BIPV):** Solar panels integrated into building materials (e.g., Tesla's solar roof).
+*   **Solar Aircraft:**  Demonstrates the potential for solar power in aviation.
+
+**IV.  Getting Started with Solar (Implied)**
+
+*   **Solar Calculator:** EnergySage offers a calculator to estimate potential savings.
+*   **Marketplace:**  Connects consumers with vetted solar installers.
+*   **Unbiased Advice:** Provides information to help consumers make informed decisions.
+
+**V.  Privacy & Data Handling**
+
+*   **Data Collection:** EnergySage collects data to personalize advertising and provide services.
+*   **Opt-Out Options:** Users can opt-out of data sharing and targeted advertising through toggles or by emailing privacy@energysage.com.
+*   **Global Privacy Control (GPC):**  Recognizes and respects GPC signals for opt-out requests.
+
+
+
+**Key Takeaways & Significance:**
+
+*   The webpage provides a comprehensive overview of solar energy, tracing its history from ancient practices to modern technological advancements.
+*   It highlights the decreasing cost of solar technology, making it increasingly accessible.
+*   It positions EnergySage as a resource for consumers looking to explore solar options.
+*   The emphasis on data-driven insights and unbiased advice underscores the site's commitment to consumer empowerment.

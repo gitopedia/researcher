@@ -4,13 +4,13 @@ This directory contains the Docker Compose setup to run the local "brain" of the
 
 ## Services
 
-1.  **Ollama**: Hosts the DeepSeek (or other) LLM locally. Exposes an OpenAI-compatible API at `http://localhost:11434/v1`.
+1.  **Ollama**: Hosts the LLMs locally (e.g. Gemma, Qwen). Exposes an OpenAI-compatible API at `http://localhost:11434/v1` (configured via `LLM_BASE_URL`).
 2.  **Researcher**: Runs the researcher agent in a container with headless Chrome (Chromium) for "Deep Research" capabilities.
 
 ## Setup
 
 1.  **Configure Environment**:
-    Copy `env.example` to `.env` in the `researcher` root directory and fill in your GitHub credentials.
+    Copy `env.example` to `.env` in the `researcher` root directory and fill in your GitHub credentials and LLM configuration.
     ```bash
     cp ../env.example ../.env
     # Edit ../.env
@@ -23,9 +23,13 @@ This directory contains the Docker Compose setup to run the local "brain" of the
     ```
     This will build the researcher image and start both Ollama and the Researcher.
 
-3.  **Pull the DeepSeek model** (if not already done):
+3.  **Pull one or more models** (if not already done):
     ```bash
-    docker exec -it ollama ollama pull deepseek-llm:7b
+    # Example "fast" model
+    docker exec -it ollama ollama pull gemma3:12b
+
+    # Example "detailed" model
+    docker exec -it ollama ollama pull qwen3:14b
     ```
 
 4.  **Run the Researcher**:
@@ -77,12 +81,31 @@ docker compose up -d
 
 GPU support is enabled in `docker-compose.yml` by default. To use your GPU for Ollama, you need:
 
-### 1. Install NVIDIA Drivers (Arch Linux)
+### 1. Install NVIDIA Drivers
 
+Install NVIDIA drivers for your Linux distribution:
+
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install nvidia-driver nvidia-utils
+sudo reboot  # Reboot to load the drivers
+```
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install akmod-nvidia xorg-x11-drv-nvidia
+sudo reboot  # Reboot to load the drivers
+```
+
+**Arch Linux:**
 ```bash
 sudo pacman -S nvidia nvidia-utils
 sudo reboot  # Reboot to load the drivers
 ```
+
+**Other distributions:**
+Refer to your distribution's documentation for NVIDIA driver installation.
 
 After reboot, verify drivers are working:
 ```bash
@@ -91,13 +114,40 @@ nvidia-smi  # Should show your GPU
 
 ### 2. Install NVIDIA Container Toolkit
 
+Install the NVIDIA Container Toolkit for your distribution:
+
+**Ubuntu/Debian:**
+```bash
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+sudo apt update
+sudo apt install -y nvidia-container-toolkit
+sudo systemctl restart docker
+```
+
+**Fedora/RHEL:**
+```bash
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.repo | sudo tee /etc/yum.repos.d/nvidia-docker.repo
+sudo dnf install -y nvidia-container-toolkit
+sudo systemctl restart docker
+```
+
+**Arch Linux:**
 ```bash
 # Install from AUR
 yay -S nvidia-container-toolkit
 # Or use paru
 paru -S nvidia-container-toolkit
+sudo systemctl restart docker
+```
 
-# Configure Docker to use NVIDIA runtime
+**Other distributions:**
+See the [NVIDIA Container Toolkit documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for installation instructions.
+
+Configure Docker to use the NVIDIA runtime:
+```bash
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 ```
