@@ -10,10 +10,15 @@ This directory contains the Docker Compose setup to run the local "brain" of the
 ## Setup
 
 1.  **Configure Environment**:
-    Copy `env.example` to `.env` in the `researcher` root directory and fill in your GitHub credentials and LLM configuration.
+    The system loads settings from `config/base.env` first (contains all defaults), then `.env` (your overrides).
+    Create a `.env` file in the `researcher` root directory with only the values you want to override:
     ```bash
-    cp ../env.example ../.env
-    # Edit ../.env
+    # Create .env with your overrides (e.g., GitHub credentials)
+    # Only include the variables you want to change from config/base.env
+    cat > ../.env <<EOF
+    GITHUB_TOKEN=your_token_here
+    # Add any other overrides
+    EOF
     ```
 
 2.  **Start the stack**:
@@ -41,11 +46,15 @@ This directory contains the Docker Compose setup to run the local "brain" of the
 
 ## Context Size Configuration
 
-Ollama's default context size is 4096 tokens, which may cause truncation errors when processing long research content. You can increase the context size to handle more content.
+Ollama's default context size is 4096 tokens, which may cause truncation errors when processing long research content. The docker-compose.yml sets this to 40960 tokens by default to match `qwen3:14b`'s maximum.
+
+**Model context size limits:**
+- **gemma3:12b**: Up to 131,072 tokens
+- **qwen3:14b**: Up to 40,960 tokens
 
 ### Configure Context Size
 
-The context size is configured via the `OLLAMA_NUM_CTX` environment variable in `docker-compose.yml`. The default is set to 8192 tokens.
+The context size is configured via the `OLLAMA_NUM_CTX` environment variable in `docker-compose.yml`. The default is set to 40960 tokens (qwen3:14b's maximum).
 
 **To change the context size:**
 
@@ -53,20 +62,20 @@ The context size is configured via the `OLLAMA_NUM_CTX` environment variable in 
    Edit `docker-compose.yml` and modify the `OLLAMA_NUM_CTX` value:
    ```yaml
    environment:
-     - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-16384}  # Change 16384 to your desired size
+     - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-40960}  # Change to your desired size
    ```
 
 2. **Option 2: Set via environment variable**:
    ```bash
-   export OLLAMA_NUM_CTX=16384
+   export OLLAMA_NUM_CTX=40960
    cd researcher/infra
    docker compose up -d
    ```
 
 **Recommended values:**
-- **8192**: Good balance for most research tasks (default)
-- **16384**: Better for longer articles with multiple sources
-- **32768**: Maximum for DeepSeek models (requires more GPU/CPU memory)
+- **40960**: Matches qwen3:14b's maximum (default)
+- **65536**: Good middle ground for both models
+- **131072**: Matches gemma3:12b's maximum (requires more GPU/CPU memory)
 
 **After changing context size, restart Ollama:**
 ```bash

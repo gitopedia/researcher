@@ -231,7 +231,7 @@ func (c *Client) FetchContent(targetURL string) (string, error) {
 	// Limit to a large but bounded size to avoid pathological pages.
 	// We now rely on an LLM summarization step to compress this further,
 	// so this cap just protects against extremely large documents.
-	// 128k characters ≈ ~32k–40k tokens of raw text; summarization will
+	// 200k characters ≈ ~57k–70k tokens of raw text; summarization will
 	// reduce this further before it is sent to the article-generation LLM.
 	maxChars := c.maxChars
 	if maxChars <= 0 {

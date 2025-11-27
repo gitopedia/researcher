@@ -22,9 +22,13 @@ var categories = []string{
 }
 
 func main() {
-	// Load .env file
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+	// Load config/base.env first (base configuration), then .env (user overrides)
+	if err := godotenv.Load("config/base.env"); err != nil {
+		log.Println("config/base.env not found, using defaults and environment variables")
+	}
+	// .env overrides values from config/base.env (Overload forces override even if variable already exists)
+	if err := godotenv.Overload(".env"); err != nil {
+		log.Println(".env not found, using config/base.env defaults only")
 	}
 
 	ctx := context.Background()

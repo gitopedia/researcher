@@ -380,15 +380,20 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 			}
 		}
 
-		// Validate summary length (must be at least 800 words, target 1200-2000)
+		// Validate summary length (configurable via environment variables)
+		minWords := 400
+		if envVal := os.Getenv("SOURCE_SUMMARY_MIN_WORDS"); envVal != "" {
+			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+				minWords = v
+			}
+		}
+
 		wordCount := len(strings.Fields(summary.Summary))
-		if wordCount < 800 {
-			log.Printf("Skipping source %s: summary too short (%d words, minimum 800)", r.Href, wordCount)
+		if wordCount < minWords {
+			log.Printf("Skipping source %s: summary too short (%d words, minimum %d)", r.Href, wordCount, minWords)
 			continue
 		}
-		if wordCount < 1200 {
-			log.Printf("Warning: summary for %s is shorter than target (%d words, target 1200-2000)", r.Href, wordCount)
-		}
+		// Summaries above minimum are accepted (target is 1200-2000 but not enforced)
 
 		processedCount++
 		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nSummary: %s\n\n", processedCount, r.Title, r.Href, summary.Summary)
