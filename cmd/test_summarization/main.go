@@ -51,13 +51,13 @@ func main() {
 	client := openai.NewClientWithConfig(config)
 
 	// Load prompts from embedded filesystem
-	systemPromptBytes, err := promptsFS.ReadFile("prompts/summarize_source_system.txt")
+	systemPromptBytes, err := promptsFS.ReadFile("prompts/phase_1_step_1_summarize_source_system.txt")
 	if err != nil {
 		log.Fatalf("Failed to load system prompt: %v", err)
 	}
 	systemPrompt := string(systemPromptBytes)
 
-	userPromptTemplateBytes, err := promptsFS.ReadFile("prompts/summarize_source_user.txt")
+	userPromptTemplateBytes, err := promptsFS.ReadFile("prompts/phase_1_step_1_summarize_source_user.txt")
 	if err != nil {
 		log.Fatalf("Failed to load user prompt: %v", err)
 	}
