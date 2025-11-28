@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/gitopedia/researcher/internal/agent"
 	"github.com/joho/godotenv"
@@ -21,13 +24,30 @@ func main() {
 
 	log.Println("Starting Researcher Agent (Go)...")
 
-	ctx := context.Background()
+	// Create a context that can be cancelled with signals (Ctrl+C)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle SIGINT (Ctrl+C) and SIGTERM
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigChan
+		log.Printf("Received signal: %v, cancelling...", sig)
+		cancel()
+	}()
+
 	a, err := agent.NewAgent(ctx)
 	if err != nil {
 		log.Fatalf("Failed to initialize agent: %v", err)
 	}
 
 	if err := a.Run(ctx); err != nil {
-		log.Fatalf("Agent run failed: %v", err)
+		if err == context.Canceled {
+			log.Println("Agent run cancelled by user")
+			os.Exit(130) // Standard exit code for SIGINT
+		} else {
+			log.Fatalf("Agent run failed: %v", err)
+		}
 	}
 }

@@ -72,6 +72,33 @@ The context size is configured via the `OLLAMA_NUM_CTX` environment variable in 
    docker compose up -d
    ```
 
+## Model Keep-Alive Configuration
+
+By default, Ollama keeps models loaded in memory for 5 minutes after the last request. This can cause GPU/CPU usage to continue even after your application stops. The docker-compose.yml sets `OLLAMA_KEEP_ALIVE=30s` to unload models after 30 seconds of inactivity.
+
+**To change the keep-alive duration:**
+
+1. **Option 1: Set in docker-compose.yml** (recommended):
+   Edit `docker-compose.yml` and modify the `OLLAMA_KEEP_ALIVE` value:
+   ```yaml
+   environment:
+     - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30s}  # Options: "0" (immediate), "30s", "1m", "5m", etc.
+   ```
+
+2. **Option 2: Set via environment variable**:
+   ```bash
+   export OLLAMA_KEEP_ALIVE=30s
+   cd researcher/infra
+   docker compose up -d ollama
+   ```
+
+**Keep-alive options:**
+- `"0"` - Unload models immediately after each request (frees resources fastest)
+- `"30s"` - Unload after 30 seconds of inactivity (default in this setup)
+- `"1m"` - Unload after 1 minute
+- `"5m"` - Unload after 5 minutes (Ollama's default)
+- `"-1"` - Keep models loaded indefinitely (uses most resources)
+
 **Recommended values:**
 - **40960**: Matches qwen3:14b's maximum (default)
 - **65536**: Good middle ground for both models

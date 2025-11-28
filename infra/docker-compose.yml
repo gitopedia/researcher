@@ -13,6 +13,10 @@ services:
       # gemma3:12b supports up to 131k tokens, qwen3:14b supports up to 40k tokens.
       # Set to 40960 to match qwen3:14b's maximum (can be overridden via OLLAMA_NUM_CTX env var).
       - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-40960}
+      # Keep-alive duration: how long models stay loaded after last use.
+      # Set to "0" to unload immediately, or a duration like "30s", "1m", "5m" (default is 5m).
+      # This helps free GPU/CPU when the application stops.
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30s}
     # GPU support (requires nvidia-container-toolkit)
     deploy:
       resources:

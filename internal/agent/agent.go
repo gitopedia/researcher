@@ -144,14 +144,37 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 	}
 
 	// 5. Generation Loop
+	// Create progress tracker
+	progress := NewProgressTracker()
+	defer progress.Finish()
+	progress.SetPhase(PhaseInitialGathering)
+
 	var createdArticles []string
 	for _, topic := range candidates {
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		progress.SetTopic(topic)
+
 		log.Printf("Processing topic: %s", topic)
-		if err := a.processTopic(ctx, topic, category, branchName, authMgr); err != nil {
+		if err := a.processTopic(ctx, topic, category, branchName, authMgr, progress); err != nil {
+			if err == context.Canceled {
+				return err
+			}
 			log.Printf("Error processing topic '%s': %v", topic, err)
 			continue
 		}
 		createdArticles = append(createdArticles, topic)
+
+		// Phase 2: Detailed Information Gathering (placeholder)
+		progress.SetPhase(PhaseDetailedGathering)
+		log.Printf("Phase 2: Detailed Information Gathering (placeholder - not yet implemented)")
+		// TODO: Implement phase 2 - gather sources for subtopics
+		progress.SetPhase(PhaseInitialGathering) // Reset for next topic
 	}
 
 	if len(createdArticles) == 0 {
@@ -204,14 +227,22 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 	return nil
 }
 
-func (a *Agent) processTopic(ctx context.Context, topic, category, branchName string, authMgr *authority.Manager) error {
+func (a *Agent) processTopic(ctx context.Context, topic, category, branchName string, authMgr *authority.Manager, progress *ProgressTracker) error {
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
 
 	// Research - generate multiple search queries for variety
 	numQueries := 5
-	if envVal := os.Getenv("SEARCH_NUM_QUERIES"); envVal != "" {
+	if envVal := os.Getenv("PHASE1_SEARCH_NUM_QUERIES"); envVal != "" {
 		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
 			numQueries = v
+		}
+	}
+	// Backwards compatibility with old variable name
+	if numQueries == 5 {
+		if envVal := os.Getenv("SEARCH_NUM_QUERIES"); envVal != "" {
+			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+				numQueries = v
+			}
 		}
 	}
 
@@ -237,10 +268,22 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		}
 	}
 
-	var results []search.Result
+	type resultWithQuery struct {
+		result     search.Result
+		queryIndex int
+	}
+
+	var results []resultWithQuery
 	seenURLs := make(map[string]bool)
 
-	for _, q := range queries {
+	for queryIdx, q := range queries {
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		res, err := a.search.Search(q)
 		if err != nil {
 			log.Printf("Search warning for '%s': %v", q, err)
@@ -249,11 +292,17 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		log.Printf("Search '%s' returned %d results", q, len(res))
 		for _, r := range res {
 			if !seenURLs[r.Href] {
-				results = append(results, r)
+				results = append(results, resultWithQuery{result: r, queryIndex: queryIdx})
 				seenURLs[r.Href] = true
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+
+		// Check for cancellation before sleeping
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 
 	// Deep Research: Fetch content for top results
@@ -261,24 +310,59 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 	var references []string
 
 	limit := 30
-	if envVal := os.Getenv("SEARCH_MAX_SOURCES"); envVal != "" {
+	if envVal := os.Getenv("PHASE1_TARGET_SOURCES"); envVal != "" {
 		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
 			limit = v
 		}
 	}
-	if len(results) < limit {
-		limit = len(results)
+	// Backwards compatibility with old variable names
+	if limit == 30 {
+		if envVal := os.Getenv("TARGET_SOURCES_PHASE1"); envVal != "" {
+			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+				limit = v
+			}
+		}
+	}
+	if limit == 30 {
+		if envVal := os.Getenv("SEARCH_MAX_SOURCES"); envVal != "" {
+			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+				limit = v
+			}
+		}
+	}
+	log.Printf("Total unique search results: %d (target successful summaries: %d)", len(results), limit)
+
+	// Prepare targets - include ALL non-PDF results so we can keep processing
+	// until we reach the target number of successful summaries
+	type targetWithQuery struct {
+		result     search.Result
+		queryIndex int
+		index      int // Original index in targets slice
 	}
 
-	// Prepare targets
-	var targets []search.Result
-	for _, r := range results {
-		if len(targets) >= limit {
-			break
+	var targets []targetWithQuery
+	targetIndex := 0
+	for _, rwq := range results {
+		if !strings.HasSuffix(rwq.result.Href, ".pdf") {
+			targets = append(targets, targetWithQuery{
+				result:     rwq.result,
+				queryIndex: rwq.queryIndex,
+				index:      targetIndex,
+			})
+			targetIndex++
 		}
-		if !strings.HasSuffix(r.Href, ".pdf") {
-			targets = append(targets, r)
-		}
+	}
+	log.Printf("Prepared %d targets for fetching (excluding PDFs)", len(targets))
+
+	// Set the target for progress tracking (PHASE1_TARGET_SOURCES)
+	if progress != nil {
+		progress.SetTotal(limit)
+	}
+
+	// Adjust limit if we don't have enough targets
+	if len(targets) < limit {
+		log.Printf("Warning: only %d targets available, reducing limit from %d", len(targets), limit)
+		limit = len(targets)
 	}
 
 	// Fetch content in parallel
@@ -299,85 +383,159 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 	}
 	sem := make(chan struct{}, semSize)
 
-	for i, r := range targets {
+	for _, t := range targets {
 		wg.Add(1)
-		go func(i int, urlStr string) {
+		go func(idx int, urlStr string) {
 			defer wg.Done()
 			sem <- struct{}{}        // Acquire
 			defer func() { <-sem }() // Release
 
 			content, err := a.search.FetchContent(urlStr)
-			resultsChan <- fetchResult{i, content, err}
-		}(i, r.Href)
+			resultsChan <- fetchResult{idx, content, err}
+		}(t.index, t.result.Href)
 	}
-
-	wg.Wait()
-	close(resultsChan)
 
 	// Collect fetched page contents
 	fetchedContents := make(map[int]string)
-	for res := range resultsChan {
-		if res.err == nil && len(res.content) >= 100 {
-			fetchedContents[res.index] = res.content
-		} else if res.err != nil {
-			log.Printf("Failed to fetch %s: %v", targets[res.index].Href, res.err)
+
+	// Start a goroutine to collect results
+	done := make(chan bool)
+	go func() {
+		for res := range resultsChan {
+			if res.err == nil && len(res.content) >= 100 {
+				fetchedContents[res.index] = res.content
+			} else if res.err != nil {
+				log.Printf("Failed to fetch %s: %v", targets[res.index].result.Href, res.err)
+			}
+		}
+		done <- true
+	}()
+
+	wg.Wait()
+	close(resultsChan)
+	<-done // Wait for collection to finish
+
+	log.Printf("Successfully fetched %d/%d sources", len(fetchedContents), len(targets))
+
+	// Target number of summaries to collect per query
+	targetSummariesPerQuery := 2
+	if envVal := os.Getenv("TARGET_SUMMARIES_PER_QUERY"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			targetSummariesPerQuery = v
 		}
 	}
 
+	// Track summaries collected per query
+	summariesPerQuery := make(map[int]int)
 	processedCount := 0
+	skippedCount := 0
+	skippedReasons := make(map[string]int)
 
 	// Optional debug mode: when enabled, save raw fetched pages and LLM outputs
 	debugSources := false
 	if v := os.Getenv("RESEARCH_DEBUG_SOURCES"); strings.EqualFold(v, "1") || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") {
 		debugSources = true
 	}
-	for i, r := range targets {
-		content, ok := fetchedContents[i]
+	for _, t := range targets {
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		content, ok := fetchedContents[t.index]
 		if !ok {
+			skippedCount++
+			skippedReasons["fetch failed"]++
 			continue
 		}
 
 		// If debug is enabled, save the raw fetched page content for inspection.
 		if debugSources {
-			if u, err := url.Parse(r.Href); err == nil {
+			if u, err := url.Parse(t.result.Href); err == nil {
 				domain := strings.ReplaceAll(u.Host, ".", "-")
-				rawPath := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d-raw.txt", slug, domain, i+1)
-				if err := a.gh.CreateFile(branchName, rawPath, "Add debug raw source: "+r.Title, content); err != nil {
+				rawPath := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/raw.txt", slug, domain, t.index+1)
+				if err := a.gh.CreateFile(branchName, rawPath, "Add debug raw source: "+t.result.Title, content); err != nil {
 					log.Printf("Failed to save debug raw source %s: %v", rawPath, err)
 				}
 			}
 		}
 
 		// Summarize and filter source using LLM
-		summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
+		log.Printf("Summarizing source %d/%d: %s", processedCount+1, limit, t.result.Href)
+		summary, err := a.llm.SummarizeSource(ctx, topic, t.result.Href, content)
 		if err != nil {
-			log.Printf("Failed to summarize %s: %v", r.Href, err)
+			log.Printf("Failed to summarize %s: %v", t.result.Href, err)
 			// If we have the raw LLM output, save it for debugging.
-			if debugSources && summary.Raw != "" {
-				if u, errParse := url.Parse(r.Href); errParse == nil {
+			if debugSources {
+				if u, errParse := url.Parse(t.result.Href); errParse == nil {
 					domain := strings.ReplaceAll(u.Host, ".", "-")
-					llmPath := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d-llm.txt", slug, domain, i+1)
-					if errSave := a.gh.CreateFile(branchName, llmPath, "Add debug LLM output (error): "+r.Title, summary.Raw); errSave != nil {
-						log.Printf("Failed to save debug LLM output %s: %v", llmPath, errSave)
+					// Save step 1 output if available
+					if summary.Step1Output != "" {
+						step1Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_1.txt", slug, domain, t.index+1)
+						if errSave := a.gh.CreateFile(branchName, step1Path, "Add debug phase 1 step 1 output (error): "+t.result.Title, summary.Step1Output); errSave != nil {
+							log.Printf("Failed to save debug step 1 output %s: %v", step1Path, errSave)
+						}
+					}
+					// Save step 2 output if available
+					if summary.Raw != "" {
+						step2Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_2.txt", slug, domain, t.index+1)
+						if errSave := a.gh.CreateFile(branchName, step2Path, "Add debug phase 1 step 2 output (error): "+t.result.Title, summary.Raw); errSave != nil {
+							log.Printf("Failed to save debug step 2 output %s: %v", step2Path, errSave)
+						}
 					}
 				}
 			}
 			continue
 		}
-		if !summary.Relevant {
-			log.Printf("Skipping source as not relevant: %s (reason: %s)", r.Href, summary.Reason)
-			continue
-		}
 
-		// In debug mode, also save the successful LLM output for the source.
-		if debugSources && summary.Raw != "" {
-			if u, err := url.Parse(r.Href); err == nil {
+		// In debug mode, save both step outputs for the source.
+		if debugSources {
+			if u, err := url.Parse(t.result.Href); err == nil {
 				domain := strings.ReplaceAll(u.Host, ".", "-")
-				llmPath := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d-llm.txt", slug, domain, i+1)
-				if err := a.gh.CreateFile(branchName, llmPath, "Add debug LLM output: "+r.Title, summary.Raw); err != nil {
-					log.Printf("Failed to save debug LLM output %s: %v", llmPath, err)
+				// Save phase 1 step 1 output (plain-text summarization)
+				if summary.Step1Output != "" {
+					step1Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_1.txt", slug, domain, t.index+1)
+					if err := a.gh.CreateFile(branchName, step1Path, "Add debug phase 1 step 1 output: "+t.result.Title, summary.Step1Output); err != nil {
+						log.Printf("Failed to save debug step 1 output %s: %v", step1Path, err)
+					}
+				}
+				// Save phase 1 step 2 output (JSON conversion)
+				if summary.Raw != "" {
+					step2Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_2.txt", slug, domain, t.index+1)
+					if err := a.gh.CreateFile(branchName, step2Path, "Add debug phase 1 step 2 output: "+t.result.Title, summary.Raw); err != nil {
+						log.Printf("Failed to save debug step 2 output %s: %v", step2Path, err)
+					}
 				}
 			}
+		}
+
+		// In debug mode, save step outputs even if source is not relevant
+		if !summary.Relevant {
+			if debugSources {
+				if u, err := url.Parse(t.result.Href); err == nil {
+					domain := strings.ReplaceAll(u.Host, ".", "-")
+					// Save phase 1 step 1 output (plain-text summarization)
+					if summary.Step1Output != "" {
+						step1Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_1.txt", slug, domain, t.index+1)
+						if err := a.gh.CreateFile(branchName, step1Path, "Add debug phase 1 step 1 output (not relevant): "+t.result.Title, summary.Step1Output); err != nil {
+							log.Printf("Failed to save debug step 1 output %s: %v", step1Path, err)
+						}
+					}
+					// Save phase 1 step 2 output if available (may not exist if marked NOT_RELEVANT in step 1)
+					if summary.Raw != "" && summary.Raw != summary.Step1Output {
+						step2Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_2.txt", slug, domain, t.index+1)
+						if err := a.gh.CreateFile(branchName, step2Path, "Add debug phase 1 step 2 output (not relevant): "+t.result.Title, summary.Raw); err != nil {
+							log.Printf("Failed to save debug step 2 output %s: %v", step2Path, err)
+						}
+					}
+				}
+			}
+			log.Printf("Skipping source as not relevant: %s (reason: %s)", t.result.Href, summary.Reason)
+			skippedCount++
+			skippedReasons["not relevant"]++
+			continue
 		}
 
 		// Validate summary length (configurable via environment variables)
@@ -390,17 +548,40 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 
 		wordCount := len(strings.Fields(summary.Summary))
 		if wordCount < minWords {
-			log.Printf("Skipping source %s: summary too short (%d words, minimum %d)", r.Href, wordCount, minWords)
+			log.Printf("Skipping source %s: summary too short (%d words, minimum %d)", t.result.Href, wordCount, minWords)
+			skippedCount++
+			skippedReasons["too short"]++
 			continue
 		}
 		// Summaries above minimum are accepted (target is 1200-2000 but not enforced)
 
+		// Check if this query has already reached its target (only count successful summaries)
+		if summariesPerQuery[t.queryIndex] >= targetSummariesPerQuery {
+			log.Printf("Skipping source from query %d (limit %d successful summaries reached): %s - continuing to other queries", t.queryIndex, targetSummariesPerQuery, t.result.Href)
+			skippedCount++
+			skippedReasons["query limit reached"]++
+			continue
+		}
+
+		// Increment summary count for this query (only successful summaries count)
+		summariesPerQuery[t.queryIndex]++
 		processedCount++
-		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nSummary: %s\n\n", processedCount, r.Title, r.Href, summary.Summary)
-		references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", processedCount, r.Title, r.Href))
+
+		// Print progress after each successful summary
+		if progress != nil {
+			progress.Update(processedCount)
+		}
+		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nSummary: %s\n\n", processedCount, t.result.Title, t.result.Href, summary.Summary)
+		references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", processedCount, t.result.Title, t.result.Href))
+
+		// Stop Phase 1 if we've reached the target number of sources (PHASE1_TARGET_SOURCES)
+		if processedCount >= limit {
+			log.Printf("Reached Phase 1 target of %d summaries, stopping source processing", limit)
+			break
+		}
 
 		// Save source summary (compressed, relevant-only)
-		if u, err := url.Parse(r.Href); err == nil {
+		if u, err := url.Parse(t.result.Href); err == nil {
 			domain := strings.ReplaceAll(u.Host, ".", "-")
 			sourceID := ulid.Make().String()
 			sourcePath := fmt.Sprintf("Compendium/_incoming/sources/%s--%s-%d.md", slug, domain, processedCount)
@@ -427,11 +608,34 @@ summary: "Summarized source material for %s"
 %s%s---
 
 %s
-`, sourceID, r.Title, r.Href, slug, time.Now().Format("2006-01-02"), topic, modelField, languageField, summary.Summary)
+`, sourceID, t.result.Title, t.result.Href, slug, time.Now().Format("2006-01-02"), topic, modelField, languageField, summary.Summary)
 
-			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+r.Title, sourceContent); err != nil {
+			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+t.result.Title, sourceContent); err != nil {
 				log.Printf("Failed to save source %s: %v", sourcePath, err)
 			}
+		}
+	}
+
+	// Log summary of processing results
+	if processedCount < limit {
+		log.Printf("Phase 1 completed with %d/%d sources (target: %d). Skipped %d sources:", processedCount, len(targets), limit, skippedCount)
+		// Show per-query summary
+		log.Printf("Summaries per query:")
+		for qIdx, count := range summariesPerQuery {
+			log.Printf("  - Query %d: %d summaries (limit: %d)", qIdx, count, targetSummariesPerQuery)
+		}
+		for reason, count := range skippedReasons {
+			log.Printf("  - %s: %d", reason, count)
+		}
+		if processedCount == 0 {
+			return fmt.Errorf("no valid sources collected for topic %s", topic)
+		}
+	} else {
+		log.Printf("Phase 1 completed: collected %d/%d sources", processedCount, limit)
+		// Show per-query summary
+		log.Printf("Summaries per query:")
+		for qIdx, count := range summariesPerQuery {
+			log.Printf("  - Query %d: %d summaries (limit: %d)", qIdx, count, targetSummariesPerQuery)
 		}
 	}
 

@@ -28,6 +28,8 @@ type SourceSummary struct {
 	// Raw contains the raw LLM response used for debugging and logging.
 	// It is not part of the JSON contract with the model.
 	Raw string `json:"-"`
+	// Step1Output contains the phase 1 step 1 (plain-text summarization) output
+	Step1Output string `json:"-"`
 }
 
 type Generator interface {

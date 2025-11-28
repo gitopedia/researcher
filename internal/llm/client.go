@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"text/template"
@@ -112,22 +113,22 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load suggest_topics_user template: %w", err)
 	}
 
-	summarizeSourceSystem, err := loadTemplate("prompts/summarize_source_system.txt")
+	summarizeSourceSystem, err := loadTemplate("prompts/phase_1_step_1_summarize_source_system.txt")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load summarize_source_system template: %w", err)
 	}
 
-	summarizeSourceUser, err := loadTemplate("prompts/summarize_source_user.txt")
+	summarizeSourceUser, err := loadTemplate("prompts/phase_1_step_1_summarize_source_user.txt")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load summarize_source_user template: %w", err)
 	}
 
-	convertSummarySystem, err := loadTemplate("prompts/convert_summary_system.txt")
+	convertSummarySystem, err := loadTemplate("prompts/phase_1_step_2_convert_summary_system.txt")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load convert_summary_system template: %w", err)
 	}
 
-	convertSummaryUser, err := loadTemplate("prompts/convert_summary_user.txt")
+	convertSummaryUser, err := loadTemplate("prompts/phase_1_step_2_convert_summary_user.txt")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load convert_summary_user template: %w", err)
 	}
@@ -314,6 +315,7 @@ func (c *Client) SuggestTopics(ctx context.Context, category string, existingTop
 //  2) JSON conversion (relevance + reason + language + topics) without changing the text.
 func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error) {
 	// Stage 1: plain-text summarization with headings and bullets
+	log.Printf("Stage 1: Starting plain-text summarization (model: %s) for %s", c.modelSummarizePlain, urlStr)
 	var systemBuf bytes.Buffer
 	if err := c.summarizeSourceSystemTemplate.Execute(&systemBuf, nil); err != nil {
 		return SourceSummary{}, fmt.Errorf("failed to execute summarize system template: %w", err)
@@ -351,11 +353,13 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	}
 
 	plain := strings.TrimSpace(resp.Choices[0].Message.Content)
+	log.Printf("Stage 1: Completed plain-text summarization (model: %s), output length: %d chars", c.modelSummarizePlain, len(plain))
 
 	summary := SourceSummary{
-		Model:    c.modelSummarizePlain,
-		Language: detectLanguage(content),
-		Raw:      plain,
+		Model:       c.modelSummarizePlain,
+		Language:    detectLanguage(content),
+		Raw:         plain,
+		Step1Output: plain,
 	}
 
 	// If the model decides the page is not relevant, it should output NOT_RELEVANT.
@@ -364,10 +368,12 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 		summary.Relevant = false
 		summary.Reason = "Marked NOT_RELEVANT by summarization model"
 		summary.Summary = ""
+		log.Printf("Stage 1: Source marked as NOT_RELEVANT, skipping Stage 2")
 		return summary, nil
 	}
 
 	// Stage 2: JSON conversion (relevance + reason + topics), using a fast model.
+	log.Printf("Stage 2: Starting JSON conversion (model: %s) for %s", c.modelSummarizeJSON, urlStr)
 	var convSystemBuf bytes.Buffer
 	if err := c.convertSummarySystemTemplate.Execute(&convSystemBuf, nil); err != nil {
 		// Fallback: return the plain summary marked as relevant.
@@ -414,7 +420,7 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	}
 
 	rawJSON := strings.TrimSpace(resp2.Choices[0].Message.Content)
-	summary.Raw = rawJSON
+	summary.Raw = rawJSON // Step 2 output (JSON)
 
 	jsonStr := extractJSONObject(rawJSON)
 	var converted struct {
@@ -445,6 +451,7 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 		summary.Language = converted.Language
 	}
 
+	log.Printf("Stage 2: Completed JSON conversion (model: %s), relevant: %v, topics: %d", c.modelSummarizeJSON, summary.Relevant, len(converted.Topics))
 	return summary, nil
 }
 
