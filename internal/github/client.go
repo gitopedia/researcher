@@ -319,32 +319,49 @@ func (c *Client) GetPRStatus(prNumber int) (*PRStatus, error) {
 		Merged:    pr.GetMerged(),
 		Mergeable: pr.GetMergeable(),
 		State:     pr.GetState(),
-		CIStatus:  "pending",
+		CIStatus:  "success", // Default to success if no CI configured
 	}
 
 	// Get combined status for the head SHA
 	if pr.Head != nil && pr.Head.SHA != nil {
+		hasChecks := false
+		
+		// Check combined commit status (older status API)
 		combined, _, err := c.client.Repositories.GetCombinedStatus(c.ctx, c.owner, c.repo, *pr.Head.SHA, nil)
-		if err == nil && combined != nil {
+		if err == nil && combined != nil && len(combined.Statuses) > 0 {
+			hasChecks = true
 			status.CIStatus = combined.GetState()
 		}
 
 		// Also check check runs (GitHub Actions uses check runs, not statuses)
 		checkRuns, _, err := c.client.Checks.ListCheckRunsForRef(c.ctx, c.owner, c.repo, *pr.Head.SHA, nil)
 		if err == nil && checkRuns != nil && len(checkRuns.CheckRuns) > 0 {
+			hasChecks = true
 			allSuccess := true
 			anyFailure := false
 			anyPending := false
 
 			for _, run := range checkRuns.CheckRuns {
-				switch run.GetConclusion() {
-				case "success", "skipped", "neutral":
-					// OK
-				case "failure", "cancelled", "timed_out", "action_required":
-					anyFailure = true
+				runStatus := run.GetStatus()
+				conclusion := run.GetConclusion()
+				
+				// Check if still running
+				if runStatus == "in_progress" || runStatus == "queued" || runStatus == "waiting" {
+					anyPending = true
 					allSuccess = false
-				default:
-					if run.GetStatus() != "completed" {
+					continue
+				}
+				
+				// Check completed runs
+				if runStatus == "completed" {
+					switch conclusion {
+					case "success", "skipped", "neutral":
+						// OK
+					case "failure", "cancelled", "timed_out", "action_required":
+						anyFailure = true
+						allSuccess = false
+					default:
+						// Unknown conclusion on completed run - treat as pending
 						anyPending = true
 						allSuccess = false
 					}
@@ -358,6 +375,11 @@ func (c *Client) GetPRStatus(prNumber int) (*PRStatus, error) {
 			} else if allSuccess {
 				status.CIStatus = "success"
 			}
+		}
+		
+		// If no checks at all, it's considered passing (no CI required)
+		if !hasChecks {
+			status.CIStatus = "success"
 		}
 	}
 
