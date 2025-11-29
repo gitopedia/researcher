@@ -224,6 +224,134 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 		log.Printf("Failed to comment on issue: %v", err)
 	}
 
+	// 9. Monitor PR and merge when ready
+	if err := a.monitorAndMergePR(ctx, *pr.Number, *issue.Number); err != nil {
+		return fmt.Errorf("failed to monitor/merge PR: %w", err)
+	}
+
+	return nil
+}
+
+// monitorAndMergePR watches the PR state, invokes Encyclopaedist, waits for it to finish,
+// and merges the PR when ready
+func (a *Agent) monitorAndMergePR(ctx context.Context, prNumber, issueNumber int) error {
+	log.Printf("Starting PR monitoring for PR #%d", prNumber)
+
+	// Invoke Encyclopaedist agent via gh CLI
+	if err := a.invokeEncyclopaedist(ctx, prNumber); err != nil {
+		log.Printf("Warning: failed to invoke Encyclopaedist: %v", err)
+		// Continue anyway - Encyclopaedist might be invoked manually
+	}
+
+	// Polling configuration
+	pollInterval := 30 * time.Second
+	if envVal := os.Getenv("PR_POLL_INTERVAL_SECONDS"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			pollInterval = time.Duration(v) * time.Second
+		}
+	}
+
+	maxWait := 30 * time.Minute
+	if envVal := os.Getenv("PR_MAX_WAIT_MINUTES"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			maxWait = time.Duration(v) * time.Minute
+		}
+	}
+
+	deadline := time.Now().Add(maxWait)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for PR #%d to be ready (waited %v)", prNumber, maxWait)
+		}
+
+		status, err := a.gh.GetPRStatus(prNumber)
+		if err != nil {
+			log.Printf("Warning: failed to get PR status: %v", err)
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		log.Printf("PR #%d status: draft=%v, state=%s, ci=%s, mergeable=%v",
+			prNumber, status.Draft, status.State, status.CIStatus, status.Mergeable)
+
+		// Check if PR was closed without merging
+		if status.State == "closed" && !status.Merged {
+			return fmt.Errorf("PR #%d was closed without merging", prNumber)
+		}
+
+		// Check if already merged
+		if status.Merged {
+			log.Printf("PR #%d was already merged", prNumber)
+			// Close the tracking issue
+			if err := a.gh.CloseIssue(issueNumber); err != nil {
+				log.Printf("Warning: failed to close issue #%d: %v", issueNumber, err)
+			} else {
+				log.Printf("Closed tracking issue #%d", issueNumber)
+			}
+			return nil
+		}
+
+		// Check if ready to merge: not draft, CI passed, mergeable
+		if !status.Draft && status.CIStatus == "success" && status.Mergeable {
+			log.Printf("PR #%d is ready to merge!", prNumber)
+
+			commitMsg := fmt.Sprintf("Merge PR #%d: automated content expansion", prNumber)
+			if err := a.gh.MergePR(prNumber, commitMsg); err != nil {
+				return fmt.Errorf("failed to merge PR #%d: %w", prNumber, err)
+			}
+			log.Printf("Successfully merged PR #%d", prNumber)
+
+			// Close the tracking issue
+			if err := a.gh.CloseIssue(issueNumber); err != nil {
+				log.Printf("Warning: failed to close issue #%d: %v", issueNumber, err)
+			} else {
+				log.Printf("Closed tracking issue #%d", issueNumber)
+			}
+
+			return nil
+		}
+
+		// If CI failed, report and exit
+		if status.CIStatus == "failure" {
+			errMsg := fmt.Sprintf("CI failed for PR #%d - manual intervention required", prNumber)
+			if err := a.gh.CommentOnPR(prNumber, "⚠️ CI checks failed. Please review and fix manually."); err != nil {
+				log.Printf("Warning: failed to comment on PR: %v", err)
+			}
+			return fmt.Errorf(errMsg)
+		}
+
+		log.Printf("PR #%d not ready yet, waiting %v...", prNumber, pollInterval)
+		time.Sleep(pollInterval)
+	}
+}
+
+// invokeEncyclopaedist uses gh CLI to trigger the Encyclopaedist Copilot agent
+func (a *Agent) invokeEncyclopaedist(ctx context.Context, prNumber int) error {
+	log.Printf("Invoking Encyclopaedist agent for PR #%d via gh CLI", prNumber)
+
+	// Comment on PR to trigger Copilot with Encyclopaedist context
+	comment := `@copilot Please organize the articles in this Draft PR following the Encyclopaedist agent guidelines:
+
+1. Move articles from ` + "`_incoming/*.md`" + ` to appropriate ` + "`Compendium/<Category>/`" + ` paths
+2. Validate front matter (ULID, title, slug, tags)
+3. Leave ` + "`_incoming/sources/`" + ` untouched
+4. Delete any ` + "`_debug/`" + ` directories
+5. Mark the PR ready for review when complete
+
+See the Encyclopaedist agent definition for full instructions.`
+
+	if err := a.gh.CommentOnPR(prNumber, comment); err != nil {
+		return fmt.Errorf("failed to comment on PR to invoke Encyclopaedist: %w", err)
+	}
+
+	log.Printf("Posted Encyclopaedist invocation comment on PR #%d", prNumber)
 	return nil
 }
 

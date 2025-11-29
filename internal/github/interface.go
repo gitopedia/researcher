@@ -4,6 +4,16 @@ import (
 	"github.com/google/go-github/v57/github"
 )
 
+// PRStatus represents the current state of a pull request
+type PRStatus struct {
+	Number    int
+	Draft     bool
+	Merged    bool
+	Mergeable bool
+	State     string // "open", "closed"
+	CIStatus  string // "pending", "success", "failure"
+}
+
 type GitHubClient interface {
 	GetResearchRequests() ([]*github.Issue, error)
 	CreateBranch(baseBranch, newBranch string) error
@@ -14,6 +24,12 @@ type GitHubClient interface {
 	GetFile(ref, path string) (string, string, error)
 	ListAllFiles(path string) ([]string, error)
 	CreateIssue(title, body string, labels []string) (*github.Issue, error)
+
+	// PR monitoring and management
+	GetPRStatus(prNumber int) (*PRStatus, error)
+	MergePR(prNumber int, commitMessage string) error
+	CommentOnPR(prNumber int, body string) error
+	CloseIssue(issueNumber int) error
 }
 
 // Ensure Client implements GitHubClient

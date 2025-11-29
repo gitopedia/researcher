@@ -306,3 +306,83 @@ func (c *Client) CreateIssue(title, body string, labels []string) (*github.Issue
 	issue, _, err := c.client.Issues.Create(c.ctx, c.owner, c.repo, req)
 	return issue, err
 }
+
+func (c *Client) GetPRStatus(prNumber int) (*PRStatus, error) {
+	pr, _, err := c.client.PullRequests.Get(c.ctx, c.owner, c.repo, prNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	status := &PRStatus{
+		Number:    prNumber,
+		Draft:     pr.GetDraft(),
+		Merged:    pr.GetMerged(),
+		Mergeable: pr.GetMergeable(),
+		State:     pr.GetState(),
+		CIStatus:  "pending",
+	}
+
+	// Get combined status for the head SHA
+	if pr.Head != nil && pr.Head.SHA != nil {
+		combined, _, err := c.client.Repositories.GetCombinedStatus(c.ctx, c.owner, c.repo, *pr.Head.SHA, nil)
+		if err == nil && combined != nil {
+			status.CIStatus = combined.GetState()
+		}
+
+		// Also check check runs (GitHub Actions uses check runs, not statuses)
+		checkRuns, _, err := c.client.Checks.ListCheckRunsForRef(c.ctx, c.owner, c.repo, *pr.Head.SHA, nil)
+		if err == nil && checkRuns != nil && len(checkRuns.CheckRuns) > 0 {
+			allSuccess := true
+			anyFailure := false
+			anyPending := false
+
+			for _, run := range checkRuns.CheckRuns {
+				switch run.GetConclusion() {
+				case "success", "skipped", "neutral":
+					// OK
+				case "failure", "cancelled", "timed_out", "action_required":
+					anyFailure = true
+					allSuccess = false
+				default:
+					if run.GetStatus() != "completed" {
+						anyPending = true
+						allSuccess = false
+					}
+				}
+			}
+
+			if anyFailure {
+				status.CIStatus = "failure"
+			} else if anyPending {
+				status.CIStatus = "pending"
+			} else if allSuccess {
+				status.CIStatus = "success"
+			}
+		}
+	}
+
+	return status, nil
+}
+
+func (c *Client) MergePR(prNumber int, commitMessage string) error {
+	opts := &github.PullRequestOptions{
+		CommitTitle: commitMessage,
+		MergeMethod: "squash",
+	}
+	_, _, err := c.client.PullRequests.Merge(c.ctx, c.owner, c.repo, prNumber, commitMessage, opts)
+	return err
+}
+
+func (c *Client) CommentOnPR(prNumber int, body string) error {
+	// PRs are issues in GitHub's API
+	return c.CommentOnIssue(prNumber, body)
+}
+
+func (c *Client) CloseIssue(issueNumber int) error {
+	state := "closed"
+	req := &github.IssueRequest{
+		State: &state,
+	}
+	_, _, err := c.client.Issues.Edit(c.ctx, c.owner, c.repo, issueNumber, req)
+	return err
+}
