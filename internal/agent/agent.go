@@ -54,6 +54,11 @@ func NewAgentWithDeps(gh github.GitHubClient, s search.Searcher, l llm.Generator
 }
 
 func (a *Agent) Run(ctx context.Context) error {
+	// First, check if any PRs are ready to merge
+	if err := a.mergeReadyPRs(ctx); err != nil {
+		log.Printf("Warning: error checking/merging PRs: %v", err)
+	}
+
 	log.Println("Checking for research category issues...")
 	issues, err := a.gh.GetResearchRequests()
 	if err != nil {
@@ -65,11 +70,52 @@ func (a *Agent) Run(ctx context.Context) error {
 		return nil
 	}
 
-	// Pick one random issue
-	rand.Seed(time.Now().UnixNano())
-	issue := issues[rand.Intn(len(issues))]
+	// Get open PRs to filter out issues that already have PRs
+	openPRs, err := a.gh.ListOpenPRs()
+	if err != nil {
+		log.Printf("Warning: failed to list open PRs: %v", err)
+		openPRs = nil
+	}
 
-	return a.expandCategory(ctx, issue)
+	// Build set of issue numbers that have open PRs
+	issuesWithPRs := make(map[int]bool)
+	for _, pr := range openPRs {
+		for _, issueNum := range pr.IssueRefs {
+			issuesWithPRs[issueNum] = true
+			log.Printf("Issue #%d has open PR #%d, will skip", issueNum, pr.Number)
+		}
+	}
+
+	// Filter issues to only those without open PRs
+	var availableIssues []*gh.Issue
+	for _, issue := range issues {
+		if !issuesWithPRs[*issue.Number] {
+			availableIssues = append(availableIssues, issue)
+		}
+	}
+
+	if len(availableIssues) == 0 {
+		log.Println("All research issues already have open PRs. Nothing to do.")
+		return nil
+	}
+
+	log.Printf("Found %d issues without PRs (out of %d total)", len(availableIssues), len(issues))
+
+	// Pick one random issue from available ones
+	rand.Seed(time.Now().UnixNano())
+	issue := availableIssues[rand.Intn(len(availableIssues))]
+
+	// Process the research task
+	if err := a.expandCategory(ctx, issue); err != nil {
+		return err
+	}
+
+	// After completing research, check again for ready PRs to merge
+	if err := a.mergeReadyPRs(ctx); err != nil {
+		log.Printf("Warning: error checking/merging PRs after research: %v", err)
+	}
+
+	return nil
 }
 
 func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
@@ -224,112 +270,82 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 		log.Printf("Failed to comment on issue: %v", err)
 	}
 
-	// 9. Monitor PR and merge when ready
-	if err := a.monitorAndMergePR(ctx, *pr.Number, *issue.Number); err != nil {
-		return fmt.Errorf("failed to monitor/merge PR: %w", err)
+	// 9. Invoke Encyclopaedist agent (non-blocking)
+	if err := a.invokeEncyclopaedist(ctx, *pr.Number); err != nil {
+		log.Printf("Warning: failed to invoke Encyclopaedist: %v", err)
 	}
 
+	log.Printf("Research task complete. PR #%d created and Encyclopaedist invoked.", *pr.Number)
 	return nil
 }
 
-// monitorAndMergePR watches the PR state, invokes Encyclopaedist, waits for it to finish,
-// and merges the PR when ready
-func (a *Agent) monitorAndMergePR(ctx context.Context, prNumber, issueNumber int) error {
-	log.Printf("Starting PR monitoring for PR #%d", prNumber)
+// mergeReadyPRs checks all open PRs and merges any that are ready
+func (a *Agent) mergeReadyPRs(ctx context.Context) error {
+	log.Println("Checking for PRs ready to merge...")
 
-	// Invoke Encyclopaedist agent via gh CLI
-	if err := a.invokeEncyclopaedist(ctx, prNumber); err != nil {
-		log.Printf("Warning: failed to invoke Encyclopaedist: %v", err)
-		// Continue anyway - Encyclopaedist might be invoked manually
+	openPRs, err := a.gh.ListOpenPRs()
+	if err != nil {
+		return fmt.Errorf("failed to list open PRs: %w", err)
 	}
 
-	// Polling configuration
-	pollInterval := 30 * time.Second
-	if envVal := os.Getenv("PR_POLL_INTERVAL_SECONDS"); envVal != "" {
-		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
-			pollInterval = time.Duration(v) * time.Second
-		}
+	if len(openPRs) == 0 {
+		log.Println("No open PRs found.")
+		return nil
 	}
 
-	maxWait := 30 * time.Minute
-	if envVal := os.Getenv("PR_MAX_WAIT_MINUTES"); envVal != "" {
-		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
-			maxWait = time.Duration(v) * time.Minute
-		}
-	}
+	log.Printf("Found %d open PRs, checking status...", len(openPRs))
 
-	deadline := time.Now().Add(maxWait)
-
-	for {
+	mergedCount := 0
+	for _, pr := range openPRs {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for PR #%d to be ready (waited %v)", prNumber, maxWait)
-		}
-
-		status, err := a.gh.GetPRStatus(prNumber)
+		status, err := a.gh.GetPRStatus(pr.Number)
 		if err != nil {
-			log.Printf("Warning: failed to get PR status: %v", err)
-			time.Sleep(pollInterval)
+			log.Printf("Warning: failed to get status for PR #%d: %v", pr.Number, err)
 			continue
 		}
 
-		log.Printf("PR #%d status: draft=%v, state=%s, ci=%s, mergeable=%v",
-			prNumber, status.Draft, status.State, status.CIStatus, status.Mergeable)
-
-		// Check if PR was closed without merging
-		if status.State == "closed" && !status.Merged {
-			return fmt.Errorf("PR #%d was closed without merging", prNumber)
-		}
-
-		// Check if already merged
-		if status.Merged {
-			log.Printf("PR #%d was already merged", prNumber)
-			// Close the tracking issue
-			if err := a.gh.CloseIssue(issueNumber); err != nil {
-				log.Printf("Warning: failed to close issue #%d: %v", issueNumber, err)
-			} else {
-				log.Printf("Closed tracking issue #%d", issueNumber)
-			}
-			return nil
-		}
+		log.Printf("PR #%d: draft=%v, state=%s, ci=%s, mergeable=%v",
+			pr.Number, status.Draft, status.State, status.CIStatus, status.Mergeable)
 
 		// Check if ready to merge: not draft, CI passed, mergeable
 		if !status.Draft && status.CIStatus == "success" && status.Mergeable {
-			log.Printf("PR #%d is ready to merge!", prNumber)
+			log.Printf("PR #%d is ready to merge!", pr.Number)
 
-			commitMsg := fmt.Sprintf("Merge PR #%d: automated content expansion", prNumber)
-			if err := a.gh.MergePR(prNumber, commitMsg); err != nil {
-				return fmt.Errorf("failed to merge PR #%d: %w", prNumber, err)
+			commitMsg := fmt.Sprintf("Merge PR #%d: automated content expansion", pr.Number)
+			if err := a.gh.MergePR(pr.Number, commitMsg); err != nil {
+				log.Printf("Failed to merge PR #%d: %v", pr.Number, err)
+				continue
 			}
-			log.Printf("Successfully merged PR #%d", prNumber)
+			log.Printf("Successfully merged PR #%d", pr.Number)
+			mergedCount++
 
-			// Close the tracking issue
-			if err := a.gh.CloseIssue(issueNumber); err != nil {
-				log.Printf("Warning: failed to close issue #%d: %v", issueNumber, err)
-			} else {
-				log.Printf("Closed tracking issue #%d", issueNumber)
+			// Close the tracking issues
+			for _, issueNum := range pr.IssueRefs {
+				if err := a.gh.CloseIssue(issueNum); err != nil {
+					log.Printf("Warning: failed to close issue #%d: %v", issueNum, err)
+				} else {
+					log.Printf("Closed tracking issue #%d", issueNum)
+				}
 			}
-
-			return nil
+		} else if status.CIStatus == "failure" {
+			log.Printf("PR #%d has failed CI - needs manual attention", pr.Number)
+		} else if status.Draft {
+			log.Printf("PR #%d is still a draft - waiting for Encyclopaedist", pr.Number)
+		} else if status.CIStatus == "pending" {
+			log.Printf("PR #%d CI is still running", pr.Number)
 		}
-
-		// If CI failed, report and exit
-		if status.CIStatus == "failure" {
-			errMsg := fmt.Sprintf("CI failed for PR #%d - manual intervention required", prNumber)
-			if err := a.gh.CommentOnPR(prNumber, "⚠️ CI checks failed. Please review and fix manually."); err != nil {
-				log.Printf("Warning: failed to comment on PR: %v", err)
-			}
-			return fmt.Errorf(errMsg)
-		}
-
-		log.Printf("PR #%d not ready yet, waiting %v...", prNumber, pollInterval)
-		time.Sleep(pollInterval)
 	}
+
+	if mergedCount > 0 {
+		log.Printf("Merged %d PRs this run", mergedCount)
+	}
+
+	return nil
 }
 
 // invokeEncyclopaedist uses gh CLI to trigger the Encyclopaedist Copilot agent

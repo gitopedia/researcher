@@ -386,3 +386,51 @@ func (c *Client) CloseIssue(issueNumber int) error {
 	_, _, err := c.client.Issues.Edit(c.ctx, c.owner, c.repo, issueNumber, req)
 	return err
 }
+
+func (c *Client) ListOpenPRs() ([]*PRInfo, error) {
+	opts := &github.PullRequestListOptions{
+		State: "open",
+	}
+	prs, _, err := c.client.PullRequests.List(c.ctx, c.owner, c.repo, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*PRInfo
+	for _, pr := range prs {
+		info := &PRInfo{
+			Number: pr.GetNumber(),
+			Title:  pr.GetTitle(),
+			Body:   pr.GetBody(),
+			Draft:  pr.GetDraft(),
+		}
+		
+		// Extract issue references from body (e.g., "#123", "Closes #45")
+		info.IssueRefs = extractIssueRefs(pr.GetBody())
+		
+		result = append(result, info)
+	}
+	return result, nil
+}
+
+// extractIssueRefs finds issue numbers referenced in text (e.g., #123, Closes #45)
+func extractIssueRefs(text string) []int {
+	var refs []int
+	// Simple regex-free parsing for #NUMBER patterns
+	for i := 0; i < len(text); i++ {
+		if text[i] == '#' && i+1 < len(text) {
+			// Extract the number after #
+			j := i + 1
+			for j < len(text) && text[j] >= '0' && text[j] <= '9' {
+				j++
+			}
+			if j > i+1 {
+				numStr := text[i+1 : j]
+				if num, err := strconv.Atoi(numStr); err == nil && num > 0 {
+					refs = append(refs, num)
+				}
+			}
+		}
+	}
+	return refs
+}

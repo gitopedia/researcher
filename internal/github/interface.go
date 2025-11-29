@@ -30,6 +30,18 @@ type GitHubClient interface {
 	MergePR(prNumber int, commitMessage string) error
 	CommentOnPR(prNumber int, body string) error
 	CloseIssue(issueNumber int) error
+	
+	// PR listing
+	ListOpenPRs() ([]*PRInfo, error)
+}
+
+// PRInfo contains basic info about a PR
+type PRInfo struct {
+	Number    int
+	Title     string
+	Body      string
+	Draft     bool
+	IssueRefs []int // Issue numbers referenced in the PR body
 }
 
 // Ensure Client implements GitHubClient
