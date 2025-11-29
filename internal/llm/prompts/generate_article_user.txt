@@ -37,10 +37,13 @@ Write a comprehensive, in-depth encyclopedia article about "{{.Topic}}".
 - Use concrete facts, dates, examples, and, where relevant, statistics from the context.
 - Connect sections logically so the article reads as a coherent whole.
 
-**Citations**
-- Use Markdown footnotes like [^1], [^2] that refer to the numbered sources in the context.
-- Place citations near the specific facts or claims they support.
-- Do NOT add a manual "References" section; the system will append one.
+**Citations (CRITICAL)**
+- Use ONLY inline footnote markers like [^1], [^2], [^3] etc. to cite facts from the numbered sources in the research context.
+- The numbers correspond to the [1], [2], [3] etc. source numbers in the Research Context above.
+- Place citation markers near the specific facts or claims they support (e.g., "AI ethics emerged in the 1950s[^1]").
+- DO NOT include a References or Bibliography section at the end. The system automatically appends one.
+- DO NOT define footnotes like "[^1]: some reference". Only use the inline markers [^1], [^2], etc.
+- NEVER invent or hallucinate references. Only cite sources that appear in the Research Context.
 
 **Style**
 - Neutral, objective, encyclopedic tone.

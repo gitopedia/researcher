@@ -53,31 +53,27 @@ func NewClient() (*Client, error) {
 		baseUrl = "http://localhost:11434/v1"
 	}
 
-	// Global model configuration
-	// LLM_MODEL_FAST: smaller/faster model (JSON conversion, utility tasks)
-	// LLM_MODEL_DETAILED: larger/more capable model (article & summarization)
-	fastModel := os.Getenv("LLM_MODEL_FAST")
-	detailedModel := os.Getenv("LLM_MODEL_DETAILED")
-
-	// Backwards compatibility: fall back to legacy OPENAI_MODEL if present
-	if fastModel == "" && detailedModel == "" {
-		if legacy := os.Getenv("OPENAI_MODEL"); legacy != "" {
-			fastModel = legacy
+	// Model configuration - single model for all tasks
+	model := os.Getenv("LLM_MODEL")
+	if model == "" {
+		// Backwards compatibility
+		if legacy := os.Getenv("LLM_MODEL_DETAILED"); legacy != "" {
+			model = legacy
+		} else if legacy := os.Getenv("LLM_MODEL_FAST"); legacy != "" {
+			model = legacy
+		} else if legacy := os.Getenv("OPENAI_MODEL"); legacy != "" {
+			model = legacy
+		} else {
+			model = "qwen3:14b"
 		}
 	}
-	if fastModel == "" {
-		fastModel = "gemma3:12b"
-	}
-	if detailedModel == "" {
-		detailedModel = fastModel
-	}
 
-	// Per-task model configuration (with fallback to fast/detailed)
-	modelGenerateArticle := getEnvOrDefault("LLM_MODEL_GENERATE_ARTICLE", detailedModel)
-	modelExtractEntities := getEnvOrDefault("LLM_MODEL_EXTRACT_ENTITIES", fastModel)
-	modelSuggestTopics := getEnvOrDefault("LLM_MODEL_SUGGEST_TOPICS", fastModel)
-	modelSummarizePlain := getEnvOrDefault("LLM_MODEL_SUMMARIZE_PLAIN", detailedModel)
-	modelSummarizeJSON := getEnvOrDefault("LLM_MODEL_SUMMARIZE_JSON", fastModel)
+	// Use the same model for all tasks
+	modelGenerateArticle := model
+	modelExtractEntities := model
+	modelSuggestTopics := model
+	modelSummarizePlain := model
+	modelSummarizeJSON := model
 
 	config := openai.DefaultConfig(apiKey)
 	config.BaseURL = baseUrl
@@ -310,12 +306,73 @@ func (c *Client) SuggestTopics(ctx context.Context, category string, existingTop
 
 // SummarizeSource compresses a single source page into a focused summary and
 // decides whether it is relevant enough to include.
-// It now uses a two-step process:
-//  1) Plain-text summarization with structured headings/bullets.
-//  2) JSON conversion (relevance + reason + language + topics) without changing the text.
+//
+// Uses a code-based filtering approach that preserves more content:
+//  1) Code-based prefilter (removes web junk, keeps all content)
+//  2) Code-based formatting (converts to bullet points)
+//  3) Code-based topic extraction (from headings/structure)
+//
+// The LLM is NOT used for summarization to avoid content loss with smaller models.
 func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error) {
+	// Check if we should use the old LLM-based approach (for backwards compatibility)
+	if os.Getenv("USE_LLM_SUMMARIZATION") == "true" {
+		return c.summarizeSourceLLM(ctx, topic, urlStr, content)
+	}
+
+	// New code-based approach
+	log.Printf("Phase 1 Step 1: Starting code-based prefilter for %s", urlStr)
+
+	// Step 1: Code-based prefiltering
+	filtered := PreFilterContent(content)
+	filteredWordCount := len(strings.Fields(filtered))
+
+	log.Printf("Phase 1 Step 1: Prefilter complete - %d chars → %d chars (%d words)",
+		len(content), len(filtered), filteredWordCount)
+
+	// Check if content is too short after filtering (likely junk page)
+	if filteredWordCount < 50 {
+		log.Printf("Phase 1 Step 1: Content too short after filtering (%d words), marking as NOT_RELEVANT", filteredWordCount)
+		return SourceSummary{
+			Model:       "code-prefilter",
+			Language:    detectLanguage(content),
+			Relevant:    false,
+			Reason:      fmt.Sprintf("Content too short after filtering (%d words)", filteredWordCount),
+			Summary:     "",
+			Raw:         filtered,
+			Step1Output: filtered,
+		}, nil
+	}
+
+	// Step 2: Code-based formatting
+	log.Printf("Phase 1 Step 2: Starting code-based formatting")
+	formatted := FormatContent(filtered, topic)
+	formattedWordCount := len(strings.Fields(formatted))
+
+	log.Printf("Phase 1 Step 2: Formatting complete - %d words", formattedWordCount)
+
+	// Step 3: Code-based topic extraction
+	topics := ExtractTopicsFromContent(formatted)
+	log.Printf("Phase 1 Step 3: Extracted %d topics from content structure", len(topics))
+
+	// Build the summary result
+	summary := SourceSummary{
+		Model:       "code-prefilter",
+		Language:    detectLanguage(content),
+		Relevant:    true,
+		Reason:      fmt.Sprintf("Content about %s (%d words)", topic, formattedWordCount),
+		Summary:     formatted,
+		Raw:         formatted,
+		Step1Output: filtered, // Raw filtered content before formatting
+	}
+
+	return summary, nil
+}
+
+// summarizeSourceLLM is the old LLM-based approach, kept for backwards compatibility.
+// Enable by setting USE_LLM_SUMMARIZATION=true
+func (c *Client) summarizeSourceLLM(ctx context.Context, topic, urlStr, content string) (SourceSummary, error) {
 	// Stage 1: plain-text summarization with headings and bullets
-	log.Printf("Stage 1: Starting plain-text summarization (model: %s) for %s", c.modelSummarizePlain, urlStr)
+	log.Printf("Stage 1: Starting LLM plain-text summarization (model: %s) for %s", c.modelSummarizePlain, urlStr)
 	var systemBuf bytes.Buffer
 	if err := c.summarizeSourceSystemTemplate.Execute(&systemBuf, nil); err != nil {
 		return SourceSummary{}, fmt.Errorf("failed to execute summarize system template: %w", err)
@@ -345,7 +402,7 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 					Content: userBuf.String(),
 				},
 			},
-			Temperature: 0.3, // allow some variation while remaining stable
+			Temperature: 0.3,
 		},
 	)
 	if err != nil {
@@ -353,7 +410,7 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	}
 
 	plain := strings.TrimSpace(resp.Choices[0].Message.Content)
-	log.Printf("Stage 1: Completed plain-text summarization (model: %s), output length: %d chars", c.modelSummarizePlain, len(plain))
+	log.Printf("Stage 1: Completed LLM plain-text summarization (model: %s), output length: %d chars", c.modelSummarizePlain, len(plain))
 
 	summary := SourceSummary{
 		Model:       c.modelSummarizePlain,
@@ -376,7 +433,6 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	log.Printf("Stage 2: Starting JSON conversion (model: %s) for %s", c.modelSummarizeJSON, urlStr)
 	var convSystemBuf bytes.Buffer
 	if err := c.convertSummarySystemTemplate.Execute(&convSystemBuf, nil); err != nil {
-		// Fallback: return the plain summary marked as relevant.
 		summary.Relevant = true
 		summary.Reason = "Failed to execute JSON conversion system prompt"
 		summary.Summary = plain
@@ -408,11 +464,10 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 					Content: convUserBuf.String(),
 				},
 			},
-			Temperature: 0.0, // deterministic JSON
+			Temperature: 0.0,
 		},
 	)
 	if err != nil {
-		// Fallback: return plain summary without JSON enrichment.
 		summary.Relevant = true
 		summary.Reason = fmt.Sprintf("JSON conversion request failed: %v", err)
 		summary.Summary = plain
@@ -420,7 +475,7 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	}
 
 	rawJSON := strings.TrimSpace(resp2.Choices[0].Message.Content)
-	summary.Raw = rawJSON // Step 2 output (JSON)
+	summary.Raw = rawJSON
 
 	jsonStr := extractJSONObject(rawJSON)
 	var converted struct {
@@ -432,7 +487,6 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &converted); err != nil {
-		// Fallback: keep plain summary but surface the error for logging.
 		summary.Relevant = true
 		summary.Reason = fmt.Sprintf("failed to parse JSON conversion: %v", err)
 		summary.Summary = plain

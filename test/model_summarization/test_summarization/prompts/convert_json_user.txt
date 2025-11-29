@@ -1,5 +1,0 @@
-Convert this summary into JSON format. Copy the content exactly - do not modify it.
-
-Summary to convert:
-{{.Content}}
-

@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/gitopedia/researcher/internal/github"
+	"github.com/gitopedia/researcher/internal/logging"
 	"github.com/joho/godotenv"
 )
 
@@ -22,6 +23,9 @@ var categories = []string{
 }
 
 func main() {
+	// Initialize structured, colorized logging for this command as well.
+	logging.Init()
+
 	// Load config/base.env first (base configuration), then .env (user overrides)
 	if err := godotenv.Load("config/base.env"); err != nil {
 		log.Println("config/base.env not found, using defaults and environment variables")

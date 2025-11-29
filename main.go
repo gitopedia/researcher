@@ -8,10 +8,15 @@ import (
 	"syscall"
 
 	"github.com/gitopedia/researcher/internal/agent"
+	"github.com/gitopedia/researcher/internal/logging"
 	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Initialize structured, colorized logging using Go's standard library slog,
+	// and route the standard log package through it.
+	logging.Init()
+
 	// Load config/base.env first (base configuration), then .env (user overrides)
 	// config/base.env contains all default settings; .env only needs to override specific values
 	if err := godotenv.Load("config/base.env"); err != nil {

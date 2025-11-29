@@ -574,12 +574,6 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nSummary: %s\n\n", processedCount, t.result.Title, t.result.Href, summary.Summary)
 		references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", processedCount, t.result.Title, t.result.Href))
 
-		// Stop Phase 1 if we've reached the target number of sources (PHASE1_TARGET_SOURCES)
-		if processedCount >= limit {
-			log.Printf("Reached Phase 1 target of %d summaries, stopping source processing", limit)
-			break
-		}
-
 		// Save source summary (compressed, relevant-only)
 		if u, err := url.Parse(t.result.Href); err == nil {
 			domain := strings.ReplaceAll(u.Host, ".", "-")
@@ -613,6 +607,12 @@ summary: "Summarized source material for %s"
 			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+t.result.Title, sourceContent); err != nil {
 				log.Printf("Failed to save source %s: %v", sourcePath, err)
 			}
+		}
+
+		// Stop Phase 1 if we've reached the target number of sources (PHASE1_TARGET_SOURCES)
+		if processedCount >= limit {
+			log.Printf("Reached Phase 1 target of %d summaries, stopping source processing", limit)
+			break
 		}
 	}
 
