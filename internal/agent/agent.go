@@ -592,6 +592,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 
 			sourceContent := fmt.Sprintf(`---
 id: %s
+slug: "%s--%s-%d"
 title: "Source: %s"
 url: "%s"
 type: source
@@ -602,7 +603,7 @@ summary: "Summarized source material for %s"
 %s%s---
 
 %s
-`, sourceID, t.result.Title, t.result.Href, slug, time.Now().Format("2006-01-02"), topic, modelField, languageField, summary.Summary)
+`, sourceID, slug, domain, processedCount, t.result.Title, t.result.Href, slug, time.Now().Format("2006-01-02"), topic, modelField, languageField, summary.Summary)
 
 			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+t.result.Title, sourceContent); err != nil {
 				log.Printf("Failed to save source %s: %v", sourcePath, err)
