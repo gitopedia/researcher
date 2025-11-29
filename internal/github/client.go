@@ -17,43 +17,70 @@ import (
 )
 
 type Client struct {
-	client *github.Client
-	ctx    context.Context
-	owner  string
-	repo   string
+	client      *github.Client
+	ctx         context.Context
+	owner       string
+	repo        string
+	tokenExpiry time.Time
+	useAppAuth  bool
 }
 
 func NewClient(ctx context.Context) (*Client, error) {
+	c := &Client{
+		ctx:   ctx,
+		owner: "gitopedia", // Default, can be made configurable
+		repo:  "gitopedia",
+	}
+	
+	// Check if using GitHub App auth
+	c.useAppAuth = os.Getenv("GITHUB_APP_ID") != ""
+	
+	if err := c.refreshClient(); err != nil {
+		return nil, err
+	}
+	
+	return c, nil
+}
+
+// refreshClient creates a new authenticated GitHub client
+func (c *Client) refreshClient() error {
 	var token string
 	var err error
 
 	// Try GitHub App authentication first
 	appID := os.Getenv("GITHUB_APP_ID")
 	if appID != "" {
-		token, err = getAppInstallationToken(ctx, appID)
+		token, err = getAppInstallationToken(c.ctx, appID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get app installation token: %w", err)
+			return fmt.Errorf("failed to get app installation token: %w", err)
 		}
+		// GitHub App tokens expire after 1 hour, refresh after 50 minutes
+		c.tokenExpiry = time.Now().Add(50 * time.Minute)
 	} else {
 		// Fall back to PAT
 		token = os.Getenv("GITHUB_TOKEN")
 		if token == "" {
-			return nil, fmt.Errorf("either GITHUB_APP_ID or GITHUB_TOKEN environment variable must be set")
+			return fmt.Errorf("either GITHUB_APP_ID or GITHUB_TOKEN environment variable must be set")
 		}
+		// PATs don't expire during runtime
+		c.tokenExpiry = time.Now().Add(24 * time.Hour)
 	}
 
 	ts := oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: token},
 	)
-	tc := oauth2.NewClient(ctx, ts)
-	client := github.NewClient(tc)
+	tc := oauth2.NewClient(c.ctx, ts)
+	c.client = github.NewClient(tc)
+	
+	return nil
+}
 
-	return &Client{
-		client: client,
-		ctx:    ctx,
-		owner:  "gitopedia", // Default, can be made configurable
-		repo:   "gitopedia",
-	}, nil
+// ensureValidToken refreshes the token if it's expired or about to expire
+func (c *Client) ensureValidToken() error {
+	if c.useAppAuth && time.Now().After(c.tokenExpiry) {
+		return c.refreshClient()
+	}
+	return nil
 }
 
 func getAppInstallationToken(ctx context.Context, appID string) (string, error) {
@@ -190,6 +217,10 @@ func fetchInstallationToken(ctx context.Context, jwtToken, installID string) (st
 }
 
 func (c *Client) GetResearchRequests() ([]*github.Issue, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	}
+	
 	opts := &github.IssueListByRepoOptions{
 		State:  "open",
 		Labels: []string{"research category"},
@@ -410,6 +441,10 @@ func (c *Client) CloseIssue(issueNumber int) error {
 }
 
 func (c *Client) ListOpenPRs() ([]*PRInfo, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	}
+	
 	opts := &github.PullRequestListOptions{
 		State: "open",
 	}
