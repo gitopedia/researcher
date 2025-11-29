@@ -112,9 +112,9 @@ func (m *Manager) createEntity(typeKey, name string) (string, EntityEntry) {
 	// ID format: type:slug-ulid (to ensure uniqueness and readability)
 	// e.g. org:openai-01H...
 	slug := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
-	// keep slug reasonable length
-	if len(slug) > 30 {
-		slug = slug[:30]
+	// keep slug reasonable length (long enough to avoid collisions)
+	if len(slug) > 200 {
+		slug = slug[:200]
 	}
 	// Using a short suffix from ULID might be enough, or full ULID?
 	// Roadmap examples: org:openai. If we want to avoid collisions automatically, appending ULID is safer.
