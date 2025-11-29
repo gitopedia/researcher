@@ -5,7 +5,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/gitopedia/researcher/internal/agent"
 	"github.com/gitopedia/researcher/internal/logging"
@@ -28,18 +31,39 @@ func main() {
 	}
 
 	log.Println("Starting Researcher Agent (Go)...")
+	log.Println("Press Ctrl+C to gracefully shutdown (will wait for current task to complete)")
 
 	// Create a context that can be cancelled with signals (Ctrl+C)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+
+	// Track if we're currently running a task
+	var taskMu sync.Mutex
+	taskRunning := false
+	shutdownRequested := false
 
 	// Handle SIGINT (Ctrl+C) and SIGTERM
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		sig := <-sigChan
-		log.Printf("Received signal: %v, cancelling...", sig)
-		cancel()
+		taskMu.Lock()
+		if taskRunning {
+			log.Printf("Received %v - waiting for current task to complete...", sig)
+			log.Println("(Press Ctrl+C again to force quit)")
+			shutdownRequested = true
+			taskMu.Unlock()
+			
+			// Wait for second signal to force quit
+			sig = <-sigChan
+			log.Printf("Received %v again - forcing shutdown", sig)
+			cancel()
+			os.Exit(130)
+		} else {
+			log.Printf("Received %v - shutting down", sig)
+			shutdownRequested = true
+			taskMu.Unlock()
+			cancel()
+		}
 	}()
 
 	a, err := agent.NewAgent(ctx)
@@ -47,12 +71,64 @@ func main() {
 		log.Fatalf("Failed to initialize agent: %v", err)
 	}
 
-	if err := a.Run(ctx); err != nil {
-		if err == context.Canceled {
-			log.Println("Agent run cancelled by user")
-			os.Exit(130) // Standard exit code for SIGINT
-		} else {
-			log.Fatalf("Agent run failed: %v", err)
+	// Loop interval configuration
+	loopInterval := 60 * time.Second
+	if envVal := os.Getenv("LOOP_INTERVAL_SECONDS"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			loopInterval = time.Duration(v) * time.Second
 		}
 	}
+
+	// Main loop
+	for {
+		// Check if shutdown was requested
+		taskMu.Lock()
+		if shutdownRequested {
+			taskMu.Unlock()
+			log.Println("Shutdown requested, exiting loop")
+			break
+		}
+		taskRunning = true
+		taskMu.Unlock()
+
+		// Run one iteration
+		err := a.Run(ctx)
+		
+		taskMu.Lock()
+		taskRunning = false
+		shouldExit := shutdownRequested
+		taskMu.Unlock()
+
+		if err != nil {
+			if err == context.Canceled {
+				log.Println("Agent run cancelled by user")
+				break
+			}
+			log.Printf("Agent run error: %v", err)
+			// Continue to next iteration after error
+		}
+
+		if shouldExit {
+			log.Println("Shutdown requested, exiting after task completion")
+			break
+		}
+
+		log.Printf("Sleeping for %v before next run...", loopInterval)
+		
+		// Sleep with cancellation check
+		select {
+		case <-ctx.Done():
+			log.Println("Context cancelled during sleep")
+			break
+		case <-time.After(loopInterval):
+			// Continue to next iteration
+		}
+		
+		// Check context after sleep
+		if ctx.Err() != nil {
+			break
+		}
+	}
+
+	log.Println("Researcher Agent stopped gracefully")
 }
