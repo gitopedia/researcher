@@ -158,30 +158,40 @@ func (h *ColorHandler) WithGroup(name string) slog.Handler {
 	}
 }
 
-// Init configures slog as the default logger with a colorizing text handler
-// and routes the standard library log package through it as well.
-//
-// After calling Init, any use of:
-//   - slog.Xxx(...)
-//   - log.Printf / log.Println / log.Fatal
-// will go through the same colored handler.
+// Init configures logging with colored output.
+// Colors are always written (for file tailing) unless NO_COLOR is set.
 func Init() {
-	// Create color handler that writes directly to stderr with ANSI colors.
 	colorHandler := NewColorHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
-		// You can turn on source locations if desired:
-		// AddSource: true,
 	})
 
-	// Set slog's default logger.
+	// Set slog's default logger
 	logger := slog.New(colorHandler)
 	slog.SetDefault(logger)
 
-	// Route the standard library logger through slog as well, so existing
-	// log.Printf / log.Println calls benefit from the same handler and colors.
-	std := slog.NewLogLogger(colorHandler, slog.LevelInfo)
+	// Route standard log package through slog
 	stdlog.SetFlags(0)
-	stdlog.SetOutput(std.Writer())
+	stdlog.SetOutput(slogWriter{handler: colorHandler})
+}
+
+// slogWriter adapts log.Printf calls to go through our ColorHandler
+type slogWriter struct {
+	handler *ColorHandler
+}
+
+func (w slogWriter) Write(p []byte) (n int, err error) {
+	// Trim trailing newline since Handle adds one
+	msg := string(p)
+	if len(msg) > 0 && msg[len(msg)-1] == '\n' {
+		msg = msg[:len(msg)-1]
+	}
+	
+	r := slog.NewRecord(time.Now(), slog.LevelInfo, msg, 0)
+	err = w.handler.Handle(context.Background(), r)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 

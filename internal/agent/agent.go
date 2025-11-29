@@ -574,11 +574,47 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nSummary: %s\n\n", processedCount, t.result.Title, t.result.Href, summary.Summary)
 		references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", processedCount, t.result.Title, t.result.Href))
 
-		// Save source summary (compressed, relevant-only)
+		// Save source summary with extracted entities
 		if u, err := url.Parse(t.result.Href); err == nil {
 			domain := strings.ReplaceAll(u.Host, ".", "-")
 			sourceID := ulid.Make().String()
 			sourcePath := fmt.Sprintf("Compendium/_incoming/sources/%s--%s-%d.md", slug, domain, processedCount)
+
+			// Extract entities from source content for knowledge base ingestion
+			sourceEntities, err := a.llm.ExtractEntities(ctx, summary.Summary)
+			if err != nil {
+				log.Printf("Warning: entity extraction failed for source: %v", err)
+				sourceEntities = []llm.ExtractedEntity{}
+			}
+
+			// Add the parent topic as an entity
+			sourceEntities = append(sourceEntities, llm.ExtractedEntity{Name: topic, Type: llm.Topic})
+
+			// Resolve entities to authority IDs
+			resolvedSource, err := authMgr.ResolveEntities(sourceEntities)
+			if err != nil {
+				log.Printf("Warning: entity resolution failed for source: %v", err)
+				resolvedSource = make(map[string][]string)
+			}
+
+			// Build tags from topics
+			var sourceTags []string
+			if topicIDs, ok := resolvedSource["topic"]; ok {
+				sourceTags = topicIDs
+			}
+			sourceTagsStr := fmt.Sprintf("[\"%s\"]", strings.Join(sourceTags, "\", \""))
+
+			// Build facets block for people, orgs, places
+			sourceFacets := ""
+			if ids, ok := resolvedSource["person"]; ok && len(ids) > 0 {
+				sourceFacets += fmt.Sprintf("people: [\"%s\"]\n", strings.Join(ids, "\", \""))
+			}
+			if ids, ok := resolvedSource["org"]; ok && len(ids) > 0 {
+				sourceFacets += fmt.Sprintf("orgs: [\"%s\"]\n", strings.Join(ids, "\", \""))
+			}
+			if ids, ok := resolvedSource["place"]; ok && len(ids) > 0 {
+				sourceFacets += fmt.Sprintf("places: [\"%s\"]\n", strings.Join(ids, "\", \""))
+			}
 
 			// Build front matter with optional fields
 			modelField := ""
@@ -598,12 +634,12 @@ url: "%s"
 type: source
 related_article: "%s"
 created: %s
-tags: ["Source"]
-summary: "Summarized source material for %s"
+tags: %s
+%ssummary: "Summarized source material for %s"
 %s%s---
 
 %s
-`, sourceID, slug, domain, processedCount, t.result.Title, t.result.Href, slug, time.Now().Format("2006-01-02"), topic, modelField, languageField, summary.Summary)
+`, sourceID, slug, domain, processedCount, t.result.Title, t.result.Href, slug, time.Now().Format("2006-01-02"), sourceTagsStr, sourceFacets, topic, modelField, languageField, summary.Summary)
 
 			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+t.result.Title, sourceContent); err != nil {
 				log.Printf("Failed to save source %s: %v", sourcePath, err)

@@ -1,11 +1,27 @@
-Analyze the following article text and extract key entities.
-Return the result as a valid JSON array of objects.
-Each object should have:
-- "name": The exact name of the entity as mentioned.
-- "type": One of "person", "org", "place", "topic".
+Analyze the following text and extract key entities for a knowledge base.
+
+Return a valid JSON array of objects. Each object must have:
+- "name": The entity name WITH disambiguation qualifier if needed (e.g., "John Smith (physicist)")
+- "type": One of "person", "org", "place", "topic"
+
+**Rules:**
+1. Only extract entities significant enough to appear in multiple articles
+2. Add qualifiers in parentheses for ambiguous names (profession, location, era, etc.)
+3. Use the most specific, commonly-known name
+4. Skip generic terms that aren't specific entities
+
+**Examples of good extractions:**
+- {"name": "Richard Thaler (economist)", "type": "person"}
+- {"name": "Cambridge (Massachusetts)", "type": "place"}
+- {"name": "Apple Inc.", "type": "org"}
+- {"name": "behavioral economics", "type": "topic"}
+
+**Examples of bad extractions:**
+- {"name": "John Smith", "type": "person"} — too ambiguous, needs qualifier
+- {"name": "the university", "type": "org"} — too generic
+- {"name": "research", "type": "topic"} — too generic
 
 **Text:**
 {{.Content}}
 
 **JSON Output:**
-

@@ -17,14 +17,14 @@ func main() {
 	// and route the standard log package through it.
 	logging.Init()
 
-	// Load config/base.env first (base configuration), then .env (user overrides)
-	// config/base.env contains all default settings; .env only needs to override specific values
+	// Load config/base.env first (base configuration), then config/.env (user overrides)
+	// config/base.env contains all default settings; config/.env only needs to override specific values
 	if err := godotenv.Load("config/base.env"); err != nil {
 		log.Println("config/base.env not found, using defaults and environment variables")
 	}
-	// .env overrides values from config/base.env (Overload forces override even if variable already exists)
-	if err := godotenv.Overload(".env"); err != nil {
-		log.Println(".env not found, using config/base.env defaults only")
+	// config/.env overrides values from config/base.env (Overload forces override even if variable already exists)
+	if err := godotenv.Overload("config/.env"); err != nil {
+		log.Println("config/.env not found, using config/base.env defaults only")
 	}
 
 	log.Println("Starting Researcher Agent (Go)...")

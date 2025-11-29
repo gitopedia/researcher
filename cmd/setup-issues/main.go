@@ -26,13 +26,13 @@ func main() {
 	// Initialize structured, colorized logging for this command as well.
 	logging.Init()
 
-	// Load config/base.env first (base configuration), then .env (user overrides)
+	// Load config/base.env first (base configuration), then config/.env (user overrides)
 	if err := godotenv.Load("config/base.env"); err != nil {
 		log.Println("config/base.env not found, using defaults and environment variables")
 	}
-	// .env overrides values from config/base.env (Overload forces override even if variable already exists)
-	if err := godotenv.Overload(".env"); err != nil {
-		log.Println(".env not found, using config/base.env defaults only")
+	// config/.env overrides values from config/base.env (Overload forces override even if variable already exists)
+	if err := godotenv.Overload("config/.env"); err != nil {
+		log.Println("config/.env not found, using config/base.env defaults only")
 	}
 
 	ctx := context.Background()
