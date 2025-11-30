@@ -94,9 +94,20 @@ func (a *Agent) organizeArticles(ctx context.Context, branchName string, prNumbe
 			continue
 		}
 
+		// Check context before LLM call
+		if ctx.Err() != nil {
+			log.Printf("Context cancelled, stopping organization")
+			return ctx.Err()
+		}
+
 		// Use LLM to categorize
 		category, err := a.llm.CategorizeArticle(ctx, frontMatter.Title, frontMatter.Tags, body, existingCategories)
 		if err != nil {
+			// Check if it's a context cancellation
+			if ctx.Err() != nil {
+				log.Printf("Context cancelled during categorization")
+				return ctx.Err()
+			}
 			log.Printf("Failed to categorize %s: %v", articlePath, err)
 			continue
 		}

@@ -47,21 +47,22 @@ func main() {
 	go func() {
 		sig := <-sigChan
 		taskMu.Lock()
-		if taskRunning {
-			log.Printf("Received %v - waiting for current task to complete...", sig)
-			log.Println("(Press Ctrl+C again to force quit)")
-			shutdownRequested = true
-			taskMu.Unlock()
+		shutdownRequested = true
+		running := taskRunning
+		taskMu.Unlock()
+		
+		if running {
+			log.Printf("Received %v - cancelling after current LLM inference completes...", sig)
+			log.Println("(Press Ctrl+C again to force quit immediately)")
+			// Cancel context so operations see the shutdown request
+			cancel()
 			
 			// Wait for second signal to force quit
 			sig = <-sigChan
-			log.Printf("Received %v again - forcing shutdown", sig)
-			cancel()
+			log.Printf("Received %v again - forcing immediate shutdown", sig)
 			os.Exit(130)
 		} else {
 			log.Printf("Received %v - shutting down", sig)
-			shutdownRequested = true
-			taskMu.Unlock()
 			cancel()
 		}
 	}()
