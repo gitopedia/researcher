@@ -28,6 +28,7 @@ type GitHubClient interface {
 	// PR monitoring and management
 	GetPRStatus(prNumber int) (*PRStatus, error)
 	MergePR(prNumber int, commitMessage string) error
+	ClosePR(prNumber int) error
 	CommentOnPR(prNumber int, body string) error
 	CloseIssue(issueNumber int) error
 	ReopenIssue(issueNumber int) error

@@ -482,6 +482,17 @@ func (c *Client) MergePR(prNumber int, commitMessage string) error {
 	return err
 }
 
+func (c *Client) ClosePR(prNumber int) error {
+	if err := c.ensureValidToken(); err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+	state := "closed"
+	_, _, err := c.client.PullRequests.Edit(c.ctx, c.owner, c.repo, prNumber, &github.PullRequest{
+		State: &state,
+	})
+	return err
+}
+
 func (c *Client) CommentOnPR(prNumber int, body string) error {
 	// PRs are issues in GitHub's API
 	return c.CommentOnIssue(prNumber, body)
@@ -761,6 +772,62 @@ func (c *Client) ResolveAuthorityConflicts(headBranch string) error {
 	}
 
 	log.Printf("Resolved conflicts in %d files", resolvedCount)
+	
+	// After updating files, try to merge main into the PR branch again
+	// This creates a proper merge commit with the resolved content
+	log.Printf("Attempting to create merge commit for branch %s...", headBranch)
+	if err := c.MergeMainIntoBranch(headBranch); err != nil {
+		log.Printf("Could not create merge commit: %v (this is expected if files still differ)", err)
+	} else {
+		log.Printf("Successfully merged main into %s", headBranch)
+	}
+	
+	return nil
+}
+
+// MergeMainIntoBranch creates a merge commit that merges main into the specified branch.
+// This properly resolves the git history so the PR becomes mergeable.
+func (c *Client) MergeMainIntoBranch(branch string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+	
+	// Get the SHA of main's HEAD
+	mainRef, _, err := c.client.Git.GetRef(c.ctx, c.owner, c.repo, "heads/main")
+	if err != nil {
+		return fmt.Errorf("failed to get main ref: %w", err)
+	}
+	mainSHA := mainRef.Object.GetSHA()
+	
+	// Get the SHA of the branch's HEAD
+	branchRef, _, err := c.client.Git.GetRef(c.ctx, c.owner, c.repo, "heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("failed to get branch ref: %w", err)
+	}
+	branchSHA := branchRef.Object.GetSHA()
+	
+	// Try to create a merge using the repos merge API
+	// This is like running "git merge main" in the PR branch
+	mergeReq := &github.RepositoryMergeRequest{
+		Base:          github.String(branch),
+		Head:          github.String("main"),
+		CommitMessage: github.String("Merge main into " + branch),
+	}
+	
+	_, resp, err := c.client.Repositories.Merge(c.ctx, c.owner, c.repo, mergeReq)
+	if err != nil {
+		// Check if it's a conflict error (409)
+		if resp != nil && resp.StatusCode == 409 {
+			return fmt.Errorf("merge conflict: branches cannot be automatically merged (main=%s, branch=%s)", mainSHA[:7], branchSHA[:7])
+		}
+		// Check if already merged (204 No Content or similar)
+		if resp != nil && resp.StatusCode == 204 {
+			log.Printf("Branch %s is already up to date with main", branch)
+			return nil
+		}
+		return fmt.Errorf("merge failed: %w", err)
+	}
+	
 	return nil
 }
 
