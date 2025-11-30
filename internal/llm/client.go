@@ -630,3 +630,76 @@ func extractJSONObject(s string) string {
 	// If no matching brace found, return from start to end
 	return s[start:]
 }
+
+func (c *Client) CategorizeArticle(ctx context.Context, title string, tags []string, content string, existingCategories []string) (*ArticleCategory, error) {
+	systemPrompt := `You are an article categorization expert for an encyclopedia. Your task is to determine the best category path for an article based on its title, tags, and content.
+
+You must respond with a JSON object in this exact format:
+{
+  "category": "TopLevelCategory/Subcategory",
+  "subcategory": "",
+  "reasoning": "Brief explanation of why this category was chosen"
+}
+
+Category guidelines:
+- Technology topics → Technology/<subtopic> (e.g., Technology/AI, Technology/Programming)
+- Science topics → Science/<field> (e.g., Science/Physics, Science/Biology, Science/Chemistry)
+- History topics → History/<era-or-region> (e.g., History/Ancient, History/Modern)
+- Arts topics → Arts/<medium> (e.g., Arts/Music, Arts/Literature, Arts/Film)
+- Geography topics → Geography/<region> (e.g., Geography/Europe, Geography/Asia)
+- People/Biography → People/<field> (e.g., People/Scientists, People/Politicians)
+
+Use existing categories when appropriate. Create new subcategories only when necessary.
+The category path should be 2-3 levels deep maximum.`
+
+	userPrompt := fmt.Sprintf(`Categorize this article:
+
+Title: %s
+Tags: %s
+
+Content (first 2000 chars):
+%s
+
+Existing categories in the repository:
+%s
+
+Respond with JSON only.`, title, strings.Join(tags, ", "), truncateString(content, 2000), strings.Join(existingCategories, "\n"))
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelExtractEntities, // Use same model as entity extraction
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: systemPrompt,
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: userPrompt,
+				},
+			},
+			Temperature: 0.0, // Deterministic
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+
+	var category ArticleCategory
+	if err := json.Unmarshal([]byte(jsonStr), &category); err != nil {
+		return nil, fmt.Errorf("failed to parse category JSON: %w (input: %q)", err, jsonStr)
+	}
+
+	return &category, nil
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}

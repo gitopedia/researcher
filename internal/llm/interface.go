@@ -32,11 +32,19 @@ type SourceSummary struct {
 	Step1Output string `json:"-"`
 }
 
+// ArticleCategory represents the LLM's categorization decision for an article
+type ArticleCategory struct {
+	Category    string `json:"category"`     // e.g., "Science/Physics"
+	Subcategory string `json:"subcategory"`  // e.g., "Quantum Mechanics" (optional)
+	Reasoning   string `json:"reasoning"`    // Why this category was chosen
+}
+
 type Generator interface {
 	GenerateArticle(ctx context.Context, topic, contextData string) (string, error)
 	ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error)
 	SuggestTopics(ctx context.Context, category string, existingTopics []string) ([]string, error)
 	SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error)
+	CategorizeArticle(ctx context.Context, title string, tags []string, content string, existingCategories []string) (*ArticleCategory, error)
 }
 
 // Ensure Client implements Generator

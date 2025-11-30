@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -271,12 +270,17 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 		log.Printf("Failed to comment on issue: %v", err)
 	}
 
-	// 9. Invoke Encyclopaedist agent (non-blocking)
-	if err := a.invokeEncyclopaedist(ctx, *pr.Number); err != nil {
-		log.Printf("Warning: failed to invoke Encyclopaedist: %v", err)
+	// 9. Organize articles (move from _incoming to proper Compendium paths)
+	if err := a.organizeArticles(ctx, branchName, *pr.Number); err != nil {
+		log.Printf("Warning: failed to organize articles: %v", err)
+		// Add a comment about the failure
+		comment := fmt.Sprintf("⚠️ Article organization failed: %v\n\nPlease organize articles manually.", err)
+		if commentErr := a.gh.CommentOnPR(*pr.Number, comment); commentErr != nil {
+			log.Printf("Failed to add failure comment: %v", commentErr)
+		}
 	}
 
-	log.Printf("Research task complete. PR #%d created and Encyclopaedist invoked.", *pr.Number)
+	log.Printf("Research task complete. PR #%d created and articles organized.", *pr.Number)
 	return nil
 }
 
@@ -346,58 +350,6 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 		log.Printf("Merged %d PRs this run", mergedCount)
 	}
 
-	return nil
-}
-
-// invokeEncyclopaedist uses gh CLI to trigger the Encyclopaedist Copilot agent
-func (a *Agent) invokeEncyclopaedist(ctx context.Context, prNumber int) error {
-	log.Printf("Invoking Encyclopaedist agent for PR #%d via gh copilot CLI", prNumber)
-
-	// Build the prompt for Copilot
-	prompt := fmt.Sprintf(`You are the Encyclopaedist agent. Process PR #%d in the gitopedia/gitopedia repository.
-
-Your tasks:
-1. List all .md files in Compendium/_incoming/ (excluding sources/ subdirectory)
-2. For each article, analyze tags and content to determine the appropriate Compendium/<Category>/ path
-3. Move each article from _incoming/<slug>.md to Compendium/<Category>/<slug>.md
-4. Validate front matter has: id (ULID), title, slug, created, tags
-5. Delete any _debug/ directories if present
-6. Leave _incoming/sources/ untouched
-7. Commit changes and mark the PR ready for review
-
-Use gh CLI to checkout the PR branch and make the changes.`, prNumber)
-
-	// Use exec to run gh copilot
-	cmd := exec.CommandContext(ctx, "gh", "copilot", "suggest", "-t", "shell", prompt)
-	cmd.Dir = os.Getenv("GITOPEDIA_REPO_PATH")
-	if cmd.Dir == "" {
-		cmd.Dir = "."
-	}
-	
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Log the output for debugging
-		log.Printf("gh copilot output: %s", string(output))
-		
-		// Fallback: just add a comment with instructions
-		log.Printf("gh copilot failed, adding manual instruction comment")
-		comment := fmt.Sprintf(`🤖 **Encyclopaedist Instructions**
-
-This PR needs organization. Please run the Encyclopaedist agent manually:
-
-%s
-
-Or use Copilot Chat with the Encyclopaedist agent to process this PR.`, "```\ngh copilot suggest -t shell \"Process PR #"+fmt.Sprint(prNumber)+" as Encyclopaedist\"\n```")
-		
-		if commentErr := a.gh.CommentOnPR(prNumber, comment); commentErr != nil {
-			log.Printf("Failed to add fallback comment: %v", commentErr)
-		}
-		
-		return fmt.Errorf("gh copilot failed: %w (output: %s)", err, string(output))
-	}
-
-	log.Printf("Encyclopaedist invoked successfully for PR #%d", prNumber)
-	log.Printf("gh copilot output: %s", string(output))
 	return nil
 }
 

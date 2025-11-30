@@ -491,3 +491,118 @@ func extractIssueRefs(text string) []int {
 	}
 	return refs
 }
+
+func (c *Client) ListFilesInBranch(branch, path string) ([]string, error) {
+	tree, _, err := c.client.Git.GetTree(c.ctx, c.owner, c.repo, branch, true)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, entry := range tree.Entries {
+		if entry.GetType() == "blob" && strings.HasPrefix(entry.GetPath(), path) {
+			files = append(files, entry.GetPath())
+		}
+	}
+	return files, nil
+}
+
+func (c *Client) DeleteFile(branch, path, message, sha string) error {
+	opts := &github.RepositoryContentFileOptions{
+		Message: github.String(message),
+		SHA:     github.String(sha),
+		Branch:  github.String(branch),
+	}
+	_, _, err := c.client.Repositories.DeleteFile(c.ctx, c.owner, c.repo, path, opts)
+	return err
+}
+
+func (c *Client) MarkPRReady(prNumber int) error {
+	// GitHub API doesn't have a direct "mark ready" endpoint
+	// We need to use the GraphQL API or update the PR
+	// For now, we'll use the REST API to update the draft status
+	
+	// The REST API doesn't support changing draft status directly
+	// We need to use GraphQL mutation: markPullRequestReadyForReview
+	
+	query := `mutation($id: ID!) {
+		markPullRequestReadyForReview(input: {pullRequestId: $id}) {
+			pullRequest {
+				isDraft
+			}
+		}
+	}`
+	
+	// First, get the PR's node ID
+	pr, _, err := c.client.PullRequests.Get(c.ctx, c.owner, c.repo, prNumber)
+	if err != nil {
+		return fmt.Errorf("failed to get PR: %w", err)
+	}
+	
+	nodeID := pr.GetNodeID()
+	
+	// Execute GraphQL mutation
+	var mutation struct {
+		MarkPullRequestReadyForReview struct {
+			PullRequest struct {
+				IsDraft bool
+			}
+		} `graphql:"markPullRequestReadyForReview(input: {pullRequestId: $id})"`
+	}
+	
+	variables := map[string]interface{}{
+		"id": nodeID,
+	}
+	
+	// Use raw HTTP request for GraphQL since go-github doesn't have native GraphQL support
+	reqBody := struct {
+		Query     string                 `json:"query"`
+		Variables map[string]interface{} `json:"variables"`
+	}{
+		Query:     query,
+		Variables: variables,
+	}
+	
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal GraphQL request: %w", err)
+	}
+	
+	req, err := http.NewRequestWithContext(c.ctx, "POST", "https://api.github.com/graphql", strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return fmt.Errorf("failed to create GraphQL request: %w", err)
+	}
+	
+	// We need to get a token - extract from the client
+	// This is a bit hacky, but go-github doesn't expose the token directly
+	// We'll use the client's transport
+	req.Header.Set("Content-Type", "application/json")
+	
+	// Use the client's underlying HTTP client which has auth
+	resp, err := c.client.Client().Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute GraphQL request: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GraphQL request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+	
+	// Check for GraphQL errors
+	var graphqlResp struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	
+	body, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(body, &graphqlResp); err == nil && len(graphqlResp.Errors) > 0 {
+		return fmt.Errorf("GraphQL error: %s", graphqlResp.Errors[0].Message)
+	}
+	
+	_ = mutation // Suppress unused variable warning
+	
+	return nil
+}
