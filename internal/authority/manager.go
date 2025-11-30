@@ -3,7 +3,7 @@ package authority
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/gitopedia/researcher/internal/github"
@@ -44,7 +44,7 @@ func (m *Manager) Load(ref string) error {
 	for typeKey, path := range files {
 		content, sha, err := m.gh.GetFile(ref, path)
 		if err != nil {
-			log.Printf("Warning: could not load %s: %v. Assuming empty.", path, err)
+			slog.Warn("Could not load authority file, assuming empty", "path", path, "error", err)
 			m.data[typeKey] = []EntityEntry{}
 			continue
 		}
@@ -52,7 +52,7 @@ func (m *Manager) Load(ref string) error {
 		m.shas[typeKey] = sha
 		var entries []EntityEntry
 		if err := json.Unmarshal([]byte(content), &entries); err != nil {
-			log.Printf("Warning: could not parse %s: %v. Assuming empty.", path, err)
+			slog.Warn("Could not parse authority file, assuming empty", "path", path, "error", err)
 			m.data[typeKey] = []EntityEntry{}
 			continue
 		}
@@ -85,7 +85,7 @@ func (m *Manager) ResolveEntities(entities []llm.ExtractedEntity) (map[string][]
 			// Mark for update
 			m.updated[typeKey] = m.data[typeKey]
 			id = newID
-			log.Printf("Created new authority: %s (%s)", ent.Name, id)
+			slog.Info("Created new authority", "name", ent.Name, "id", id)
 		}
 		result[typeKey] = append(result[typeKey], id)
 	}

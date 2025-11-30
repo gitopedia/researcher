@@ -60,7 +60,7 @@ func (a *Agent) organizeArticles(ctx context.Context, branchName string, prNumbe
 	// 2. Get existing categories from Compendium
 	existingCategories, err := a.getExistingCategories(branchName)
 	if err != nil {
-		log.Printf("Warning: failed to get existing categories: %v", err)
+		slog.Warn("Failed to get existing categories", "error", err)
 		existingCategories = []string{}
 	}
 
@@ -78,14 +78,14 @@ func (a *Agent) organizeArticles(ctx context.Context, branchName string, prNumbe
 		// Read article content
 		content, sha, err := a.gh.GetFile(branchName, articlePath)
 		if err != nil {
-			log.Printf("Failed to read article %s: %v", articlePath, err)
+			slog.Error("Failed to read article", "path", articlePath, "error", err)
 			continue
 		}
 
 		// Parse front matter
 		frontMatter, body, err := parseFrontMatter(content)
 		if err != nil {
-			log.Printf("Failed to parse front matter for %s: %v", articlePath, err)
+			slog.Error("Failed to parse front matter", "path", articlePath, "error", err)
 			continue
 		}
 
@@ -109,7 +109,7 @@ func (a *Agent) organizeArticles(ctx context.Context, branchName string, prNumbe
 				log.Printf("Context cancelled during categorization")
 				return ctx.Err()
 			}
-			log.Printf("Failed to categorize %s: %v", articlePath, err)
+			slog.Error("Failed to categorize article", "path", articlePath, "error", err)
 			continue
 		}
 
@@ -150,11 +150,11 @@ func (a *Agent) organizeArticles(ctx context.Context, branchName string, prNumbe
 		for _, debugFile := range debugDirs {
 			_, sha, err := a.gh.GetFile(branchName, debugFile)
 			if err != nil {
-				log.Printf("Failed to get SHA for debug file %s: %v", debugFile, err)
+				slog.Warn("Failed to get SHA for debug file", "path", debugFile, "error", err)
 				continue
 			}
 			if err := a.gh.DeleteFile(branchName, debugFile, "Cleanup: Remove debug artifacts", sha); err != nil {
-				log.Printf("Failed to delete debug file %s: %v", debugFile, err)
+				slog.Warn("Failed to delete debug file", "path", debugFile, "error", err)
 			}
 		}
 	}
@@ -163,14 +163,14 @@ func (a *Agent) organizeArticles(ctx context.Context, branchName string, prNumbe
 	if len(organized) > 0 {
 		comment := fmt.Sprintf("📚 **Articles Organized**\n\n%s\n\n✅ Ready for review.", strings.Join(organized, "\n"))
 		if err := a.gh.CommentOnPR(prNumber, comment); err != nil {
-			log.Printf("Failed to add summary comment: %v", err)
+			slog.Warn("Failed to add summary comment", "error", err)
 		}
 	}
 
 	// 6. Mark PR as ready
 	log.Printf("Marking PR #%d as ready for review", prNumber)
 	if err := a.gh.MarkPRReady(prNumber); err != nil {
-		log.Printf("Failed to mark PR as ready: %v", err)
+		slog.Error("Failed to mark PR as ready", "pr", prNumber, "error", err)
 		// Don't fail - the PR can still be merged manually
 	}
 

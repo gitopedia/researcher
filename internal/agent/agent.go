@@ -57,7 +57,7 @@ func NewAgentWithDeps(gh github.GitHubClient, s search.Searcher, l llm.Generator
 func (a *Agent) Run(ctx context.Context) error {
 	// First, check if any PRs are ready to merge
 	if err := a.mergeReadyPRs(ctx); err != nil {
-		log.Printf("Warning: error checking/merging PRs: %v", err)
+		slog.Warn("Error checking/merging PRs", "error", err)
 	}
 
 	log.Println("Checking for research category issues...")
@@ -74,7 +74,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Get open PRs to filter out issues that already have PRs
 	openPRs, err := a.gh.ListOpenPRs()
 	if err != nil {
-		log.Printf("Warning: failed to list open PRs: %v", err)
+		slog.Warn("Failed to list open PRs", "error", err)
 		openPRs = nil
 	}
 
@@ -113,7 +113,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	// After completing research, check again for ready PRs to merge
 	if err := a.mergeReadyPRs(ctx); err != nil {
-		log.Printf("Warning: error checking/merging PRs after research: %v", err)
+		slog.Warn("Error checking/merging PRs after research", "error", err)
 	}
 
 	return nil
@@ -187,7 +187,7 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 	// 4. Load Authorities
 	authMgr := authority.NewManager(a.gh)
 	if err := authMgr.Load("main"); err != nil {
-		log.Printf("Warning: failed to load authorities: %v", err)
+		slog.Warn("Failed to load authorities", "error", err)
 	}
 
 	// 5. Generation Loop
@@ -212,7 +212,7 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 			if err == context.Canceled {
 				return err
 			}
-			log.Printf("Error processing topic '%s': %v", topic, err)
+			slog.Error("Error processing topic", "topic", topic, "error", err)
 			continue
 		}
 		createdArticles = append(createdArticles, topic)
@@ -231,17 +231,17 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 	// 6. Commit Authority Updates
 	updates, err := authMgr.GetUpdates()
 	if err != nil {
-		log.Printf("Failed to get authority updates: %v", err)
+		slog.Error("Failed to get authority updates", "error", err)
 	} else {
 		for path, update := range updates {
 			log.Printf("Updating authority file: %s", path)
 			if update.SHA == "" {
 				if err := a.gh.CreateFile(branchName, path, "Create authority "+path, update.Content); err != nil {
-					log.Printf("Failed to create authority file %s: %v", path, err)
+					slog.Error("Failed to create authority file", "path", path, "error", err)
 				}
 			} else {
 				if err := a.gh.UpdateFile(branchName, path, "Update authority "+path, update.Content, update.SHA); err != nil {
-					log.Printf("Failed to update authority file %s: %v", path, err)
+					slog.Error("Failed to update authority file", "path", path, "error", err)
 				}
 			}
 		}
@@ -268,16 +268,16 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 	// 8. Comment on Issue
 	comment := fmt.Sprintf("Expanded category with %d articles: %s. PR: %s", len(createdArticles), strings.Join(createdArticles, ", "), *pr.HTMLURL)
 	if err := a.gh.CommentOnIssue(*issue.Number, comment); err != nil {
-		log.Printf("Failed to comment on issue: %v", err)
+		slog.Warn("Failed to comment on issue", "issue", *issue.Number, "error", err)
 	}
 
 	// 9. Organize articles (move from _incoming to proper Compendium paths)
 	if err := a.organizeArticles(ctx, branchName, *pr.Number); err != nil {
-		log.Printf("Warning: failed to organize articles: %v", err)
+		slog.Error("Failed to organize articles", "error", err)
 		// Add a comment about the failure
 		comment := fmt.Sprintf("⚠️ Article organization failed: %v\n\nPlease organize articles manually.", err)
 		if commentErr := a.gh.CommentOnPR(*pr.Number, comment); commentErr != nil {
-			log.Printf("Failed to add failure comment: %v", commentErr)
+			slog.Warn("Failed to add failure comment", "error", commentErr)
 		}
 	}
 
@@ -311,7 +311,7 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 
 		status, err := a.gh.GetPRStatus(pr.Number)
 		if err != nil {
-			log.Printf("Warning: failed to get status for PR #%d: %v", pr.Number, err)
+			slog.Warn("Failed to get status for PR", "pr", pr.Number, "error", err)
 			continue
 		}
 
@@ -324,7 +324,7 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 
 			commitMsg := fmt.Sprintf("Merge PR #%d: automated content expansion", pr.Number)
 			if err := a.gh.MergePR(pr.Number, commitMsg); err != nil {
-				log.Printf("Failed to merge PR #%d: %v", pr.Number, err)
+				slog.Error("Failed to merge PR", "pr", pr.Number, "error", err)
 				continue
 			}
 			log.Printf("Successfully merged PR #%d", pr.Number)
@@ -333,7 +333,7 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 			// Close the tracking issues
 			for _, issueNum := range pr.IssueRefs {
 				if err := a.gh.CloseIssue(issueNum); err != nil {
-					log.Printf("Warning: failed to close issue #%d: %v", issueNum, err)
+					slog.Warn("Failed to close issue", "issue", issueNum, "error", err)
 				} else {
 					log.Printf("Closed tracking issue #%d", issueNum)
 				}
@@ -488,7 +488,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 
 	// Adjust limit if we don't have enough targets
 	if len(targets) < limit {
-		log.Printf("Warning: only %d targets available, reducing limit from %d", len(targets), limit)
+		slog.Warn("Fewer targets available than limit", "available", len(targets), "limit", limit)
 		limit = len(targets)
 	}
 
@@ -532,7 +532,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 			if res.err == nil && len(res.content) >= 100 {
 				fetchedContents[res.index] = res.content
 			} else if res.err != nil {
-				log.Printf("Failed to fetch %s: %v", targets[res.index].result.Href, res.err)
+				slog.Warn("Failed to fetch URL", "url", targets[res.index].result.Href, "error", res.err)
 			}
 		}
 		done <- true
@@ -584,7 +584,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 				domain := strings.ReplaceAll(u.Host, ".", "-")
 				rawPath := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/raw.txt", slug, domain, t.index+1)
 				if err := a.gh.CreateFile(branchName, rawPath, "Add debug raw source: "+t.result.Title, content); err != nil {
-					log.Printf("Failed to save debug raw source %s: %v", rawPath, err)
+					slog.Warn("Failed to save debug raw source", "path", rawPath, "error", err)
 				}
 			}
 		}
@@ -593,7 +593,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		log.Printf("Summarizing source %d/%d: %s", processedCount+1, limit, t.result.Href)
 		summary, err := a.llm.SummarizeSource(ctx, topic, t.result.Href, content)
 		if err != nil {
-			log.Printf("Failed to summarize %s: %v", t.result.Href, err)
+			slog.Warn("Failed to summarize source", "url", t.result.Href, "error", err)
 			// If we have the raw LLM output, save it for debugging.
 			if debugSources {
 				if u, errParse := url.Parse(t.result.Href); errParse == nil {
@@ -602,14 +602,14 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 					if summary.Step1Output != "" {
 						step1Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_1.txt", slug, domain, t.index+1)
 						if errSave := a.gh.CreateFile(branchName, step1Path, "Add debug phase 1 step 1 output (error): "+t.result.Title, summary.Step1Output); errSave != nil {
-							log.Printf("Failed to save debug step 1 output %s: %v", step1Path, errSave)
+							slog.Warn("Failed to save debug step 1 output", "path", step1Path, "error", errSave)
 						}
 					}
 					// Save step 2 output if available
 					if summary.Raw != "" {
 						step2Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_2.txt", slug, domain, t.index+1)
 						if errSave := a.gh.CreateFile(branchName, step2Path, "Add debug phase 1 step 2 output (error): "+t.result.Title, summary.Raw); errSave != nil {
-							log.Printf("Failed to save debug step 2 output %s: %v", step2Path, errSave)
+							slog.Warn("Failed to save debug step 2 output", "path", step2Path, "error", errSave)
 						}
 					}
 				}
@@ -625,14 +625,14 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 				if summary.Step1Output != "" {
 					step1Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_1.txt", slug, domain, t.index+1)
 					if err := a.gh.CreateFile(branchName, step1Path, "Add debug phase 1 step 1 output: "+t.result.Title, summary.Step1Output); err != nil {
-						log.Printf("Failed to save debug step 1 output %s: %v", step1Path, err)
+						slog.Warn("Failed to save debug step 1 output", "path", step1Path, "error", err)
 					}
 				}
 				// Save phase 1 step 2 output (JSON conversion)
 				if summary.Raw != "" {
 					step2Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_2.txt", slug, domain, t.index+1)
 					if err := a.gh.CreateFile(branchName, step2Path, "Add debug phase 1 step 2 output: "+t.result.Title, summary.Raw); err != nil {
-						log.Printf("Failed to save debug step 2 output %s: %v", step2Path, err)
+						slog.Warn("Failed to save debug step 2 output", "path", step2Path, "error", err)
 					}
 				}
 			}
@@ -647,14 +647,14 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 					if summary.Step1Output != "" {
 						step1Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_1.txt", slug, domain, t.index+1)
 						if err := a.gh.CreateFile(branchName, step1Path, "Add debug phase 1 step 1 output (not relevant): "+t.result.Title, summary.Step1Output); err != nil {
-							log.Printf("Failed to save debug step 1 output %s: %v", step1Path, err)
+							slog.Warn("Failed to save debug step 1 output", "path", step1Path, "error", err)
 						}
 					}
 					// Save phase 1 step 2 output if available (may not exist if marked NOT_RELEVANT in step 1)
 					if summary.Raw != "" && summary.Raw != summary.Step1Output {
 						step2Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_2.txt", slug, domain, t.index+1)
 						if err := a.gh.CreateFile(branchName, step2Path, "Add debug phase 1 step 2 output (not relevant): "+t.result.Title, summary.Raw); err != nil {
-							log.Printf("Failed to save debug step 2 output %s: %v", step2Path, err)
+							slog.Warn("Failed to save debug step 2 output", "path", step2Path, "error", err)
 						}
 					}
 				}
@@ -710,7 +710,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 			// Extract entities from source content for knowledge base ingestion
 			sourceEntities, err := a.llm.ExtractEntities(ctx, summary.Summary)
 			if err != nil {
-				log.Printf("Warning: entity extraction failed for source: %v", err)
+				slog.Warn("Entity extraction failed for source", "error", err)
 				sourceEntities = []llm.ExtractedEntity{}
 			}
 
@@ -720,7 +720,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 			// Resolve entities to authority IDs
 			resolvedSource, err := authMgr.ResolveEntities(sourceEntities)
 			if err != nil {
-				log.Printf("Warning: entity resolution failed for source: %v", err)
+				slog.Warn("Entity resolution failed for source", "error", err)
 				resolvedSource = make(map[string][]string)
 			}
 
@@ -821,7 +821,7 @@ tags: %s
 	// Entities
 	extracted, err := a.llm.ExtractEntities(ctx, content)
 	if err != nil {
-		log.Printf("Warning: entity extraction failed: %v", err)
+		slog.Warn("Entity extraction failed", "error", err)
 	}
 
 	// Add Category as a topic if missing
@@ -840,7 +840,7 @@ tags: %s
 
 	resolved, err := authMgr.ResolveEntities(extracted)
 	if err != nil {
-		log.Printf("Warning: entity resolution failed: %v", err)
+		slog.Warn("Entity resolution failed", "error", err)
 	}
 
 	// Front Matter
