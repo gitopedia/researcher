@@ -54,7 +54,7 @@ func NewClient() *Client {
 
 // Search performs a DuckDuckGo search via HTML scraping
 func (c *Client) Search(query string) ([]Result, error) {
-	fmt.Printf("Searching for: %s\n", query)
+	log.Printf("Searching for: %s", query)
 
 	// Sleep slightly to be polite
 	time.Sleep(2 * time.Second)
@@ -176,7 +176,7 @@ func (c *Client) Search(query string) ([]Result, error) {
 }
 
 func (c *Client) FetchContent(targetURL string) (string, error) {
-	fmt.Printf("Fetching content (headless): %s\n", targetURL)
+	log.Printf("Fetching content (headless): %s", targetURL)
 
 	// Create allocator options
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
