@@ -53,27 +53,56 @@ func NewClient() (*Client, error) {
 		baseUrl = "http://localhost:11434/v1"
 	}
 
-	// Model configuration - single model for all tasks
-	model := os.Getenv("LLM_MODEL")
-	if model == "" {
-		// Backwards compatibility
-		if legacy := os.Getenv("LLM_MODEL_DETAILED"); legacy != "" {
-			model = legacy
-		} else if legacy := os.Getenv("LLM_MODEL_FAST"); legacy != "" {
-			model = legacy
-		} else if legacy := os.Getenv("OPENAI_MODEL"); legacy != "" {
-			model = legacy
-		} else {
-			model = "qwen3:14b"
+	// Model configuration - multi-model support for optimized performance
+	// If LLM_MODEL is set, use it for all tasks (backwards compatibility)
+	// Otherwise, use task-specific models
+	var modelGenerateArticle, modelExtractEntities, modelSuggestTopics, modelSummarizePlain, modelSummarizeJSON string
+	
+	legacyModel := os.Getenv("LLM_MODEL")
+	if legacyModel != "" {
+		// Backwards compatibility: use single model for all tasks
+		modelGenerateArticle = legacyModel
+		modelExtractEntities = legacyModel
+		modelSuggestTopics = legacyModel
+		modelSummarizePlain = legacyModel
+		modelSummarizeJSON = legacyModel
+		log.Printf("Using single model for all tasks (legacy mode): %s", legacyModel)
+	} else {
+		// Multi-model configuration
+		// Fast tasks: topic suggestion, JSON conversion
+		modelFast := os.Getenv("LLM_MODEL_FAST")
+		if modelFast == "" {
+			// Fallback to legacy variable names
+			if legacy := os.Getenv("LLM_MODEL_DETAILED"); legacy != "" {
+				modelFast = legacy
+			} else if legacy := os.Getenv("OPENAI_MODEL"); legacy != "" {
+				modelFast = legacy
+			} else {
+				modelFast = "qwen3:7b"
+			}
 		}
+		
+		// Entity extraction: medium model
+		modelEntity := os.Getenv("LLM_MODEL_ENTITY")
+		if modelEntity == "" {
+			modelEntity = "qwen3:14b"
+		}
+		
+		// Article generation: large model
+		modelArticle := os.Getenv("LLM_MODEL_ARTICLE")
+		if modelArticle == "" {
+			modelArticle = "qwen3:32b"
+		}
+		
+		// Assign models to tasks
+		modelGenerateArticle = modelArticle
+		modelExtractEntities = modelEntity
+		modelSuggestTopics = modelFast
+		modelSummarizePlain = modelEntity  // Use medium model if LLM summarization enabled
+		modelSummarizeJSON = modelFast     // Use fast model for JSON conversion
+		
+		log.Printf("Multi-model configuration: Fast=%s, Entity=%s, Article=%s", modelFast, modelEntity, modelArticle)
 	}
-
-	// Use the same model for all tasks
-	modelGenerateArticle := model
-	modelExtractEntities := model
-	modelSuggestTopics := model
-	modelSummarizePlain := model
-	modelSummarizeJSON := model
 
 	config := openai.DefaultConfig(apiKey)
 	config.BaseURL = baseUrl
