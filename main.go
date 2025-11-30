@@ -50,13 +50,13 @@ func main() {
 		shutdownRequested = true
 		running := taskRunning
 		taskMu.Unlock()
-		
+
 		if running {
 			log.Printf("Received %v - cancelling after current LLM inference completes...", sig)
 			log.Println("(Press Ctrl+C again to force quit immediately)")
 			// Cancel context so operations see the shutdown request
 			cancel()
-			
+
 			// Wait for second signal to force quit
 			sig = <-sigChan
 			log.Printf("Received %v again - forcing immediate shutdown", sig)
@@ -94,7 +94,7 @@ func main() {
 
 		// Run one iteration
 		err := a.Run(ctx)
-		
+
 		taskMu.Lock()
 		taskRunning = false
 		shouldExit := shutdownRequested
@@ -115,7 +115,7 @@ func main() {
 		}
 
 		log.Printf("Sleeping for %v before next run...", loopInterval)
-		
+
 		// Sleep with cancellation check
 		select {
 		case <-ctx.Done():
@@ -124,7 +124,7 @@ func main() {
 		case <-time.After(loopInterval):
 			// Continue to next iteration
 		}
-		
+
 		// Check context after sleep
 		if ctx.Err() != nil {
 			break
