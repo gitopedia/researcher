@@ -242,12 +242,29 @@ func (c *Client) GetResearchRequests() ([]*github.Issue, error) {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
 	
+	// Use pagination to get all issues with the "research category" label
 	opts := &github.IssueListByRepoOptions{
 		State:  "open",
 		Labels: []string{"research category"},
+		ListOptions: github.ListOptions{
+			PerPage: 100,
+		},
 	}
-	issues, _, err := c.client.Issues.ListByRepo(c.ctx, c.owner, c.repo, opts)
-	return issues, err
+	
+	var allIssues []*github.Issue
+	for {
+		issues, resp, err := c.client.Issues.ListByRepo(c.ctx, c.owner, c.repo, opts)
+		if err != nil {
+			return nil, err
+		}
+		allIssues = append(allIssues, issues...)
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	
+	return allIssues, nil
 }
 
 func (c *Client) CreateBranch(baseBranch, newBranch string) error {
@@ -387,7 +404,7 @@ func (c *Client) GetPRStatus(prNumber int) (*PRStatus, error) {
 		Number:    prNumber,
 		Draft:     pr.GetDraft(),
 		Merged:    pr.GetMerged(),
-		Mergeable: pr.GetMergeable(),
+		Mergeable: pr.Mergeable, // Access field directly to preserve nil (unknown) vs false (conflicts)
 		State:     pr.GetState(),
 		CIStatus:  "success", // Default to success if no CI configured
 	}
@@ -479,6 +496,274 @@ func (c *Client) CloseIssue(issueNumber int) error {
 	return err
 }
 
+func (c *Client) ReopenIssue(issueNumber int) error {
+	if err := c.ensureValidToken(); err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+	state := "open"
+	req := &github.IssueRequest{
+		State: &state,
+	}
+	_, _, err := c.client.Issues.Edit(c.ctx, c.owner, c.repo, issueNumber, req)
+	return err
+}
+
+func (c *Client) ListClosedIssuesWithLabel(label string, limit int) ([]*github.Issue, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	}
+	
+	opts := &github.IssueListByRepoOptions{
+		State:  "closed",
+		Labels: []string{label},
+		Sort:   "updated",
+		Direction: "desc",
+		ListOptions: github.ListOptions{
+			PerPage: limit,
+		},
+	}
+	issues, _, err := c.client.Issues.ListByRepo(c.ctx, c.owner, c.repo, opts)
+	return issues, err
+}
+
+// UpdatePRBranch updates the PR branch by merging the base branch (main) into it.
+// This resolves conflicts when the PR is behind the base branch.
+func (c *Client) UpdatePRBranch(prNumber int) error {
+	if err := c.ensureValidToken(); err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	// Use the UpdateBranch API to merge base into the PR branch
+	opts := &github.PullRequestBranchUpdateOptions{
+		ExpectedHeadSHA: nil, // Accept any current HEAD
+	}
+	_, _, err := c.client.PullRequests.UpdateBranch(c.ctx, c.owner, c.repo, prNumber, opts)
+	return err
+}
+
+// AuthorityEntry represents an entry in an authority JSON file
+type AuthorityEntry struct {
+	ID      string   `json:"id"`
+	Label   string   `json:"label"`
+	Aliases []string `json:"aliases"`
+}
+
+// ResolveAuthorityConflicts merges authority JSON files between main and PR branch.
+// It fetches both versions, merges the arrays (deduping by ID), and updates the PR branch.
+// It also handles category index.md files by regenerating them based on the PR branch content.
+func (c *Client) ResolveAuthorityConflicts(headBranch string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	resolvedCount := 0
+
+	// 1. Resolve authority JSON files
+	authorityFiles := []string{
+		"authority/topics.json",
+		"authority/people.json",
+		"authority/orgs.json",
+		"authority/places.json",
+	}
+
+	for _, path := range authorityFiles {
+		// Get file from main branch
+		mainContent, _, err := c.GetFile("main", path)
+		if err != nil {
+			// File might not exist in main, skip
+			log.Printf("Could not get %s from main: %v", path, err)
+			continue
+		}
+
+		// Get file from head branch
+		headContent, headSHA, err := c.GetFile(headBranch, path)
+		if err != nil {
+			// File might not exist in head, skip
+			log.Printf("Could not get %s from %s: %v", path, headBranch, err)
+			continue
+		}
+
+		// Parse both versions
+		var mainEntries, headEntries []AuthorityEntry
+		if err := json.Unmarshal([]byte(mainContent), &mainEntries); err != nil {
+			log.Printf("Could not parse main %s: %v", path, err)
+			continue
+		}
+		if err := json.Unmarshal([]byte(headContent), &headEntries); err != nil {
+			log.Printf("Could not parse head %s: %v", path, err)
+			continue
+		}
+
+		// Merge entries (main first, then add new entries from head)
+		seenIDs := make(map[string]bool)
+		var merged []AuthorityEntry
+
+		// Add all entries from main
+		for _, entry := range mainEntries {
+			seenIDs[entry.ID] = true
+			merged = append(merged, entry)
+		}
+
+		// Add entries from head that aren't in main
+		newEntries := 0
+		for _, entry := range headEntries {
+			if !seenIDs[entry.ID] {
+				seenIDs[entry.ID] = true
+				merged = append(merged, entry)
+				newEntries++
+			}
+		}
+
+		// Skip if no new entries to add
+		if newEntries == 0 {
+			continue
+		}
+
+		// Marshal merged content
+		mergedJSON, err := json.MarshalIndent(merged, "", "  ")
+		if err != nil {
+			log.Printf("Could not marshal merged %s: %v", path, err)
+			continue
+		}
+
+		// Update file in head branch
+		log.Printf("Merging %s: %d entries from main + %d new from head = %d total",
+			path, len(mainEntries), newEntries, len(merged))
+		if err := c.UpdateFile(headBranch, path, "Merge authority file: "+path, string(mergedJSON), headSHA); err != nil {
+			return fmt.Errorf("failed to update %s: %w", path, err)
+		}
+		resolvedCount++
+	}
+
+	// 2. Resolve category index.md files by regenerating them
+	// Get files from BOTH main AND the PR branch under Compendium/, then merge
+	headFiles, err := c.ListFilesInBranch(headBranch, "Compendium")
+	if err != nil {
+		log.Printf("Could not list files in Compendium from %s: %v", headBranch, err)
+		headFiles = []string{}
+	}
+	
+	mainFiles, err := c.ListFilesInBranch("main", "Compendium")
+	if err != nil {
+		log.Printf("Could not list files in Compendium from main: %v", err)
+		mainFiles = []string{}
+	}
+	
+	// Combine files from both branches
+	allFilesSet := make(map[string]bool)
+	for _, file := range headFiles {
+		allFilesSet[file] = true
+	}
+	for _, file := range mainFiles {
+		allFilesSet[file] = true
+	}
+	
+	// Group articles by directory (from combined set)
+	articlesByDir := make(map[string][]string)
+	indexFiles := make(map[string]bool)
+	
+	for file := range allFilesSet {
+		if strings.HasSuffix(file, ".md") {
+			if !strings.Contains(file, "/") {
+				continue // Skip files not in a subdirectory
+			}
+			dir := file[:strings.LastIndex(file, "/")]
+			filename := file[strings.LastIndex(file, "/")+1:]
+
+			if filename == "index.md" {
+				indexFiles[file] = true
+			} else if !strings.HasPrefix(filename, "_") && !strings.Contains(dir, "_incoming") {
+				// Regular article (not starting with _, not in _incoming)
+				// Dedupe by checking if already added
+				found := false
+				for _, existing := range articlesByDir[dir] {
+					if existing == filename {
+						found = true
+						break
+					}
+				}
+				if !found {
+					articlesByDir[dir] = append(articlesByDir[dir], filename)
+				}
+			}
+		}
+	}
+
+	// For each index.md that exists in head branch, regenerate it based on combined articles
+	for indexPath := range indexFiles {
+		dir := indexPath[:strings.LastIndex(indexPath, "/")]
+		articles := articlesByDir[dir]
+
+		if len(articles) == 0 {
+			continue
+		}
+		
+		// Check if this index.md exists in the head branch and get its SHA
+		_, indexSHA, err := c.GetFile(headBranch, indexPath)
+		if err != nil {
+			// index.md doesn't exist in head branch, skip
+			continue
+		}
+
+		// Get the category name from the directory path (last component)
+		parts := strings.Split(dir, "/")
+		categoryName := parts[len(parts)-1]
+
+		// Generate index content
+		var sb strings.Builder
+		sb.WriteString("# ")
+		sb.WriteString(categoryName)
+		sb.WriteString(" Articles\n\n")
+
+		// Sort articles for consistent output
+		sortedArticles := make([]string, len(articles))
+		copy(sortedArticles, articles)
+		for i := 0; i < len(sortedArticles)-1; i++ {
+			for j := i + 1; j < len(sortedArticles); j++ {
+				if sortedArticles[i] > sortedArticles[j] {
+					sortedArticles[i], sortedArticles[j] = sortedArticles[j], sortedArticles[i]
+				}
+			}
+		}
+
+		for _, article := range sortedArticles {
+			// Convert filename to title (remove .md, convert dashes to spaces, title case)
+			title := strings.TrimSuffix(article, ".md")
+			title = strings.ReplaceAll(title, "-", " ")
+			// Simple title case
+			words := strings.Fields(title)
+			for i, word := range words {
+				if len(word) > 0 {
+					words[i] = strings.ToUpper(word[:1]) + word[1:]
+				}
+			}
+			title = strings.Join(words, " ")
+
+			sb.WriteString("- [")
+			sb.WriteString(title)
+			sb.WriteString("](")
+			sb.WriteString(article)
+			sb.WriteString(")\n")
+		}
+		sb.WriteString("\n")
+
+		// Update the index file
+		log.Printf("Regenerating %s with %d articles", indexPath, len(articles))
+		if err := c.UpdateFile(headBranch, indexPath, "Regenerate category index: "+indexPath, sb.String(), indexSHA); err != nil {
+			log.Printf("Failed to update %s: %v", indexPath, err)
+			continue
+		}
+		resolvedCount++
+	}
+
+	if resolvedCount == 0 {
+		return fmt.Errorf("no files needed merging")
+	}
+
+	log.Printf("Resolved conflicts in %d files", resolvedCount)
+	return nil
+}
+
 func (c *Client) ListOpenPRs() ([]*PRInfo, error) {
 	if err := c.ensureValidToken(); err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
@@ -499,6 +784,11 @@ func (c *Client) ListOpenPRs() ([]*PRInfo, error) {
 			Title:  pr.GetTitle(),
 			Body:   pr.GetBody(),
 			Draft:  pr.GetDraft(),
+		}
+		
+		// Get head branch name
+		if pr.Head != nil {
+			info.HeadBranch = pr.Head.GetRef()
 		}
 		
 		// Extract issue references from body (e.g., "#123", "Closes #45")

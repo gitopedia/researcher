@@ -13,11 +13,13 @@ Write a comprehensive, in-depth encyclopedia article about "{{.Topic}}".
 
 **Format**
 - Use Markdown.
-- Start with a YAML front matter block between "---" lines.
-- Front matter fields:
-  - "title": article title
-  - "summary": 2-3 sentence summary
-  - "tags": list of relevant tags (e.g. ["Technology", "AI"]).
+- Start with a YAML front matter block. Use EXACTLY this format (with --- on separate lines, NO code fences):
+  ---
+  title: "Your Article Title"
+  summary: "2-3 sentence summary"
+  tags: ["Tag1", "Tag2"]
+  ---
+- CRITICAL: Do NOT wrap the front matter in code fences (```yaml or ```). Just use plain --- delimiters.
 - Do not include "id", "created", or "author" (these are added later).
 - After the front matter, start the article body with a Level 1 heading (# Title).
 

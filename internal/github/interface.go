@@ -9,7 +9,7 @@ type PRStatus struct {
 	Number    int
 	Draft     bool
 	Merged    bool
-	Mergeable bool
+	Mergeable *bool  // nil = not yet computed, true = mergeable, false = has conflicts
 	State     string // "open", "closed"
 	CIStatus  string // "pending", "success", "failure"
 }
@@ -30,6 +30,10 @@ type GitHubClient interface {
 	MergePR(prNumber int, commitMessage string) error
 	CommentOnPR(prNumber int, body string) error
 	CloseIssue(issueNumber int) error
+	ReopenIssue(issueNumber int) error
+	ListClosedIssuesWithLabel(label string, limit int) ([]*github.Issue, error)
+	UpdatePRBranch(prNumber int) error                // Merge base branch into PR branch to resolve conflicts
+	ResolveAuthorityConflicts(headBranch string) error // Merge authority JSON files between main and PR branch
 	
 	// PR listing
 	ListOpenPRs() ([]*PRInfo, error)
@@ -42,11 +46,12 @@ type GitHubClient interface {
 
 // PRInfo contains basic info about a PR
 type PRInfo struct {
-	Number    int
-	Title     string
-	Body      string
-	Draft     bool
-	IssueRefs []int // Issue numbers referenced in the PR body
+	Number     int
+	Title      string
+	Body       string
+	Draft      bool
+	IssueRefs  []int  // Issue numbers referenced in the PR body
+	HeadBranch string // The branch name of the PR
 }
 
 // Ensure Client implements GitHubClient

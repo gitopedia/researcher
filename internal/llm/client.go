@@ -165,11 +165,11 @@ func loadTemplate(path string) (*template.Template, error) {
 	return template.New(path).Parse(string(content))
 }
 
-func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string) (string, error) {
+func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string) (*ArticleResult, error) {
 	// Execute system template
 	var systemBuf bytes.Buffer
 	if err := c.generateArticleSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return "", fmt.Errorf("failed to execute system template: %w", err)
+		return nil, fmt.Errorf("failed to execute system template: %w", err)
 	}
 
 	// Execute user template
@@ -179,7 +179,7 @@ func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string)
 	}
 	var userBuf bytes.Buffer
 	if err := c.generateArticleUserTemplate.Execute(&userBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute user template: %w", err)
+		return nil, fmt.Errorf("failed to execute user template: %w", err)
 	}
 
 	resp, err := c.client.CreateChatCompletion(
@@ -201,10 +201,13 @@ func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string)
 	)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return resp.Choices[0].Message.Content, nil
+	return &ArticleResult{
+		Content: resp.Choices[0].Message.Content,
+		Model:   c.modelGenerateArticle,
+	}, nil
 }
 
 func (c *Client) ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error) {

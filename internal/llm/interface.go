@@ -39,8 +39,14 @@ type ArticleCategory struct {
 	Reasoning   string `json:"reasoning"`    // Why this category was chosen
 }
 
+// ArticleResult contains the generated article content and metadata
+type ArticleResult struct {
+	Content string // The generated article markdown
+	Model   string // The model used to generate the article
+}
+
 type Generator interface {
-	GenerateArticle(ctx context.Context, topic, contextData string) (string, error)
+	GenerateArticle(ctx context.Context, topic, contextData string) (*ArticleResult, error)
 	ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error)
 	SuggestTopics(ctx context.Context, category string, existingTopics []string) ([]string, error)
 	SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error)

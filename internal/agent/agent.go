@@ -71,6 +71,11 @@ func (a *Agent) Run(ctx context.Context) error {
 		return nil
 	}
 
+	log.Printf("Found %d research category issues:", len(issues))
+	for _, issue := range issues {
+		log.Printf("  - Issue #%d: %s", *issue.Number, *issue.Title)
+	}
+
 	// Get open PRs to filter out issues that already have PRs
 	openPRs, err := a.gh.ListOpenPRs()
 	if err != nil {
@@ -78,12 +83,35 @@ func (a *Agent) Run(ctx context.Context) error {
 		openPRs = nil
 	}
 
-	// Build set of issue numbers that have open PRs
+	// Build set of issue numbers that have open (non-merged) PRs
 	issuesWithPRs := make(map[int]bool)
 	for _, pr := range openPRs {
-		for _, issueNum := range pr.IssueRefs {
-			issuesWithPRs[issueNum] = true
-			log.Printf("Issue #%d has open PR #%d, will skip", issueNum, pr.Number)
+		// Check if PR is actually merged or closed
+		status, err := a.gh.GetPRStatus(pr.Number)
+		if err != nil {
+			slog.Warn("Failed to get PR status when checking for open PRs", "pr", pr.Number, "error", err)
+			// If we can't check, assume it's open to be safe
+			for _, issueNum := range pr.IssueRefs {
+				issuesWithPRs[issueNum] = true
+				log.Printf("Issue #%d has PR #%d (status unknown), will skip", issueNum, pr.Number)
+			}
+			continue
+		}
+
+		// Only skip issues if PR is open and not merged
+		if status.State == "open" && !status.Merged {
+			for _, issueNum := range pr.IssueRefs {
+				issuesWithPRs[issueNum] = true
+				log.Printf("Issue #%d has open PR #%d, will skip", issueNum, pr.Number)
+			}
+		} else if status.Merged {
+			for _, issueNum := range pr.IssueRefs {
+				log.Printf("Issue #%d has merged PR #%d, will process", issueNum, pr.Number)
+			}
+		} else if status.State == "closed" {
+			for _, issueNum := range pr.IssueRefs {
+				log.Printf("Issue #%d has closed PR #%d, will process", issueNum, pr.Number)
+			}
 		}
 	}
 
@@ -96,8 +124,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	if len(availableIssues) == 0 {
-		log.Println("All research issues already have open PRs. Nothing to do.")
-		return nil
+		return fmt.Errorf("all research issues already have open PRs - no work available")
 	}
 
 	log.Printf("Found %d issues without PRs (out of %d total)", len(availableIssues), len(issues))
@@ -302,6 +329,40 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 	log.Printf("Found %d open PRs, checking status...", len(openPRs))
 
 	mergedCount := 0
+
+	// Helper function to check and attempt merge
+	tryMerge := func(status *github.PRStatus, pr *github.PRInfo) bool {
+		mergeableStr := "unknown"
+		if status.Mergeable != nil {
+			if *status.Mergeable {
+				mergeableStr = "true"
+			} else {
+				mergeableStr = "false"
+			}
+		}
+		log.Printf("PR #%d: draft=%v, state=%s, ci=%s, mergeable=%s",
+			pr.Number, status.Draft, status.State, status.CIStatus, mergeableStr)
+
+		// Check if ready to merge: not draft, CI passed, and mergeable is explicitly true
+		// We no longer treat mergeable=nil (unknown) as mergeable - it often means GitHub
+		// is still calculating after new commits were pushed, and attempting to merge
+		// will fail with 405 "Pull Request is not mergeable"
+		if !status.Draft && status.CIStatus == "success" && status.Mergeable != nil && *status.Mergeable {
+			log.Printf("PR #%d is ready to merge!", pr.Number)
+
+			commitMsg := fmt.Sprintf("Merge PR #%d: automated content expansion", pr.Number)
+			if err := a.gh.MergePR(pr.Number, commitMsg); err != nil {
+				slog.Error("Failed to merge PR", "pr", pr.Number, "error", err)
+				return false
+			}
+			log.Printf("Successfully merged PR #%d", pr.Number)
+			mergedCount++
+			// Note: We don't manually close issues here.
+			// GitHub automatically closes issues when PRs with "Closes #X" or "Fixes #X" are merged.
+			return true
+		}
+		return false
+	}
 	for _, pr := range openPRs {
 		select {
 		case <-ctx.Done():
@@ -315,35 +376,44 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 			continue
 		}
 
-		log.Printf("PR #%d: draft=%v, state=%s, ci=%s, mergeable=%v",
-			pr.Number, status.Draft, status.State, status.CIStatus, status.Mergeable)
+		// Try to merge if ready
+		if tryMerge(status, pr) {
+			continue // Successfully merged, move to next PR
+		}
 
-		// Check if ready to merge: not draft, CI passed, mergeable
-		if !status.Draft && status.CIStatus == "success" && status.Mergeable {
-			log.Printf("PR #%d is ready to merge!", pr.Number)
-
-			commitMsg := fmt.Sprintf("Merge PR #%d: automated content expansion", pr.Number)
-			if err := a.gh.MergePR(pr.Number, commitMsg); err != nil {
-				slog.Error("Failed to merge PR", "pr", pr.Number, "error", err)
-				continue
-			}
-			log.Printf("Successfully merged PR #%d", pr.Number)
-			mergedCount++
-
-			// Close the tracking issues
-			for _, issueNum := range pr.IssueRefs {
-				if err := a.gh.CloseIssue(issueNum); err != nil {
-					slog.Warn("Failed to close issue", "issue", issueNum, "error", err)
-				} else {
-					log.Printf("Closed tracking issue #%d", issueNum)
-				}
-			}
-		} else if status.CIStatus == "failure" {
+		// Handle different PR states
+		if status.CIStatus == "failure" {
 			log.Printf("PR #%d has failed CI - needs manual attention", pr.Number)
 		} else if status.Draft {
 			log.Printf("PR #%d is still a draft - waiting for Encyclopaedist", pr.Number)
 		} else if status.CIStatus == "pending" {
 			log.Printf("PR #%d CI is still running", pr.Number)
+		} else if status.Mergeable == nil {
+			// Mergeable status is unknown - GitHub is still calculating (often after new commits)
+			log.Printf("PR #%d mergeable status unknown - GitHub is calculating, will check on next run", pr.Number)
+		} else if !*status.Mergeable {
+			// PR has conflicts - try to update the branch by merging main into it
+			log.Printf("PR #%d has merge conflicts - attempting to update branch from main...", pr.Number)
+			if err := a.gh.UpdatePRBranch(pr.Number); err != nil {
+				// GitHub's UpdateBranch failed - likely due to actual file conflicts
+				// Try to resolve authority file conflicts programmatically
+				log.Printf("PR #%d: GitHub merge failed, attempting to resolve authority file conflicts...", pr.Number)
+				if pr.HeadBranch == "" {
+					slog.Error("Cannot resolve conflicts: PR has no head branch info", "pr", pr.Number)
+				} else if resolveErr := a.gh.ResolveAuthorityConflicts(pr.HeadBranch); resolveErr != nil {
+					slog.Error("Failed to resolve authority conflicts", "pr", pr.Number, "error", resolveErr)
+					log.Printf("PR #%d needs manual conflict resolution", pr.Number)
+				} else {
+					// Successfully resolved conflicts by pushing new commits to the PR branch.
+					// Don't try to merge immediately - CI needs to run on the new commits first,
+					// and GitHub needs time to recalculate the mergeable status.
+					log.Printf("PR #%d conflicts resolved by merging authority files - CI will re-run, will check on next run", pr.Number)
+				}
+			} else {
+				// GitHub's UpdateBranch succeeded - the base branch was merged into the PR branch.
+				// CI needs to run on the new head before we can merge.
+				log.Printf("PR #%d branch updated from main - CI will re-run, will check on next run", pr.Number)
+			}
 		}
 	}
 
@@ -808,10 +878,16 @@ tags: %s
 	}
 
 	// Draft
-	content, err := a.llm.GenerateArticle(ctx, topic, contextData)
+	articleResult, err := a.llm.GenerateArticle(ctx, topic, contextData)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)
 	}
+	content := articleResult.Content
+	articleModel := articleResult.Model
+
+	// Strip code fences if the LLM wrapped the content in them
+	// Some LLMs wrap YAML frontmatter in ```yaml ... ``` which breaks rendering
+	content = stripCodeFences(content)
 
 	// Append References
 	if len(references) > 0 {
@@ -865,6 +941,12 @@ tags: %s
 		facetsBlock += fmt.Sprintf("places: [\"%s\"]\n", strings.Join(ids, "\", \""))
 	}
 
+	// Build model field for frontmatter
+	modelField := ""
+	if articleModel != "" {
+		modelField = fmt.Sprintf("model: \"%s\"\n", articleModel)
+	}
+
 	var fullContent string
 	if strings.HasPrefix(strings.TrimSpace(content), "---") {
 		lines := strings.Split(content, "\n")
@@ -877,7 +959,7 @@ tags: %s
 				}
 				cleanedLines = append(cleanedLines, line)
 			}
-			injection := fmt.Sprintf("%s\ntags: %s\n%s", systemFields, tagsStr, facetsBlock)
+			injection := fmt.Sprintf("%s\ntags: %s\n%s%s", systemFields, tagsStr, facetsBlock, modelField)
 			newLines := append([]string{cleanedLines[0], injection}, cleanedLines[1:]...)
 			fullContent = strings.Join(newLines, "\n")
 		} else {
@@ -890,13 +972,41 @@ title: "%s"
 slug: "%s"
 created: %s
 tags: %s
-%ssummary: ""
+%s%ssummary: ""
 ---
 
-`, id, topic, slug, date, tagsStr, facetsBlock)
+`, id, topic, slug, date, tagsStr, facetsBlock, modelField)
 		fullContent = frontMatter + content
 	}
 
 	filePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
 	return a.gh.CreateFile(branchName, filePath, fmt.Sprintf("Add article: %s", topic), fullContent)
+}
+
+// stripCodeFences removes markdown code fences that wrap YAML frontmatter
+// Some LLMs incorrectly wrap the entire article or frontmatter in ```yaml ... ``` blocks
+func stripCodeFences(content string) string {
+	content = strings.TrimSpace(content)
+
+	// Check if content starts with a code fence
+	if !strings.HasPrefix(content, "```") {
+		return content
+	}
+
+	// Find the first newline after the opening fence
+	firstNewline := strings.Index(content, "\n")
+	if firstNewline == -1 {
+		return content
+	}
+
+	// Remove the opening fence line (e.g., "```yaml" or "```markdown")
+	content = content[firstNewline+1:]
+
+	// Find and remove the closing fence
+	lastFence := strings.LastIndex(content, "```")
+	if lastFence != -1 {
+		content = content[:lastFence]
+	}
+
+	return strings.TrimSpace(content)
 }
