@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -120,14 +121,18 @@ func (a *Agent) organizeArticles(ctx context.Context, branchName string, prNumbe
 		// Create file at new location
 		commitMsg := fmt.Sprintf("Organize: Move %s to %s", frontMatter.Title, category.Category)
 		if err := a.gh.CreateFile(branchName, newPath, commitMsg, content); err != nil {
-			log.Printf("Failed to create file at %s: %v", newPath, err)
+			slog.Error("Failed to create file", "path", newPath, "error", err)
+			// Check for 401 - authentication failure should stop everything
+			if strings.Contains(err.Error(), "401") {
+				return fmt.Errorf("authentication failed: %w", err)
+			}
 			continue
 		}
 
 		// Delete file from old location
 		deleteMsg := fmt.Sprintf("Organize: Remove %s from _incoming", frontMatter.Slug)
 		if err := a.gh.DeleteFile(branchName, articlePath, deleteMsg, sha); err != nil {
-			log.Printf("Failed to delete old file %s: %v", articlePath, err)
+			slog.Error("Failed to delete old file", "path", articlePath, "error", err)
 			// Continue anyway - file was created at new location
 		}
 

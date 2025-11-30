@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"math/rand"
 	"net/url"
 	"os"
@@ -768,7 +769,11 @@ tags: %s
 `, sourceID, slug, domain, processedCount, t.result.Title, t.result.Href, slug, time.Now().Format("2006-01-02"), sourceTagsStr, sourceFacets, topic, modelField, languageField, summary.Summary)
 
 			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+t.result.Title, sourceContent); err != nil {
-				log.Printf("Failed to save source %s: %v", sourcePath, err)
+				slog.Error("Failed to save source", "path", sourcePath, "error", err)
+				// Check if this is a 401 error - if so, stop processing as token is invalid
+				if strings.Contains(err.Error(), "401") {
+					return fmt.Errorf("authentication failed while saving source: %w", err)
+				}
 			}
 		}
 

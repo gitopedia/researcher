@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -54,8 +55,9 @@ func (c *Client) refreshClient() error {
 		if err != nil {
 			return fmt.Errorf("failed to get app installation token: %w", err)
 		}
-		// GitHub App tokens expire after 1 hour, refresh after 50 minutes
-		c.tokenExpiry = time.Now().Add(50 * time.Minute)
+		// GitHub App tokens expire after 1 hour, refresh after 45 minutes to be safe
+		c.tokenExpiry = time.Now().Add(45 * time.Minute)
+		log.Printf("GitHub App token refreshed, expires in 45 minutes")
 	} else {
 		// Fall back to PAT
 		token = os.Getenv("GITHUB_TOKEN")
@@ -78,9 +80,28 @@ func (c *Client) refreshClient() error {
 // ensureValidToken refreshes the token if it's expired or about to expire
 func (c *Client) ensureValidToken() error {
 	if c.useAppAuth && time.Now().After(c.tokenExpiry) {
+		log.Println("Token expired, refreshing...")
 		return c.refreshClient()
 	}
 	return nil
+}
+
+// ForceRefreshToken forces a token refresh, useful after 401 errors
+func (c *Client) ForceRefreshToken() error {
+	if c.useAppAuth {
+		log.Println("Forcing token refresh...")
+		c.tokenExpiry = time.Time{} // Expire immediately
+		return c.refreshClient()
+	}
+	return nil
+}
+
+// is401Error checks if an error is a 401 Unauthorized error
+func is401Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "401") && strings.Contains(err.Error(), "Bad credentials")
 }
 
 func getAppInstallationToken(ctx context.Context, appID string) (string, error) {
@@ -230,6 +251,10 @@ func (c *Client) GetResearchRequests() ([]*github.Issue, error) {
 }
 
 func (c *Client) CreateBranch(baseBranch, newBranch string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+	
 	// Get reference of base branch
 	ref, _, err := c.client.Git.GetRef(c.ctx, c.owner, c.repo, "heads/"+baseBranch)
 	if err != nil {
@@ -248,12 +273,26 @@ func (c *Client) CreateBranch(baseBranch, newBranch string) error {
 }
 
 func (c *Client) CreateFile(branch, path, message, content string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+	
 	opts := &github.RepositoryContentFileOptions{
 		Message: github.String(message),
 		Content: []byte(content),
 		Branch:  github.String(branch),
 	}
 	_, _, err := c.client.Repositories.CreateFile(c.ctx, c.owner, c.repo, path, opts)
+	
+	// If 401 error, try refreshing token and retry once
+	if is401Error(err) {
+		log.Printf("Got 401 error, refreshing token and retrying...")
+		if refreshErr := c.ForceRefreshToken(); refreshErr != nil {
+			return fmt.Errorf("failed to refresh token after 401: %w", refreshErr)
+		}
+		_, _, err = c.client.Repositories.CreateFile(c.ctx, c.owner, c.repo, path, opts)
+	}
+	
 	return err
 }
 
