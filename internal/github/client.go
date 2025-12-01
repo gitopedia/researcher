@@ -625,8 +625,15 @@ func (c *Client) ResolveAuthorityConflicts(headBranch string) error {
 			}
 		}
 
-		// Skip if no new entries to add
+		// Skip if no new entries to add (head already has everything from main)
 		if newEntries == 0 {
+			continue
+		}
+		
+		// Skip if merged result is same size as head (nothing new to add)
+		// This prevents repeated updates when head already has the merged content
+		if len(merged) == len(headEntries) {
+			log.Printf("Skipping %s: head already has merged content (%d entries)", path, len(merged))
 			continue
 		}
 
@@ -709,8 +716,8 @@ func (c *Client) ResolveAuthorityConflicts(headBranch string) error {
 			continue
 		}
 		
-		// Check if this index.md exists in the head branch and get its SHA
-		_, indexSHA, err := c.GetFile(headBranch, indexPath)
+		// Check if this index.md exists in the head branch and get its content + SHA
+		currentContent, indexSHA, err := c.GetFile(headBranch, indexPath)
 		if err != nil {
 			// index.md doesn't exist in head branch, skip
 			continue
@@ -758,9 +765,17 @@ func (c *Client) ResolveAuthorityConflicts(headBranch string) error {
 		}
 		sb.WriteString("\n")
 
+		newContent := sb.String()
+		
+		// Skip if content is unchanged
+		if strings.TrimSpace(currentContent) == strings.TrimSpace(newContent) {
+			log.Printf("Skipping %s: content unchanged (%d articles)", indexPath, len(articles))
+			continue
+		}
+
 		// Update the index file
 		log.Printf("Regenerating %s with %d articles", indexPath, len(articles))
-		if err := c.UpdateFile(headBranch, indexPath, "Regenerate category index: "+indexPath, sb.String(), indexSHA); err != nil {
+		if err := c.UpdateFile(headBranch, indexPath, "Regenerate category index: "+indexPath, newContent, indexSHA); err != nil {
 			log.Printf("Failed to update %s: %v", indexPath, err)
 			continue
 		}
