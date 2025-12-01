@@ -47,7 +47,7 @@ func (m *MockGitHub) ListClosedIssuesWithLabel(label string, limit int) ([]*gh.I
 	return nil, nil
 }
 func (m *MockGitHub) UpdatePRBranch(prNumber int) error                  { return nil }
-func (m *MockGitHub) ResolveAuthorityConflicts(headBranch string) error  { return nil }
+func (m *MockGitHub) CreateMergeCommitWithResolution(headBranch string) error { return nil }
 func (m *MockGitHub) ListOpenPRs() ([]*github.PRInfo, error)             { return nil, nil }
 func (m *MockGitHub) ListFilesInBranch(branch, path string) ([]string, error) {
 	return []string{}, nil

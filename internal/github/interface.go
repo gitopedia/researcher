@@ -33,8 +33,8 @@ type GitHubClient interface {
 	CloseIssue(issueNumber int) error
 	ReopenIssue(issueNumber int) error
 	ListClosedIssuesWithLabel(label string, limit int) ([]*github.Issue, error)
-	UpdatePRBranch(prNumber int) error                // Merge base branch into PR branch to resolve conflicts
-	ResolveAuthorityConflicts(headBranch string) error // Merge authority JSON files between main and PR branch
+	UpdatePRBranch(prNumber int) error                      // Merge base branch into PR branch to resolve conflicts
+	CreateMergeCommitWithResolution(headBranch string) error // Create merge commit resolving authority/index conflicts
 	
 	// PR listing
 	ListOpenPRs() ([]*PRInfo, error)

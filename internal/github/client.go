@@ -559,250 +559,10 @@ type AuthorityEntry struct {
 	Aliases []string `json:"aliases"`
 }
 
-// ResolveAuthorityConflicts merges authority JSON files between main and PR branch.
-// It fetches both versions, merges the arrays (deduping by ID), and updates the PR branch.
-// It also handles category index.md files by regenerating them based on the PR branch content.
-func (c *Client) ResolveAuthorityConflicts(headBranch string) error {
-	if err := c.ensureValidToken(); err != nil {
-		return fmt.Errorf("failed to refresh token: %w", err)
-	}
-
-	resolvedCount := 0
-
-	// 1. Resolve authority JSON files
-	authorityFiles := []string{
-		"authority/topics.json",
-		"authority/people.json",
-		"authority/orgs.json",
-		"authority/places.json",
-	}
-
-	for _, path := range authorityFiles {
-		// Get file from main branch
-		mainContent, _, err := c.GetFile("main", path)
-		if err != nil {
-			// File might not exist in main, skip
-			log.Printf("Could not get %s from main: %v", path, err)
-			continue
-		}
-
-		// Get file from head branch
-		headContent, headSHA, err := c.GetFile(headBranch, path)
-		if err != nil {
-			// File might not exist in head, skip
-			log.Printf("Could not get %s from %s: %v", path, headBranch, err)
-			continue
-		}
-
-		// Parse both versions
-		var mainEntries, headEntries []AuthorityEntry
-		if err := json.Unmarshal([]byte(mainContent), &mainEntries); err != nil {
-			log.Printf("Could not parse main %s: %v", path, err)
-			continue
-		}
-		if err := json.Unmarshal([]byte(headContent), &headEntries); err != nil {
-			log.Printf("Could not parse head %s: %v", path, err)
-			continue
-		}
-
-		// Merge entries (main first, then add new entries from head)
-		seenIDs := make(map[string]bool)
-		var merged []AuthorityEntry
-
-		// Add all entries from main
-		for _, entry := range mainEntries {
-			seenIDs[entry.ID] = true
-			merged = append(merged, entry)
-		}
-
-		// Add entries from head that aren't in main
-		newEntries := 0
-		for _, entry := range headEntries {
-			if !seenIDs[entry.ID] {
-				seenIDs[entry.ID] = true
-				merged = append(merged, entry)
-				newEntries++
-			}
-		}
-
-		// Skip if no new entries to add (head already has everything from main)
-		if newEntries == 0 {
-			continue
-		}
-		
-		// Skip if merged result is same size as head (nothing new to add)
-		// This prevents repeated updates when head already has the merged content
-		if len(merged) == len(headEntries) {
-			log.Printf("Skipping %s: head already has merged content (%d entries)", path, len(merged))
-			continue
-		}
-
-		// Marshal merged content
-		mergedJSON, err := json.MarshalIndent(merged, "", "  ")
-		if err != nil {
-			log.Printf("Could not marshal merged %s: %v", path, err)
-			continue
-		}
-
-		// Update file in head branch
-		log.Printf("Merging %s: %d entries from main + %d new from head = %d total",
-			path, len(mainEntries), newEntries, len(merged))
-		if err := c.UpdateFile(headBranch, path, "Merge authority file: "+path, string(mergedJSON), headSHA); err != nil {
-			return fmt.Errorf("failed to update %s: %w", path, err)
-		}
-		resolvedCount++
-	}
-
-	// 2. Resolve category index.md files by regenerating them
-	// Get files from BOTH main AND the PR branch under Compendium/, then merge
-	headFiles, err := c.ListFilesInBranch(headBranch, "Compendium")
-	if err != nil {
-		log.Printf("Could not list files in Compendium from %s: %v", headBranch, err)
-		headFiles = []string{}
-	}
-	
-	mainFiles, err := c.ListFilesInBranch("main", "Compendium")
-	if err != nil {
-		log.Printf("Could not list files in Compendium from main: %v", err)
-		mainFiles = []string{}
-	}
-	
-	// Combine files from both branches
-	allFilesSet := make(map[string]bool)
-	for _, file := range headFiles {
-		allFilesSet[file] = true
-	}
-	for _, file := range mainFiles {
-		allFilesSet[file] = true
-	}
-	
-	// Group articles by directory (from combined set)
-	articlesByDir := make(map[string][]string)
-	indexFiles := make(map[string]bool)
-	
-	for file := range allFilesSet {
-		if strings.HasSuffix(file, ".md") {
-			if !strings.Contains(file, "/") {
-				continue // Skip files not in a subdirectory
-			}
-			dir := file[:strings.LastIndex(file, "/")]
-			filename := file[strings.LastIndex(file, "/")+1:]
-
-			if filename == "index.md" {
-				indexFiles[file] = true
-			} else if !strings.HasPrefix(filename, "_") && !strings.Contains(dir, "_incoming") {
-				// Regular article (not starting with _, not in _incoming)
-				// Dedupe by checking if already added
-				found := false
-				for _, existing := range articlesByDir[dir] {
-					if existing == filename {
-						found = true
-						break
-					}
-				}
-				if !found {
-					articlesByDir[dir] = append(articlesByDir[dir], filename)
-				}
-			}
-		}
-	}
-
-	// For each index.md that exists in head branch, regenerate it based on combined articles
-	for indexPath := range indexFiles {
-		dir := indexPath[:strings.LastIndex(indexPath, "/")]
-		articles := articlesByDir[dir]
-
-		if len(articles) == 0 {
-			continue
-		}
-		
-		// Check if this index.md exists in the head branch and get its content + SHA
-		currentContent, indexSHA, err := c.GetFile(headBranch, indexPath)
-		if err != nil {
-			// index.md doesn't exist in head branch, skip
-			continue
-		}
-
-		// Get the category name from the directory path (last component)
-		parts := strings.Split(dir, "/")
-		categoryName := parts[len(parts)-1]
-
-		// Generate index content
-		var sb strings.Builder
-		sb.WriteString("# ")
-		sb.WriteString(categoryName)
-		sb.WriteString(" Articles\n\n")
-
-		// Sort articles for consistent output
-		sortedArticles := make([]string, len(articles))
-		copy(sortedArticles, articles)
-		for i := 0; i < len(sortedArticles)-1; i++ {
-			for j := i + 1; j < len(sortedArticles); j++ {
-				if sortedArticles[i] > sortedArticles[j] {
-					sortedArticles[i], sortedArticles[j] = sortedArticles[j], sortedArticles[i]
-				}
-			}
-		}
-
-		for _, article := range sortedArticles {
-			// Convert filename to title (remove .md, convert dashes to spaces, title case)
-			title := strings.TrimSuffix(article, ".md")
-			title = strings.ReplaceAll(title, "-", " ")
-			// Simple title case
-			words := strings.Fields(title)
-			for i, word := range words {
-				if len(word) > 0 {
-					words[i] = strings.ToUpper(word[:1]) + word[1:]
-				}
-			}
-			title = strings.Join(words, " ")
-
-			sb.WriteString("- [")
-			sb.WriteString(title)
-			sb.WriteString("](")
-			sb.WriteString(article)
-			sb.WriteString(")\n")
-		}
-		sb.WriteString("\n")
-
-		newContent := sb.String()
-		
-		// Skip if content is unchanged
-		if strings.TrimSpace(currentContent) == strings.TrimSpace(newContent) {
-			log.Printf("Skipping %s: content unchanged (%d articles)", indexPath, len(articles))
-			continue
-		}
-
-		// Update the index file
-		log.Printf("Regenerating %s with %d articles", indexPath, len(articles))
-		if err := c.UpdateFile(headBranch, indexPath, "Regenerate category index: "+indexPath, newContent, indexSHA); err != nil {
-			log.Printf("Failed to update %s: %v", indexPath, err)
-			continue
-		}
-		resolvedCount++
-	}
-
-	if resolvedCount == 0 {
-		return fmt.Errorf("no files needed merging")
-	}
-
-	log.Printf("Resolved conflicts in %d files", resolvedCount)
-	
-	// After updating files, try to merge main into the PR branch again
-	// This creates a proper merge commit with the resolved content
-	log.Printf("Attempting to create merge commit for branch %s...", headBranch)
-	if err := c.MergeMainIntoBranch(headBranch); err != nil {
-		log.Printf("Could not create merge commit: %v (this is expected if files still differ)", err)
-	} else {
-		log.Printf("Successfully merged main into %s", headBranch)
-	}
-	
-	return nil
-}
-
-// MergeMainIntoBranch creates a merge commit that merges main into the specified branch.
-// This properly resolves the git history so the PR becomes mergeable.
-func (c *Client) MergeMainIntoBranch(branch string) error {
+// CreateMergeCommitWithResolution creates a merge commit that properly merges main into
+// the PR branch, resolving conflicts in authority files and index.md files.
+// This uses the Git Data API to create a commit with two parents.
+func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -821,28 +581,238 @@ func (c *Client) MergeMainIntoBranch(branch string) error {
 	}
 	branchSHA := branchRef.Object.GetSHA()
 	
-	// Try to create a merge using the repos merge API
-	// This is like running "git merge main" in the PR branch
-	mergeReq := &github.RepositoryMergeRequest{
-		Base:          github.String(branch),
-		Head:          github.String("main"),
-		CommitMessage: github.String("Merge main into " + branch),
-	}
+	log.Printf("Creating merge commit: main(%s) + %s(%s)", mainSHA[:7], branch, branchSHA[:7])
 	
-	_, resp, err := c.client.Repositories.Merge(c.ctx, c.owner, c.repo, mergeReq)
+	// Get the tree from main (this will be our base)
+	mainCommit, _, err := c.client.Git.GetCommit(c.ctx, c.owner, c.repo, mainSHA)
 	if err != nil {
-		// Check if it's a conflict error (409)
-		if resp != nil && resp.StatusCode == 409 {
-			return fmt.Errorf("merge conflict: branches cannot be automatically merged (main=%s, branch=%s)", mainSHA[:7], branchSHA[:7])
-		}
-		// Check if already merged (204 No Content or similar)
-		if resp != nil && resp.StatusCode == 204 {
-			log.Printf("Branch %s is already up to date with main", branch)
-			return nil
-		}
-		return fmt.Errorf("merge failed: %w", err)
+		return fmt.Errorf("failed to get main commit: %w", err)
+	}
+	baseTreeSHA := mainCommit.Tree.GetSHA()
+	
+	// Get all files from the PR branch that need to be added/merged
+	branchFiles, err := c.ListFilesInBranch(branch, "")
+	if err != nil {
+		return fmt.Errorf("failed to list branch files: %w", err)
 	}
 	
+	mainFiles, err := c.ListFilesInBranch("main", "")
+	if err != nil {
+		return fmt.Errorf("failed to list main files: %w", err)
+	}
+	
+	// Build a set of main files for quick lookup
+	mainFileSet := make(map[string]bool)
+	for _, f := range mainFiles {
+		mainFileSet[f] = true
+	}
+	
+	// Collect tree entries for files that need special handling
+	var treeEntries []*github.TreeEntry
+	
+	// 1. Add files from PR branch that don't exist in main (new articles, sources, etc.)
+	for _, file := range branchFiles {
+		if mainFileSet[file] {
+			continue // File exists in both - handle conflicts separately
+		}
+		
+		// Get file content from branch
+		content, _, err := c.GetFile(branch, file)
+		if err != nil {
+			log.Printf("Warning: could not get %s from branch: %v", file, err)
+			continue
+		}
+		
+		mode := "100644" // Regular file
+		fileType := "blob"
+		treeEntries = append(treeEntries, &github.TreeEntry{
+			Path:    github.String(file),
+			Mode:    github.String(mode),
+			Type:    github.String(fileType),
+			Content: github.String(content),
+		})
+	}
+	
+	// 2. Handle authority JSON files - merge entries from both branches
+	authorityFiles := []string{
+		"authority/topics.json",
+		"authority/people.json",
+		"authority/orgs.json",
+		"authority/places.json",
+	}
+	
+	for _, path := range authorityFiles {
+		mainContent, _, err := c.GetFile("main", path)
+		if err != nil {
+			continue
+		}
+		branchContent, _, err := c.GetFile(branch, path)
+		if err != nil {
+			continue
+		}
+		
+		// Parse and merge
+		var mainEntries, branchEntries []AuthorityEntry
+		if err := json.Unmarshal([]byte(mainContent), &mainEntries); err != nil {
+			continue
+		}
+		if err := json.Unmarshal([]byte(branchContent), &branchEntries); err != nil {
+			continue
+		}
+		
+		// Merge: start with main, add unique entries from branch
+		seenIDs := make(map[string]bool)
+		var merged []AuthorityEntry
+		for _, e := range mainEntries {
+			seenIDs[e.ID] = true
+			merged = append(merged, e)
+		}
+		for _, e := range branchEntries {
+			if !seenIDs[e.ID] {
+				merged = append(merged, e)
+			}
+		}
+		
+		mergedJSON, err := json.MarshalIndent(merged, "", "  ")
+		if err != nil {
+			continue
+		}
+		
+		treeEntries = append(treeEntries, &github.TreeEntry{
+			Path:    github.String(path),
+			Mode:    github.String("100644"),
+			Type:    github.String("blob"),
+			Content: github.String(string(mergedJSON)),
+		})
+		log.Printf("Merged %s: %d entries", path, len(merged))
+	}
+	
+	// 3. Handle index.md files - regenerate based on combined articles
+	// Get all markdown files from both branches
+	allFiles := make(map[string]bool)
+	for _, f := range mainFiles {
+		allFiles[f] = true
+	}
+	for _, f := range branchFiles {
+		allFiles[f] = true
+	}
+	
+	// Group articles by directory
+	articlesByDir := make(map[string][]string)
+	indexDirs := make(map[string]bool)
+	
+	for file := range allFiles {
+		if !strings.HasSuffix(file, ".md") || !strings.HasPrefix(file, "Compendium/") {
+			continue
+		}
+		if strings.Contains(file, "_incoming") || strings.Contains(file, "_debug") {
+			continue
+		}
+		
+		lastSlash := strings.LastIndex(file, "/")
+		if lastSlash == -1 {
+			continue
+		}
+		dir := file[:lastSlash]
+		filename := file[lastSlash+1:]
+		
+		if filename == "index.md" {
+			indexDirs[dir] = true
+		} else if !strings.HasPrefix(filename, "_") {
+			articlesByDir[dir] = append(articlesByDir[dir], filename)
+		}
+	}
+	
+	// Generate merged index.md for each directory
+	for dir := range indexDirs {
+		articles := articlesByDir[dir]
+		if len(articles) == 0 {
+			continue
+		}
+		
+		// Sort articles
+		for i := 0; i < len(articles)-1; i++ {
+			for j := i + 1; j < len(articles); j++ {
+				if articles[i] > articles[j] {
+					articles[i], articles[j] = articles[j], articles[i]
+				}
+			}
+		}
+		
+		// Get category name
+		parts := strings.Split(dir, "/")
+		categoryName := parts[len(parts)-1]
+		
+		// Generate content
+		var sb strings.Builder
+		sb.WriteString("# ")
+		sb.WriteString(categoryName)
+		sb.WriteString(" Articles\n\n")
+		
+		for _, article := range articles {
+			title := strings.TrimSuffix(article, ".md")
+			title = strings.ReplaceAll(title, "-", " ")
+			words := strings.Fields(title)
+			for i, word := range words {
+				if len(word) > 0 {
+					words[i] = strings.ToUpper(word[:1]) + word[1:]
+				}
+			}
+			title = strings.Join(words, " ")
+			sb.WriteString("- [")
+			sb.WriteString(title)
+			sb.WriteString("](")
+			sb.WriteString(article)
+			sb.WriteString(")\n")
+		}
+		sb.WriteString("\n")
+		
+		indexPath := dir + "/index.md"
+		treeEntries = append(treeEntries, &github.TreeEntry{
+			Path:    github.String(indexPath),
+			Mode:    github.String("100644"),
+			Type:    github.String("blob"),
+			Content: github.String(sb.String()),
+		})
+		log.Printf("Generated %s with %d articles", indexPath, len(articles))
+	}
+	
+	if len(treeEntries) == 0 {
+		return fmt.Errorf("no files to merge")
+	}
+	
+	// Create a new tree based on main's tree with our modifications
+	newTree, _, err := c.client.Git.CreateTree(c.ctx, c.owner, c.repo, baseTreeSHA, treeEntries)
+	if err != nil {
+		return fmt.Errorf("failed to create tree: %w", err)
+	}
+	log.Printf("Created tree: %s", newTree.GetSHA()[:7])
+	
+	// Create a merge commit with two parents
+	commitMessage := "Merge main into " + branch + " (resolved conflicts)"
+	newCommit, _, err := c.client.Git.CreateCommit(c.ctx, c.owner, c.repo, &github.Commit{
+		Message: github.String(commitMessage),
+		Tree:    &github.Tree{SHA: newTree.SHA},
+		Parents: []*github.Commit{
+			{SHA: github.String(mainSHA)},
+			{SHA: github.String(branchSHA)},
+		},
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create commit: %w", err)
+	}
+	log.Printf("Created merge commit: %s", newCommit.GetSHA()[:7])
+	
+	// Update the branch ref to point to the new commit
+	_, _, err = c.client.Git.UpdateRef(c.ctx, c.owner, c.repo, &github.Reference{
+		Ref:    github.String("refs/heads/" + branch),
+		Object: &github.GitObject{SHA: newCommit.SHA},
+	}, false)
+	if err != nil {
+		return fmt.Errorf("failed to update branch ref: %w", err)
+	}
+	
+	log.Printf("Updated %s to %s", branch, newCommit.GetSHA()[:7])
 	return nil
 }
 

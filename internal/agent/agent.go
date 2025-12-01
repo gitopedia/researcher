@@ -393,41 +393,23 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 			log.Printf("PR #%d mergeable status unknown - GitHub is calculating, will check on next run", pr.Number)
 		} else if !*status.Mergeable {
 			// PR has conflicts - try to update the branch by merging main into it
-			log.Printf("PR #%d has merge conflicts - attempting to update branch from main...", pr.Number)
+			log.Printf("PR #%d has merge conflicts - attempting to resolve...", pr.Number)
+			if pr.HeadBranch == "" {
+				slog.Error("Cannot resolve conflicts: PR has no head branch info", "pr", pr.Number)
+				continue
+			}
+			
+			// Try GitHub's simple UpdateBranch first (works for non-conflicting cases)
 			if err := a.gh.UpdatePRBranch(pr.Number); err != nil {
-				// GitHub's UpdateBranch failed - likely due to actual file conflicts
-				// Try to resolve authority file conflicts programmatically
-				log.Printf("PR #%d: GitHub merge failed, attempting to resolve authority file conflicts...", pr.Number)
-				if pr.HeadBranch == "" {
-					slog.Error("Cannot resolve conflicts: PR has no head branch info", "pr", pr.Number)
+				// GitHub's UpdateBranch failed - need to create a merge commit manually
+				log.Printf("PR #%d: simple merge failed, creating merge commit with conflict resolution...", pr.Number)
+				if resolveErr := a.gh.CreateMergeCommitWithResolution(pr.HeadBranch); resolveErr != nil {
+					slog.Error("Failed to create merge commit", "pr", pr.Number, "error", resolveErr)
+					log.Printf("PR #%d needs manual conflict resolution", pr.Number)
 				} else {
-					resolveErr := a.gh.ResolveAuthorityConflicts(pr.HeadBranch)
-					if resolveErr != nil {
-						// Check if error indicates we've already tried (no files needed merging)
-						if strings.Contains(resolveErr.Error(), "no files needed merging") {
-							// We've already resolved the files but PR is still unmergeable.
-							// This means the conflict is in the git history, not file contents.
-							// Close the PR so the issue can spawn a new PR from current main.
-							log.Printf("PR #%d: authority files already merged but PR still has conflicts - closing PR to allow fresh start", pr.Number)
-							if closeErr := a.gh.ClosePR(pr.Number); closeErr != nil {
-								slog.Error("Failed to close stuck PR", "pr", pr.Number, "error", closeErr)
-							} else {
-								log.Printf("PR #%d closed - associated issues will spawn new PRs on next run", pr.Number)
-							}
-						} else {
-							slog.Error("Failed to resolve authority conflicts", "pr", pr.Number, "error", resolveErr)
-							log.Printf("PR #%d needs manual conflict resolution", pr.Number)
-						}
-					} else {
-						// Successfully resolved conflicts by pushing new commits to the PR branch.
-						// Don't try to merge immediately - CI needs to run on the new commits first,
-						// and GitHub needs time to recalculate the mergeable status.
-						log.Printf("PR #%d conflicts resolved by merging authority files - CI will re-run, will check on next run", pr.Number)
-					}
+					log.Printf("PR #%d: merge commit created - CI will re-run, will check on next run", pr.Number)
 				}
 			} else {
-				// GitHub's UpdateBranch succeeded - the base branch was merged into the PR branch.
-				// CI needs to run on the new head before we can merge.
 				log.Printf("PR #%d branch updated from main - CI will re-run, will check on next run", pr.Number)
 			}
 		}
