@@ -398,7 +398,7 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 				slog.Error("Cannot resolve conflicts: PR has no head branch info", "pr", pr.Number)
 				continue
 			}
-			
+
 			// Try GitHub's simple UpdateBranch first (works for non-conflicting cases)
 			if err := a.gh.UpdatePRBranch(pr.Number); err != nil {
 				// GitHub's UpdateBranch failed - need to create a merge commit manually
