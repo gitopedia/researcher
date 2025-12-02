@@ -563,6 +563,8 @@ type AuthorityEntry struct {
 // the PR branch, resolving conflicts in authority files and index.md files.
 // This uses the Git Data API to create a commit with two parents.
 func (c *Client) CreateMergeCommitWithResolution(branch string) error {
+	log.Printf("[MergeCommit] Starting merge commit creation for branch: %s", branch)
+	
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -573,6 +575,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		return fmt.Errorf("failed to get main ref: %w", err)
 	}
 	mainSHA := mainRef.Object.GetSHA()
+	log.Printf("[MergeCommit] Main HEAD: %s", mainSHA[:7])
 	
 	// Get the SHA of the branch's HEAD
 	branchRef, _, err := c.client.Git.GetRef(c.ctx, c.owner, c.repo, "heads/"+branch)
@@ -580,8 +583,9 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		return fmt.Errorf("failed to get branch ref: %w", err)
 	}
 	branchSHA := branchRef.Object.GetSHA()
+	log.Printf("[MergeCommit] Branch HEAD: %s", branchSHA[:7])
 	
-	log.Printf("Creating merge commit: main(%s) + %s(%s)", mainSHA[:7], branch, branchSHA[:7])
+	log.Printf("[MergeCommit] Creating merge commit: main(%s) + %s(%s)", mainSHA[:7], branch, branchSHA[:7])
 	
 	// Get the tree from main (this will be our base)
 	mainCommit, _, err := c.client.Git.GetCommit(c.ctx, c.owner, c.repo, mainSHA)
@@ -589,17 +593,22 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		return fmt.Errorf("failed to get main commit: %w", err)
 	}
 	baseTreeSHA := mainCommit.Tree.GetSHA()
+	log.Printf("[MergeCommit] Base tree SHA: %s", baseTreeSHA[:7])
 	
 	// Get all files from the PR branch that need to be added/merged
+	log.Printf("[MergeCommit] Listing files in branch: %s", branch)
 	branchFiles, err := c.ListFilesInBranch(branch, "")
 	if err != nil {
 		return fmt.Errorf("failed to list branch files: %w", err)
 	}
+	log.Printf("[MergeCommit] Branch has %d files", len(branchFiles))
 	
+	log.Printf("[MergeCommit] Listing files in main")
 	mainFiles, err := c.ListFilesInBranch("main", "")
 	if err != nil {
 		return fmt.Errorf("failed to list main files: %w", err)
 	}
+	log.Printf("[MergeCommit] Main has %d files", len(mainFiles))
 	
 	// Build a set of main files for quick lookup
 	mainFileSet := make(map[string]bool)
@@ -609,8 +618,10 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	
 	// Collect tree entries for files that need special handling
 	var treeEntries []*github.TreeEntry
+	newFilesCount := 0
 	
 	// 1. Add files from PR branch that don't exist in main (new articles, sources, etc.)
+	log.Printf("[MergeCommit] Step 1: Adding new files from branch...")
 	for _, file := range branchFiles {
 		if mainFileSet[file] {
 			continue // File exists in both - handle conflicts separately
@@ -619,7 +630,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		// Get file content from branch
 		content, _, err := c.GetFile(branch, file)
 		if err != nil {
-			log.Printf("Warning: could not get %s from branch: %v", file, err)
+			log.Printf("[MergeCommit] Warning: could not get %s from branch: %v", file, err)
 			continue
 		}
 		
@@ -631,9 +642,12 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 			Type:    github.String(fileType),
 			Content: github.String(content),
 		})
+		newFilesCount++
 	}
+	log.Printf("[MergeCommit] Added %d new files from branch", newFilesCount)
 	
 	// 2. Handle authority JSON files - merge entries from both branches
+	log.Printf("[MergeCommit] Step 2: Merging authority JSON files...")
 	authorityFiles := []string{
 		"authority/topics.json",
 		"authority/people.json",
@@ -644,21 +658,27 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	for _, path := range authorityFiles {
 		mainContent, _, err := c.GetFile("main", path)
 		if err != nil {
+			log.Printf("[MergeCommit] Skipping %s: not in main (%v)", path, err)
 			continue
 		}
 		branchContent, _, err := c.GetFile(branch, path)
 		if err != nil {
+			log.Printf("[MergeCommit] Skipping %s: not in branch (%v)", path, err)
 			continue
 		}
 		
 		// Parse and merge
 		var mainEntries, branchEntries []AuthorityEntry
 		if err := json.Unmarshal([]byte(mainContent), &mainEntries); err != nil {
+			log.Printf("[MergeCommit] Skipping %s: failed to parse main content (%v)", path, err)
 			continue
 		}
 		if err := json.Unmarshal([]byte(branchContent), &branchEntries); err != nil {
+			log.Printf("[MergeCommit] Skipping %s: failed to parse branch content (%v)", path, err)
 			continue
 		}
+		
+		log.Printf("[MergeCommit] %s: main has %d entries, branch has %d entries", path, len(mainEntries), len(branchEntries))
 		
 		// Merge: start with main, add unique entries from branch
 		seenIDs := make(map[string]bool)
@@ -667,14 +687,17 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 			seenIDs[e.ID] = true
 			merged = append(merged, e)
 		}
+		newEntriesCount := 0
 		for _, e := range branchEntries {
 			if !seenIDs[e.ID] {
 				merged = append(merged, e)
+				newEntriesCount++
 			}
 		}
 		
 		mergedJSON, err := json.MarshalIndent(merged, "", "  ")
 		if err != nil {
+			log.Printf("[MergeCommit] Skipping %s: failed to marshal merged content (%v)", path, err)
 			continue
 		}
 		
@@ -684,10 +707,11 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 			Type:    github.String("blob"),
 			Content: github.String(string(mergedJSON)),
 		})
-		log.Printf("Merged %s: %d entries", path, len(merged))
+		log.Printf("[MergeCommit] Merged %s: %d total entries (+%d new from branch)", path, len(merged), newEntriesCount)
 	}
 	
 	// 3. Handle index.md files - regenerate based on combined articles
+	log.Printf("[MergeCommit] Step 3: Regenerating index.md files...")
 	// Get all markdown files from both branches
 	allFiles := make(map[string]bool)
 	for _, f := range mainFiles {
@@ -696,6 +720,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	for _, f := range branchFiles {
 		allFiles[f] = true
 	}
+	log.Printf("[MergeCommit] Total unique files across both branches: %d", len(allFiles))
 	
 	// Group articles by directory
 	articlesByDir := make(map[string][]string)
@@ -777,19 +802,23 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		log.Printf("Generated %s with %d articles", indexPath, len(articles))
 	}
 	
+	log.Printf("[MergeCommit] Total tree entries to create: %d", len(treeEntries))
+	
 	if len(treeEntries) == 0 {
-		return fmt.Errorf("no files to merge")
+		return fmt.Errorf("no files to merge - this may indicate the branch is already up to date or has no new content")
 	}
 	
 	// Create a new tree based on main's tree with our modifications
+	log.Printf("[MergeCommit] Creating new tree based on main's tree (%s)...", baseTreeSHA[:7])
 	newTree, _, err := c.client.Git.CreateTree(c.ctx, c.owner, c.repo, baseTreeSHA, treeEntries)
 	if err != nil {
 		return fmt.Errorf("failed to create tree: %w", err)
 	}
-	log.Printf("Created tree: %s", newTree.GetSHA()[:7])
+	log.Printf("[MergeCommit] Created tree: %s", newTree.GetSHA()[:7])
 	
 	// Create a merge commit with two parents
 	commitMessage := "Merge main into " + branch + " (resolved conflicts)"
+	log.Printf("[MergeCommit] Creating merge commit with parents: main(%s), branch(%s)", mainSHA[:7], branchSHA[:7])
 	newCommit, _, err := c.client.Git.CreateCommit(c.ctx, c.owner, c.repo, &github.Commit{
 		Message: github.String(commitMessage),
 		Tree:    &github.Tree{SHA: newTree.SHA},
@@ -801,9 +830,10 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create commit: %w", err)
 	}
-	log.Printf("Created merge commit: %s", newCommit.GetSHA()[:7])
+	log.Printf("[MergeCommit] Created merge commit: %s", newCommit.GetSHA()[:7])
 	
 	// Update the branch ref to point to the new commit
+	log.Printf("[MergeCommit] Updating branch ref to point to new commit...")
 	_, _, err = c.client.Git.UpdateRef(c.ctx, c.owner, c.repo, &github.Reference{
 		Ref:    github.String("refs/heads/" + branch),
 		Object: &github.GitObject{SHA: newCommit.SHA},
@@ -812,7 +842,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		return fmt.Errorf("failed to update branch ref: %w", err)
 	}
 	
-	log.Printf("Updated %s to %s", branch, newCommit.GetSHA()[:7])
+	log.Printf("[MergeCommit] SUCCESS: Updated %s to %s", branch, newCommit.GetSHA()[:7])
 	return nil
 }
 

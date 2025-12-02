@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -16,6 +17,11 @@ import (
 )
 
 func main() {
+	// Parse CLI flags
+	mergeOnly := flag.Bool("merge-only", false, "Only run the PR merge logic, don't process new issues")
+	once := flag.Bool("once", false, "Run once and exit (no loop)")
+	flag.Parse()
+
 	// Initialize structured, colorized logging using Go's standard library slog,
 	// and route the standard log package through it.
 	logging.Init()
@@ -30,8 +36,14 @@ func main() {
 		log.Println("config/.env not found, using config/base.env defaults only")
 	}
 
-	log.Println("Starting Researcher Agent (Go)...")
-	log.Println("Press Ctrl+C to gracefully shutdown (will wait for current task to complete)")
+	if *mergeOnly {
+		log.Println("Starting Researcher Agent (merge-only mode)...")
+	} else {
+		log.Println("Starting Researcher Agent (Go)...")
+	}
+	if !*once {
+		log.Println("Press Ctrl+C to gracefully shutdown (will wait for current task to complete)")
+	}
 
 	// Create a context that can be cancelled with signals (Ctrl+C)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -93,7 +105,12 @@ func main() {
 		taskMu.Unlock()
 
 		// Run one iteration
-		err := a.Run(ctx)
+		var err error
+		if *mergeOnly {
+			err = a.MergeOnly(ctx)
+		} else {
+			err = a.Run(ctx)
+		}
 
 		taskMu.Lock()
 		taskRunning = false
@@ -111,6 +128,12 @@ func main() {
 
 		if shouldExit {
 			log.Println("Shutdown requested, exiting after task completion")
+			break
+		}
+
+		// Exit after one run if --once flag is set
+		if *once {
+			log.Println("Single run completed (--once mode)")
 			break
 		}
 

@@ -54,6 +54,12 @@ func NewAgentWithDeps(gh github.GitHubClient, s search.Searcher, l llm.Generator
 	}
 }
 
+// MergeOnly runs only the PR merging logic without processing new issues
+func (a *Agent) MergeOnly(ctx context.Context) error {
+	log.Println("Running merge-only mode...")
+	return a.mergeReadyPRs(ctx)
+}
+
 func (a *Agent) Run(ctx context.Context) error {
 	// First, check if any PRs are ready to merge
 	if err := a.mergeReadyPRs(ctx); err != nil {
@@ -393,24 +399,27 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 			log.Printf("PR #%d mergeable status unknown - GitHub is calculating, will check on next run", pr.Number)
 		} else if !*status.Mergeable {
 			// PR has conflicts - try to update the branch by merging main into it
-			log.Printf("PR #%d has merge conflicts - attempting to resolve...", pr.Number)
+			log.Printf("PR #%d has merge conflicts (mergeable=false) - attempting to resolve...", pr.Number)
+			log.Printf("PR #%d: Head branch = %s", pr.Number, pr.HeadBranch)
 			if pr.HeadBranch == "" {
 				slog.Error("Cannot resolve conflicts: PR has no head branch info", "pr", pr.Number)
 				continue
 			}
 
 			// Try GitHub's simple UpdateBranch first (works for non-conflicting cases)
+			log.Printf("PR #%d: Trying GitHub's UpdateBranch API first...", pr.Number)
 			if err := a.gh.UpdatePRBranch(pr.Number); err != nil {
 				// GitHub's UpdateBranch failed - need to create a merge commit manually
-				log.Printf("PR #%d: simple merge failed, creating merge commit with conflict resolution...", pr.Number)
+				log.Printf("PR #%d: GitHub UpdateBranch failed: %v", pr.Number, err)
+				log.Printf("PR #%d: Creating merge commit with conflict resolution...", pr.Number)
 				if resolveErr := a.gh.CreateMergeCommitWithResolution(pr.HeadBranch); resolveErr != nil {
-					slog.Error("Failed to create merge commit", "pr", pr.Number, "error", resolveErr)
-					log.Printf("PR #%d needs manual conflict resolution", pr.Number)
+					slog.Error("Failed to create merge commit", "pr", pr.Number, "branch", pr.HeadBranch, "error", resolveErr)
+					log.Printf("PR #%d needs manual conflict resolution - error: %v", pr.Number, resolveErr)
 				} else {
-					log.Printf("PR #%d: merge commit created - CI will re-run, will check on next run", pr.Number)
+					log.Printf("PR #%d: merge commit created successfully - CI will re-run, will check on next run", pr.Number)
 				}
 			} else {
-				log.Printf("PR #%d branch updated from main - CI will re-run, will check on next run", pr.Number)
+				log.Printf("PR #%d: GitHub UpdateBranch succeeded - CI will re-run, will check on next run", pr.Number)
 			}
 		}
 	}
