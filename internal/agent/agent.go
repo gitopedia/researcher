@@ -886,6 +886,18 @@ tags: %s
 	content := articleResult.Content
 	articleModel := articleResult.Model
 
+	// Save thinking trace to debug directory if enabled
+	if articleResult.Thinking != "" && debugSources {
+		thinkingPath := fmt.Sprintf("Compendium/_debug/articles/%s/thinking.txt", slug)
+		thinkingContent := fmt.Sprintf("# Thinking Trace for: %s\n# Model: %s\n# Generated: %s\n\n%s",
+			topic, articleModel, time.Now().UTC().Format(time.RFC3339), articleResult.Thinking)
+		if err := a.gh.CreateFile(branchName, thinkingPath, "Add thinking trace for "+topic, thinkingContent); err != nil {
+			slog.Warn("Failed to save thinking trace", "path", thinkingPath, "error", err)
+		} else {
+			log.Printf("Saved thinking trace (%d chars) to %s", len(articleResult.Thinking), thinkingPath)
+		}
+	}
+
 	// Strip code fences if the LLM wrapped the content in them
 	// Some LLMs wrap YAML frontmatter in ```yaml ... ``` which breaks rendering
 	content = stripCodeFences(content)

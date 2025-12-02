@@ -41,8 +41,9 @@ type ArticleCategory struct {
 
 // ArticleResult contains the generated article content and metadata
 type ArticleResult struct {
-	Content string // The generated article markdown
-	Model   string // The model used to generate the article
+	Content  string // The generated article markdown
+	Model    string // The model used to generate the article
+	Thinking string // The model's reasoning trace (if thinking mode enabled)
 }
 
 type Generator interface {

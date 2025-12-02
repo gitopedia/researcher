@@ -6,7 +6,9 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"text/template"
@@ -19,7 +21,10 @@ var promptsFS embed.FS
 
 type Client struct {
 	client                           *openai.Client
+	httpClient                       *http.Client
 	baseUrl                          string
+	ollamaBaseUrl                    string // Ollama native API URL (without /v1)
+	thinkMode                        string // "true", "false", "low", "medium", "high"
 	modelGenerateArticle             string
 	modelExtractEntities             string
 	modelSuggestTopics               string
@@ -37,6 +42,9 @@ type Client struct {
 	convertSummaryUserTemplate       *template.Template
 }
 
+// ThinkingCallback is called when thinking output is available
+type ThinkingCallback func(taskName, model, thinking string)
+
 func NewClient() (*Client, error) {
 	apiKey := os.Getenv("LLM_API_KEY")
 	if apiKey == "" {
@@ -51,6 +59,19 @@ func NewClient() (*Client, error) {
 	}
 	if baseUrl == "" {
 		baseUrl = "http://localhost:11434/v1"
+	}
+
+	// Derive Ollama native API URL (strip /v1 suffix if present)
+	ollamaBaseUrl := strings.TrimSuffix(baseUrl, "/v1")
+	ollamaBaseUrl = strings.TrimSuffix(ollamaBaseUrl, "/")
+
+	// Think mode configuration
+	thinkMode := os.Getenv("LLM_THINK_MODE")
+	if thinkMode == "" {
+		thinkMode = "false"
+	}
+	if thinkMode != "false" {
+		log.Printf("LLM Think Mode enabled: %s", thinkMode)
 	}
 
 	// Model configuration - multi-model support for optimized performance
@@ -160,7 +181,10 @@ func NewClient() (*Client, error) {
 
 	return &Client{
 		client:                        openai.NewClientWithConfig(config),
+		httpClient:                    &http.Client{},
 		baseUrl:                       baseUrl,
+		ollamaBaseUrl:                 ollamaBaseUrl,
+		thinkMode:                     thinkMode,
 		modelGenerateArticle:          modelGenerateArticle,
 		modelExtractEntities:          modelExtractEntities,
 		modelSuggestTopics:            modelSuggestTopics,
@@ -177,6 +201,97 @@ func NewClient() (*Client, error) {
 		convertSummarySystemTemplate:  convertSummarySystem,
 		convertSummaryUserTemplate:    convertSummaryUser,
 	}, nil
+}
+
+// ollamaChatMessage represents a message in Ollama's chat format
+type ollamaChatMessage struct {
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+	Thinking string `json:"thinking,omitempty"`
+}
+
+// ollamaChatRequest represents an Ollama chat API request
+type ollamaChatRequest struct {
+	Model    string              `json:"model"`
+	Messages []ollamaChatMessage `json:"messages"`
+	Stream   bool                `json:"stream"`
+	Think    interface{}         `json:"think,omitempty"` // bool or string ("low", "medium", "high")
+	Options  map[string]float64  `json:"options,omitempty"`
+}
+
+// ollamaChatResponse represents an Ollama chat API response
+type ollamaChatResponse struct {
+	Model   string `json:"model"`
+	Message struct {
+		Role     string `json:"role"`
+		Content  string `json:"content"`
+		Thinking string `json:"thinking,omitempty"`
+	} `json:"message"`
+	Done bool `json:"done"`
+}
+
+// chatWithThinking calls Ollama's native API with thinking enabled
+func (c *Client) chatWithThinking(ctx context.Context, model string, messages []ollamaChatMessage, temperature float64) (*ollamaChatResponse, error) {
+	// Determine think parameter value
+	var thinkParam interface{}
+	switch c.thinkMode {
+	case "false", "":
+		thinkParam = false
+	case "true":
+		thinkParam = true
+	case "low", "medium", "high":
+		thinkParam = c.thinkMode
+	default:
+		thinkParam = true
+	}
+
+	req := ollamaChatRequest{
+		Model:    model,
+		Messages: messages,
+		Stream:   false,
+		Think:    thinkParam,
+		Options:  map[string]float64{"temperature": temperature},
+	}
+
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.ollamaBaseUrl+"/api/chat", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ollama API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var chatResp ollamaChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &chatResp, nil
+}
+
+// ThinkingEnabled returns true if thinking mode is enabled
+func (c *Client) ThinkingEnabled() bool {
+	return c.thinkMode != "" && c.thinkMode != "false"
+}
+
+// GetLastThinking returns the thinking trace from the last API call (if available)
+// This is a placeholder - actual implementation stores thinking in response
+func (c *Client) GetLastThinking() string {
+	return "" // Thinking is returned per-call now
 }
 
 func getEnvOrDefault(key, defaultValue string) string {
@@ -211,6 +326,28 @@ func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string)
 		return nil, fmt.Errorf("failed to execute user template: %w", err)
 	}
 
+	// Use thinking mode if enabled
+	if c.ThinkingEnabled() {
+		log.Printf("GenerateArticle: Using thinking mode (%s) with model %s", c.thinkMode, c.modelGenerateArticle)
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.7)
+		if err != nil {
+			return nil, err
+		}
+		if resp.Message.Thinking != "" {
+			log.Printf("GenerateArticle: Received thinking trace (%d chars)", len(resp.Message.Thinking))
+		}
+		return &ArticleResult{
+			Content:  resp.Message.Content,
+			Model:    c.modelGenerateArticle,
+			Thinking: resp.Message.Thinking,
+		}, nil
+	}
+
+	// Standard OpenAI-compatible API call
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{

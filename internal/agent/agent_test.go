@@ -70,8 +70,9 @@ type MockLLM struct{}
 
 func (m *MockLLM) GenerateArticle(ctx context.Context, t, c string) (*llm.ArticleResult, error) {
 	return &llm.ArticleResult{
-		Content: "# Article\nContent",
-		Model:   "mock-model",
+		Content:  "# Article\nContent",
+		Model:    "mock-model",
+		Thinking: "",
 	}, nil
 }
 
