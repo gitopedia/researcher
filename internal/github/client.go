@@ -537,6 +537,71 @@ func (c *Client) ListClosedIssuesWithLabel(label string, limit int) ([]*github.I
 	return issues, err
 }
 
+// GetFailedCILogs retrieves logs from failed CI workflow runs for a PR.
+// It returns a summary of failed jobs and their error messages.
+func (c *Client) GetFailedCILogs(prNumber int) (string, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return "", fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	// Get the PR to find the head SHA
+	pr, _, err := c.client.PullRequests.Get(c.ctx, c.owner, c.repo, prNumber)
+	if err != nil {
+		return "", fmt.Errorf("failed to get PR: %w", err)
+	}
+	headSHA := pr.GetHead().GetSHA()
+
+	// List check runs for the commit
+	checkRuns, _, err := c.client.Checks.ListCheckRunsForRef(c.ctx, c.owner, c.repo, headSHA, &github.ListCheckRunsOptions{
+		Status: github.String("completed"),
+		ListOptions: github.ListOptions{PerPage: 50},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to list check runs: %w", err)
+	}
+
+	var failedLogs strings.Builder
+	for _, run := range checkRuns.CheckRuns {
+		if run.GetConclusion() == "failure" {
+			failedLogs.WriteString(fmt.Sprintf("## Failed: %s\n", run.GetName()))
+			
+			// Try to get annotations which often contain error details
+			annotations, _, err := c.client.Checks.ListCheckRunAnnotations(c.ctx, c.owner, c.repo, run.GetID(), &github.ListOptions{PerPage: 50})
+			if err == nil && len(annotations) > 0 {
+				for _, ann := range annotations {
+					failedLogs.WriteString(fmt.Sprintf("- %s:%d: %s\n", ann.GetPath(), ann.GetStartLine(), ann.GetMessage()))
+				}
+			}
+			
+			// Include the output summary if available
+			if run.Output != nil && run.Output.Summary != nil {
+				summary := run.Output.GetSummary()
+				if len(summary) > 500 {
+					summary = summary[:500] + "..."
+				}
+				failedLogs.WriteString(fmt.Sprintf("Summary: %s\n", summary))
+			}
+			
+			// Include the output text if available (often contains error details)
+			if run.Output != nil && run.Output.Text != nil {
+				text := run.Output.GetText()
+				if len(text) > 1000 {
+					text = text[:1000] + "..."
+				}
+				failedLogs.WriteString(fmt.Sprintf("Details:\n%s\n", text))
+			}
+			
+			failedLogs.WriteString("\n")
+		}
+	}
+
+	if failedLogs.Len() == 0 {
+		return "No failed CI runs found", nil
+	}
+
+	return failedLogs.String(), nil
+}
+
 // UpdatePRBranch updates the PR branch by merging the base branch (main) into it.
 // This resolves conflicts when the PR is behind the base branch.
 func (c *Client) UpdatePRBranch(prNumber int) error {

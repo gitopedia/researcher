@@ -109,9 +109,9 @@ func (m *Manager) findEntity(entries []EntityEntry, name string) string {
 }
 
 func (m *Manager) createEntity(typeKey, name string) (string, EntityEntry) {
-	// ID format: type:slug-ulid (to ensure uniqueness and readability)
-	// e.g. org:openai-01H...
-	slug := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+	// ID format: type:slug (to ensure uniqueness and readability)
+	// e.g. org:openai, person:albert-einstein
+	slug := sanitizeSlug(name)
 	// keep slug reasonable length (long enough to avoid collisions)
 	if len(slug) > 200 {
 		slug = slug[:200]
@@ -148,6 +148,56 @@ func (m *Manager) idExists(typeKey, id string) bool {
 		}
 	}
 	return false
+}
+
+// sanitizeSlug creates a YAML-safe slug from an entity name.
+// It removes or replaces characters that would break YAML parsing when used in arrays.
+// Examples:
+//   - "Cathy O'Neil (author, \"Weapons of Math Destruction\")" -> "cathy-oneil"
+//   - "John Smith (physicist)" -> "john-smith"
+//   - "Apple Inc." -> "apple-inc"
+func sanitizeSlug(name string) string {
+	// First, extract the main name before any parenthetical qualifier
+	// This handles cases like "John Smith (physicist)" -> "John Smith"
+	mainName := name
+	if idx := strings.Index(name, "("); idx > 0 {
+		mainName = strings.TrimSpace(name[:idx])
+	}
+
+	// Convert to lowercase
+	slug := strings.ToLower(mainName)
+
+	// Replace spaces with hyphens
+	slug = strings.ReplaceAll(slug, " ", "-")
+
+	// Remove or replace problematic characters for YAML
+	// These characters break YAML array syntax: " ' [ ] { } , : # & * ! | > < ` @ %
+	var result strings.Builder
+	for _, r := range slug {
+		switch {
+		case r >= 'a' && r <= 'z':
+			result.WriteRune(r)
+		case r >= '0' && r <= '9':
+			result.WriteRune(r)
+		case r == '-':
+			result.WriteRune(r)
+		case r == '.':
+			result.WriteRune(r)
+		// Skip all other characters (quotes, brackets, etc.)
+		}
+	}
+
+	slug = result.String()
+
+	// Clean up multiple consecutive hyphens
+	for strings.Contains(slug, "--") {
+		slug = strings.ReplaceAll(slug, "--", "-")
+	}
+
+	// Trim leading/trailing hyphens and dots
+	slug = strings.Trim(slug, "-.")
+
+	return slug
 }
 
 type FileUpdate struct {

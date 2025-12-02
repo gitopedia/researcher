@@ -389,7 +389,20 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 
 		// Handle different PR states
 		if status.CIStatus == "failure" {
-			log.Printf("PR #%d has failed CI - needs manual attention", pr.Number)
+			log.Printf("PR #%d has failed CI - investigating...", pr.Number)
+			// Try to get CI logs to understand the failure
+			if logs, err := a.gh.GetFailedCILogs(pr.Number); err == nil && logs != "" {
+				log.Printf("PR #%d CI failure details:\n%s", pr.Number, logs)
+				
+				// Check for common fixable issues
+				if strings.Contains(logs, "yaml:") || strings.Contains(logs, "front matter error") {
+					log.Printf("PR #%d: YAML parsing error detected - this may be due to invalid characters in entity names", pr.Number)
+					log.Printf("PR #%d: Consider checking the article frontmatter for quotes or special characters", pr.Number)
+				}
+			} else if err != nil {
+				slog.Warn("Could not fetch CI logs", "pr", pr.Number, "error", err)
+			}
+			log.Printf("PR #%d needs manual attention to fix CI failure", pr.Number)
 		} else if status.Draft {
 			log.Printf("PR #%d is still a draft - waiting for Encyclopaedist", pr.Number)
 		} else if status.CIStatus == "pending" {
