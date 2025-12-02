@@ -758,6 +758,16 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 			continue
 		}
 
+		// Extract entities FIRST - skip source entirely if this fails
+		sourceEntities, err := a.llm.ExtractEntities(ctx, summary.Summary)
+		if err != nil {
+			slog.Warn("Entity extraction failed for source after retries, skipping source entirely",
+				"error", err, "url", t.result.Href)
+			skippedCount++
+			skippedReasons["entity extraction failed"]++
+			continue
+		}
+
 		// Increment summary count for this query (only successful summaries count)
 		summariesPerQuery[t.queryIndex]++
 		processedCount++
@@ -774,13 +784,6 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 			domain := strings.ReplaceAll(u.Host, ".", "-")
 			sourceID := ulid.Make().String()
 			sourcePath := fmt.Sprintf("Compendium/_incoming/sources/%s--%s-%d.md", slug, domain, processedCount)
-
-			// Extract entities from source content for knowledge base ingestion
-			sourceEntities, err := a.llm.ExtractEntities(ctx, summary.Summary)
-			if err != nil {
-				slog.Warn("Entity extraction failed for source", "error", err)
-				sourceEntities = []llm.ExtractedEntity{}
-			}
 
 			// Add the parent topic as an entity
 			sourceEntities = append(sourceEntities, llm.ExtractedEntity{Name: topic, Type: llm.Topic})

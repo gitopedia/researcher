@@ -240,6 +240,8 @@ func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string)
 }
 
 func (c *Client) ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error) {
+	const maxRetries = 3
+
 	// Execute system template
 	var systemBuf bytes.Buffer
 	if err := c.extractEntitiesSystemTemplate.Execute(&systemBuf, nil); err != nil {
@@ -255,36 +257,74 @@ func (c *Client) ExtractEntities(ctx context.Context, content string) ([]Extract
 		return nil, fmt.Errorf("failed to execute user template: %w", err)
 	}
 
-	resp, err := c.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: c.modelExtractEntities,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleSystem,
-					Content: systemBuf.String(),
-				},
-				{
-					Role:    openai.ChatMessageRoleUser,
-					Content: userBuf.String(),
-				},
+	var lastError error
+	var lastRawResponse string
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		messages := []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemBuf.String(),
 			},
-			Temperature: 0.0, // Deterministic
-		},
-	)
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: userBuf.String(),
+			},
+		}
 
-	if err != nil {
-		return nil, err
+		// On retry attempts, add the failed response and a correction message
+		if attempt > 1 && lastRawResponse != "" {
+			messages = append(messages,
+				openai.ChatCompletionMessage{
+					Role:    openai.ChatMessageRoleAssistant,
+					Content: lastRawResponse,
+				},
+				openai.ChatCompletionMessage{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "That response is invalid. You must respond with ONLY a JSON array, starting with [ and ending with ]. No markdown, no explanation, no headers. Just the JSON array. Try again:",
+				},
+			)
+			log.Printf("Entity extraction retry %d/%d after non-JSON response", attempt, maxRetries)
+		}
+
+		resp, err := c.client.CreateChatCompletion(
+			ctx,
+			openai.ChatCompletionRequest{
+				Model:       c.modelExtractEntities,
+				Messages:    messages,
+				Temperature: 0.0,
+			},
+		)
+
+		if err != nil {
+			lastError = err
+			continue
+		}
+
+		rawContent := resp.Choices[0].Message.Content
+		jsonStr, found := extractJSONArray(rawContent)
+
+		if !found {
+			lastRawResponse = rawContent
+			lastError = fmt.Errorf("non-JSON response: %.200s...", rawContent)
+			continue
+		}
+
+		var entities []ExtractedEntity
+		if err := json.Unmarshal([]byte(jsonStr), &entities); err != nil {
+			lastRawResponse = rawContent
+			lastError = fmt.Errorf("failed to parse entities JSON: %w (input: %q)", err, jsonStr)
+			continue
+		}
+
+		// Success
+		if attempt > 1 {
+			log.Printf("Entity extraction succeeded on attempt %d", attempt)
+		}
+		return entities, nil
 	}
 
-	jsonStr := extractJSONArray(resp.Choices[0].Message.Content)
-
-	var entities []ExtractedEntity
-	if err := json.Unmarshal([]byte(jsonStr), &entities); err != nil {
-		return nil, fmt.Errorf("failed to parse entities JSON: %w (input: %q)", err, jsonStr)
-	}
-
-	return entities, nil
+	return nil, fmt.Errorf("entity extraction failed after %d attempts: %w", maxRetries, lastError)
 }
 
 func (c *Client) SuggestTopics(ctx context.Context, category string, existingTopics []string) ([]string, error) {
@@ -326,7 +366,13 @@ func (c *Client) SuggestTopics(ctx context.Context, category string, existingTop
 		return nil, err
 	}
 
-	jsonStr := extractJSONArray(resp.Choices[0].Message.Content)
+	rawContent := resp.Choices[0].Message.Content
+	jsonStr, found := extractJSONArray(rawContent)
+	
+	if !found {
+		log.Printf("Warning: Topic suggestion returned non-JSON response, returning empty topics. Raw response: %.200s...", rawContent)
+		return []string{}, nil
+	}
 
 	var topics []string
 	if err := json.Unmarshal([]byte(jsonStr), &topics); err != nil {
@@ -630,13 +676,15 @@ func detectLanguage(text string) string {
 }
 
 // extractJSONArray finds the first '[' and last ']' to extract the JSON array.
-func extractJSONArray(s string) string {
+// Returns the extracted JSON array, or "[]" if no valid array brackets are found.
+// The second return value indicates whether an array was found.
+func extractJSONArray(s string) (string, bool) {
 	start := strings.Index(s, "[")
 	end := strings.LastIndex(s, "]")
 	if start == -1 || end == -1 || start > end {
-		return s // Return original if pattern not found
+		return "[]", false // Return empty array if pattern not found
 	}
-	return s[start : end+1]
+	return s[start : end+1], true
 }
 
 // extractJSONObject finds the first '{' and matching '}' to extract the JSON object.
