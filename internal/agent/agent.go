@@ -837,7 +837,7 @@ tags: %s
 %s%s---
 
 %s
-`, sourceID, slug, domain, processedCount, t.result.Title, t.result.Href, slug, time.Now().Format("2006-01-02"), sourceTagsStr, sourceFacets, topic, modelField, languageField, summary.Summary)
+`, sourceID, slug, domain, processedCount, t.result.Title, t.result.Href, slug, time.Now().UTC().Format("2006-01-02T15:04:05Z"), sourceTagsStr, sourceFacets, topic, modelField, languageField, summary.Summary)
 
 			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+t.result.Title, sourceContent); err != nil {
 				slog.Error("Failed to save source", "path", sourcePath, "error", err)
@@ -923,7 +923,7 @@ tags: %s
 	// Front Matter
 	id := ulid.Make()
 	// slug is already defined at start of function
-	date := time.Now().Format("2006-01-02")
+	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
 	var tags []string
 	if topicIDs, ok := resolved["topic"]; ok {
