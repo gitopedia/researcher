@@ -36,10 +36,11 @@ func main() {
 		log.Println("config/.env not found, using config/base.env defaults only")
 	}
 
+	log.Printf("Gitopedia Researcher v%s", agent.Version)
 	if *mergeOnly {
-		log.Println("Starting Researcher Agent (merge-only mode)...")
+		log.Println("Starting in merge-only mode...")
 	} else {
-		log.Println("Starting Researcher Agent (Go)...")
+		log.Println("Starting in full mode...")
 	}
 	if !*once {
 		log.Println("Press Ctrl+C to gracefully shutdown (will wait for current task to complete)")

@@ -22,6 +22,18 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
+// Version is set at build time or read from VERSION file
+var Version = "dev"
+
+func init() {
+	// Try to read version from VERSION file if not set at build time
+	if Version == "dev" {
+		if data, err := os.ReadFile("VERSION"); err == nil {
+			Version = strings.TrimSpace(string(data))
+		}
+	}
+}
+
 type Agent struct {
 	gh     github.GitHubClient
 	search search.Searcher
@@ -851,14 +863,15 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 			}
 
 			// Build front matter with optional fields
-			modelField := ""
+			sourceModelField := ""
 			if summary.Model != "" {
-				modelField = fmt.Sprintf("model: \"%s\"\n", summary.Model)
+				sourceModelField = fmt.Sprintf("model: \"%s\"\n", summary.Model)
 			}
 			languageField := ""
 			if summary.Language != "" {
 				languageField = fmt.Sprintf("language: \"%s\"\n", summary.Language)
 			}
+			sourceVersionField := fmt.Sprintf("researcher_version: \"%s\"\n", Version)
 
 			sourceContent := fmt.Sprintf(`---
 id: %s
@@ -870,10 +883,10 @@ related_article: "%s"
 created: %s
 tags: %s
 %ssummary: "Summarized source material for %s"
-%s%s---
+%s%s%s---
 
 %s
-`, sourceID, slug, domain, processedCount, t.result.Title, t.result.Href, slug, time.Now().UTC().Format("2006-01-02T15:04:05Z"), sourceTagsStr, sourceFacets, topic, modelField, languageField, summary.Summary)
+`, sourceID, slug, domain, processedCount, t.result.Title, t.result.Href, slug, time.Now().UTC().Format("2006-01-02T15:04:05Z"), sourceTagsStr, sourceFacets, topic, sourceModelField, languageField, sourceVersionField, summary.Summary)
 
 			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+t.result.Title, sourceContent); err != nil {
 				slog.Error("Failed to save source", "path", sourcePath, "error", err)
@@ -990,11 +1003,12 @@ tags: %s
 		facetsBlock += fmt.Sprintf("places: [\"%s\"]\n", strings.Join(ids, "\", \""))
 	}
 
-	// Build model field for frontmatter
+	// Build model and version fields for frontmatter
 	modelField := ""
 	if articleModel != "" {
 		modelField = fmt.Sprintf("model: \"%s\"\n", articleModel)
 	}
+	versionField := fmt.Sprintf("researcher_version: \"%s\"\n", Version)
 
 	var fullContent string
 	if strings.HasPrefix(strings.TrimSpace(content), "---") {
@@ -1008,7 +1022,7 @@ tags: %s
 				}
 				cleanedLines = append(cleanedLines, line)
 			}
-			injection := fmt.Sprintf("%s\ntags: %s\n%s%s", systemFields, tagsStr, facetsBlock, modelField)
+			injection := fmt.Sprintf("%s\ntags: %s\n%s%s%s", systemFields, tagsStr, facetsBlock, modelField, versionField)
 			newLines := append([]string{cleanedLines[0], injection}, cleanedLines[1:]...)
 			fullContent = strings.Join(newLines, "\n")
 		} else {
@@ -1021,10 +1035,10 @@ title: "%s"
 slug: "%s"
 created: %s
 tags: %s
-%s%ssummary: ""
+%s%s%ssummary: ""
 ---
 
-`, id, topic, slug, date, tagsStr, facetsBlock, modelField)
+`, id, topic, slug, date, tagsStr, facetsBlock, modelField, versionField)
 		fullContent = frontMatter + content
 	}
 
