@@ -163,7 +163,7 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 		category = title
 	}
 
-	// 1. Context: List existing articles
+	// 1. Context: List existing articles (excluding sources, debug, and incoming)
 	log.Println("Listing existing articles...")
 	files, err := a.gh.ListAllFiles("Compendium")
 	if err != nil {
@@ -171,13 +171,27 @@ func (a *Agent) expandCategory(ctx context.Context, issue *gh.Issue) error {
 	}
 	var existingTitles []string
 	for _, f := range files {
-		if strings.HasSuffix(f, ".md") && !strings.HasSuffix(f, "index.md") {
-			// Convert filename to title roughly (slug to title logic is fuzzy but good enough for LLM context)
-			// e.g. Compendium/Technology/AI/OpenAI.md -> OpenAI
-			base := filepath.Base(f)
-			name := strings.TrimSuffix(base, filepath.Ext(base))
-			existingTitles = append(existingTitles, name)
+		// Skip non-markdown files
+		if !strings.HasSuffix(f, ".md") {
+			continue
 		}
+		// Skip index files
+		if strings.HasSuffix(f, "index.md") {
+			continue
+		}
+		// Skip _incoming directory (pending articles and sources)
+		if strings.Contains(f, "_incoming") {
+			continue
+		}
+		// Skip _debug directory
+		if strings.Contains(f, "_debug") {
+			continue
+		}
+		// Convert filename to title roughly (slug to title logic is fuzzy but good enough for LLM context)
+		// e.g. Compendium/Technology/AI/OpenAI.md -> OpenAI
+		base := filepath.Base(f)
+		name := strings.TrimSuffix(base, filepath.Ext(base))
+		existingTitles = append(existingTitles, name)
 	}
 	log.Printf("Found %d existing articles.", len(existingTitles))
 
