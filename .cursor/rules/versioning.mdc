@@ -1,0 +1,111 @@
+# Versioning and Release Management
+
+This project uses semantic versioning. When making changes, follow these guidelines.
+
+## Version File
+
+The current version is stored in `VERSION` at the repository root. This is a plain text file containing just the version number (e.g., `0.3.0`).
+
+## When to Update Version
+
+### Patch Version (0.0.X) - Bug fixes
+Increment for:
+- Bug fixes that don't change behavior
+- Documentation updates
+- Minor refactoring without feature changes
+
+### Minor Version (0.X.0) - New features
+Increment for:
+- New features or capabilities
+- New configuration options
+- New CLI flags
+- Significant improvements to existing features
+
+### Major Version (X.0.0) - Breaking changes
+Increment for:
+- Breaking API changes
+- Breaking configuration changes
+- Major architectural changes
+
+## Changelog Updates
+
+When committing changes, update `CHANGELOG.md`:
+
+1. Add entries under `## [Unreleased]` section (create if it doesn't exist)
+2. Use these categories:
+   - `### Added` - New features
+   - `### Changed` - Changes to existing functionality
+   - `### Fixed` - Bug fixes
+   - `### Removed` - Removed features
+   - `### Deprecated` - Features to be removed
+   - `### Security` - Security fixes
+
+Example entry:
+```markdown
+## [Unreleased]
+
+### Added
+- New feature description
+
+### Fixed
+- Bug fix description
+```
+
+## Commit Message Guidelines
+
+For version-related commits:
+- `feat:` - New feature (triggers minor version consideration)
+- `fix:` - Bug fix (triggers patch version consideration)
+- `docs:` - Documentation only
+- `refactor:` - Code change that neither fixes a bug nor adds a feature
+- `perf:` - Performance improvement
+- `test:` - Adding or updating tests
+- `chore:` - Maintenance tasks
+
+## Release Process
+
+When ready to release a new version:
+
+1. **Update VERSION file** with the new version number
+2. **Update CHANGELOG.md**:
+   - Change `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`
+   - Add comparison link at bottom: `[X.Y.Z]: https://github.com/gitopedia/researcher/compare/vPREV...vX.Y.Z`
+3. **Commit** with message: `release: vX.Y.Z`
+4. **Create git tag**: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
+5. **Push with tags**: `git push origin main --tags`
+
+## Version in Generated Content
+
+The version is automatically embedded in:
+- Article frontmatter (`researcher_version` field)
+- Source summary frontmatter
+- Startup logs
+
+This allows tracking which version of the researcher generated each piece of content.
+
+## Example Workflow
+
+When making a feature change:
+
+```bash
+# 1. Make your code changes
+# 2. Update CHANGELOG.md with your changes under [Unreleased]
+# 3. If releasing, update VERSION and convert [Unreleased] to version header
+# 4. Commit with appropriate prefix
+git commit -m "feat: add new topic suggestion algorithm"
+# 5. Push
+git push origin main
+```
+
+For a release:
+```bash
+# After all features are merged
+# 1. Update VERSION: echo "0.4.0" > VERSION
+# 2. Update CHANGELOG.md with release date
+# 3. Commit
+git commit -am "release: v0.4.0"
+# 4. Tag
+git tag -a v0.4.0 -m "Release v0.4.0"
+# 5. Push with tags
+git push origin main --tags
+```
