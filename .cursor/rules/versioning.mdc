@@ -6,6 +6,32 @@ This project uses semantic versioning. When making changes, follow these guideli
 
 The current version is stored in `VERSION` at the repository root. This is a plain text file containing just the version number (e.g., `0.3.0`).
 
+## Development Versions
+
+Git hooks automatically manage development version suffixes:
+
+- **Locally**: VERSION shows `0.3.0-abc1234` (with commit hash)
+- **In repo**: VERSION shows `0.3.0` (clean base version)
+
+This means every local build is uniquely identified by its commit hash without polluting the git history.
+
+### Setup
+
+Run once to install the git hooks:
+```bash
+./scripts/install-hooks.sh
+```
+
+### How it works
+
+1. **pre-commit hook**: Strips any `-hash` suffix from VERSION before committing
+2. **post-commit hook**: Adds the new commit hash to VERSION after committing
+
+You can also manually update the version:
+```bash
+./scripts/update-version.sh
+```
+
 ## When to Update Version
 
 ### Patch Version (0.0.X) - Bug fixes

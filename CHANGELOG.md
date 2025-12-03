@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Cursor AI rules for versioning guidelines
+- Git hooks for automatic development version tracking
+- `scripts/install-hooks.sh` to set up pre/post-commit hooks
+- `scripts/update-version.sh` for manual version updates
+- Development builds now show commit hash (e.g., `0.3.0-abc1234`)
 
 ## [0.3.0] - 2025-12-03
 
