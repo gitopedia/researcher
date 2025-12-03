@@ -398,47 +398,64 @@ func (c *Client) ExtractEntities(ctx context.Context, content string) ([]Extract
 	var lastRawResponse string
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		messages := []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: systemBuf.String(),
-			},
-			{
-				Role:    openai.ChatMessageRoleUser,
-				Content: userBuf.String(),
-			},
-		}
+		var rawContent string
 
-		// On retry attempts, add the failed response and a correction message
-		if attempt > 1 && lastRawResponse != "" {
-			messages = append(messages,
-				openai.ChatCompletionMessage{
-					Role:    openai.ChatMessageRoleAssistant,
-					Content: lastRawResponse,
-				},
-				openai.ChatCompletionMessage{
-					Role:    openai.ChatMessageRoleUser,
-					Content: "That response is invalid. You must respond with ONLY a JSON array, starting with [ and ending with ]. No markdown, no explanation, no headers. Just the JSON array. Try again:",
+		// Use thinking mode if enabled
+		if c.ThinkingEnabled() {
+			if attempt == 1 {
+				log.Printf("ExtractEntities: Using thinking mode (%s) with model %s", c.thinkMode, c.modelExtractEntities)
+			}
+			messages := []ollamaChatMessage{
+				{Role: "system", Content: systemBuf.String()},
+				{Role: "user", Content: userBuf.String()},
+			}
+
+			// On retry attempts, add the failed response and a correction message
+			if attempt > 1 && lastRawResponse != "" {
+				messages = append(messages,
+					ollamaChatMessage{Role: "assistant", Content: lastRawResponse},
+					ollamaChatMessage{Role: "user", Content: "That response is invalid. You must respond with ONLY a JSON array, starting with [ and ending with ]. No markdown, no explanation, no headers. Just the JSON array. Try again:"},
+				)
+				log.Printf("Entity extraction retry %d/%d after non-JSON response", attempt, maxRetries)
+			}
+
+			resp, err := c.chatWithThinking(ctx, c.modelExtractEntities, messages, 0.0)
+			if err != nil {
+				lastError = err
+				continue
+			}
+			rawContent = resp.Message.Content
+		} else {
+			// Standard OpenAI-compatible API call
+			messages := []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			}
+
+			// On retry attempts, add the failed response and a correction message
+			if attempt > 1 && lastRawResponse != "" {
+				messages = append(messages,
+					openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: lastRawResponse},
+					openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: "That response is invalid. You must respond with ONLY a JSON array, starting with [ and ending with ]. No markdown, no explanation, no headers. Just the JSON array. Try again:"},
+				)
+				log.Printf("Entity extraction retry %d/%d after non-JSON response", attempt, maxRetries)
+			}
+
+			resp, err := c.client.CreateChatCompletion(
+				ctx,
+				openai.ChatCompletionRequest{
+					Model:       c.modelExtractEntities,
+					Messages:    messages,
+					Temperature: 0.0,
 				},
 			)
-			log.Printf("Entity extraction retry %d/%d after non-JSON response", attempt, maxRetries)
+			if err != nil {
+				lastError = err
+				continue
+			}
+			rawContent = resp.Choices[0].Message.Content
 		}
 
-		resp, err := c.client.CreateChatCompletion(
-			ctx,
-			openai.ChatCompletionRequest{
-				Model:       c.modelExtractEntities,
-				Messages:    messages,
-				Temperature: 0.0,
-			},
-		)
-
-		if err != nil {
-			lastError = err
-			continue
-		}
-
-		rawContent := resp.Choices[0].Message.Content
 		jsonStr, found := extractJSONArray(rawContent)
 
 		if !found {
@@ -587,7 +604,6 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 // Enable by setting USE_LLM_SUMMARIZATION=true
 func (c *Client) summarizeSourceLLM(ctx context.Context, topic, urlStr, content string) (SourceSummary, error) {
 	// Stage 1: plain-text summarization with headings and bullets
-	log.Printf("Stage 1: Starting LLM plain-text summarization (model: %s) for %s", c.modelSummarizePlain, urlStr)
 	var systemBuf bytes.Buffer
 	if err := c.summarizeSourceSystemTemplate.Execute(&systemBuf, nil); err != nil {
 		return SourceSummary{}, fmt.Errorf("failed to execute summarize system template: %w", err)
@@ -603,28 +619,39 @@ func (c *Client) summarizeSourceLLM(ctx context.Context, topic, urlStr, content 
 		return SourceSummary{}, fmt.Errorf("failed to execute summarize user template: %w", err)
 	}
 
-	resp, err := c.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: c.modelSummarizePlain,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleSystem,
-					Content: systemBuf.String(),
+	var plain string
+
+	// Use thinking mode if enabled
+	if c.ThinkingEnabled() {
+		log.Printf("Stage 1: Starting LLM plain-text summarization with thinking (model: %s) for %s", c.modelSummarizePlain, urlStr)
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+		resp, err := c.chatWithThinking(ctx, c.modelSummarizePlain, messages, 0.3)
+		if err != nil {
+			return SourceSummary{}, err
+		}
+		plain = strings.TrimSpace(resp.Message.Content)
+	} else {
+		log.Printf("Stage 1: Starting LLM plain-text summarization (model: %s) for %s", c.modelSummarizePlain, urlStr)
+		resp, err := c.client.CreateChatCompletion(
+			ctx,
+			openai.ChatCompletionRequest{
+				Model: c.modelSummarizePlain,
+				Messages: []openai.ChatCompletionMessage{
+					{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+					{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
 				},
-				{
-					Role:    openai.ChatMessageRoleUser,
-					Content: userBuf.String(),
-				},
+				Temperature: 0.3,
 			},
-			Temperature: 0.3,
-		},
-	)
-	if err != nil {
-		return SourceSummary{}, err
+		)
+		if err != nil {
+			return SourceSummary{}, err
+		}
+		plain = strings.TrimSpace(resp.Choices[0].Message.Content)
 	}
 
-	plain := strings.TrimSpace(resp.Choices[0].Message.Content)
 	log.Printf("Stage 1: Completed LLM plain-text summarization (model: %s), output length: %d chars", c.modelSummarizePlain, len(plain))
 
 	summary := SourceSummary{
