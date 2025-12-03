@@ -1,0 +1,23 @@
+Add inline citations to the following encyclopedia article using ONLY the numbered sources provided.
+
+**Available Sources:**
+{{.Sources}}
+
+**Article to Cite:**
+{{.Article}}
+
+**Instructions:**
+1. Read through the article and identify factual claims that can be supported by the sources
+2. Add citation markers [^1], [^2], [^3] etc. corresponding to the source numbers above
+3. Place citations immediately after the specific fact or claim they support
+4. Only cite sources when the information clearly comes from that source
+5. Do NOT cite every sentence - only cite specific facts, statistics, dates, or claims
+6. Do NOT add citations to general knowledge or obvious statements
+7. Do NOT invent or hallucinate sources - if no source supports a claim, leave it uncited
+8. Do NOT add a References section - that is handled separately
+9. Do NOT change the article content, structure, or wording - only add citation markers
+10. Preserve ALL formatting including the YAML front matter exactly as-is
+
+**Output:**
+Return the complete article with citation markers added. Do not include any explanation or commentary - just the article with citations.
+

@@ -48,6 +48,7 @@ type ArticleResult struct {
 
 type Generator interface {
 	GenerateArticle(ctx context.Context, topic, contextData string) (*ArticleResult, error)
+	AddReferences(ctx context.Context, article string, sources string) (string, error)
 	ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error)
 	SuggestTopics(ctx context.Context, category string, existingTopics []string) ([]string, error)
 	SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error)

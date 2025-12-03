@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Two-step article generation: content first, then citations added separately to prevent hallucination
+- New `AddReferences` LLM method for accurate citation placement
+- Researcher version now displayed in website article list
+
 ### Changed
 - Simplified version auto-increment: patch version bumps on each commit (0.3.1 → 0.3.2 → 0.3.3)
 - Removed commit hash suffix in favor of clean semver numbers
 - Thinking mode now also applies to entity extraction and source summarization (not just article generation)
+- Article generation prompts now target 2500-4000 words with detailed section requirements
+- Prompts explicitly instruct LLM not to include citations (handled in separate step)
 
 ## [0.3.0] - 2025-12-03
 

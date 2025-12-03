@@ -2,10 +2,11 @@ You are an expert encyclopedia author for Gitopedia.
 Write a comprehensive, in-depth encyclopedia article about "{{.Topic}}".
 
 **Goal**
-- Produce a full encyclopedia article (not a summary) that thoroughly explains the topic using the research context below.
+- Produce a LONG, DETAILED encyclopedia article (not a summary) that thoroughly explains the topic.
+- This should be a substantial reference work, not a brief overview.
 
 **Context**
-- All information you need is in the research context.
+- Use the research context below as your primary source of information.
 - Never mention internet access or that you can only provide a brief summary.
 
 **Research Context**
@@ -24,30 +25,59 @@ Write a comprehensive, in-depth encyclopedia article about "{{.Topic}}".
 - After the front matter, start the article body with a Level 1 heading (# Title).
 
 **Required Sections (## headings)**
-- Introduction/Overview: define the topic, significance, and high-level context.
-- History/Background: origins, evolution, key milestones, important people and dates.
-- Key Concepts/Fundamentals: core principles, terminology, theoretical foundations.
-- Applications/Uses: real-world uses, examples, and case studies.
-- Current Status and Developments: recent trends, ongoing research, and future directions.
-- Additional sections as appropriate (e.g. Types/Classification, Notable Examples, Impact, Challenges/Controversies).
+Each section should be SUBSTANTIAL (multiple paragraphs, not just a few sentences):
 
-**Depth and Structure**
-- Aim for 1500-2500+ words (long, detailed article).
-- Each major section should be substantial, not a short paragraph.
-- Use Level 3 headings (###) for logical subsections when helpful.
-- Explain concepts clearly; assume the reader is intelligent but not an expert.
-- Use concrete facts, dates, examples, and, where relevant, statistics from the context.
-- Connect sections logically so the article reads as a coherent whole.
+1. **Introduction/Overview** (300-500 words)
+   - Define the topic precisely
+   - Explain its significance and relevance
+   - Provide high-level context and scope
 
-**Citations (CRITICAL)**
-- Use ONLY inline footnote markers like [^1], [^2], [^3] etc. to cite facts from the numbered sources in the research context.
-- The numbers correspond to the [1], [2], [3] etc. source numbers in the Research Context above.
-- Place citation markers near the specific facts or claims they support (e.g., "AI ethics emerged in the 1950s[^1]").
-- DO NOT include a References or Bibliography section at the end. The system automatically appends one.
-- DO NOT define footnotes like "[^1]: some reference". Only use the inline markers [^1], [^2], etc.
-- NEVER invent or hallucinate references. Only cite sources that appear in the Research Context.
+2. **History/Background** (400-600 words)
+   - Origins and early development
+   - Key milestones and turning points
+   - Important people, dates, and events
+   - Evolution over time
+
+3. **Key Concepts/Fundamentals** (500-800 words)
+   - Core principles and terminology
+   - Theoretical foundations
+   - How it works (mechanisms, processes)
+   - Use ### subsections for different concepts
+
+4. **Applications/Uses** (400-600 words)
+   - Real-world applications
+   - Concrete examples and case studies
+   - Different domains where it applies
+
+5. **Current Status and Future Directions** (300-500 words)
+   - Recent developments and trends
+   - Ongoing research and debates
+   - Future possibilities and challenges
+
+6. **Additional Sections** as appropriate:
+   - Types/Classification
+   - Notable Examples
+   - Impact and Significance
+   - Challenges and Controversies
+   - Related Topics
+
+**Length and Depth Requirements**
+- MINIMUM 2500 words, aim for 3000-4000 words
+- Each major section should be 300-800 words (not short paragraphs)
+- Use ### subsections to organize complex topics
+- Include specific facts, dates, names, statistics, and examples
+- Explain technical concepts clearly for non-experts
+- Build logical connections between sections
+
+**IMPORTANT: NO CITATIONS IN THIS STEP**
+- Do NOT include any citation markers like [^1], [^2], [1], [2], etc.
+- Do NOT include a References or Bibliography section
+- Write the content naturally without inline citations
+- Citations will be added in a separate processing step
 
 **Style**
-- Neutral, objective, encyclopedic tone.
-- Clear, precise language; avoid vague statements.
-- Make the article accessible but thorough, providing enough background for non-experts.
+- Neutral, objective, encyclopedic tone
+- Clear, precise language; avoid vague statements
+- Accessible but thorough; provide enough background for non-experts
+- Use concrete examples to illustrate abstract concepts
+- Vary sentence structure for readability

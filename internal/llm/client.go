@@ -40,6 +40,8 @@ type Client struct {
 	summarizeSourceUserTemplate      *template.Template
 	convertSummarySystemTemplate     *template.Template
 	convertSummaryUserTemplate       *template.Template
+	addReferencesSystemTemplate      *template.Template
+	addReferencesUserTemplate        *template.Template
 }
 
 // ThinkingCallback is called when thinking output is available
@@ -179,6 +181,16 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load convert_summary_user template: %w", err)
 	}
 
+	addReferencesSystem, err := loadTemplate("prompts/add_references_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load add_references_system template: %w", err)
+	}
+
+	addReferencesUser, err := loadTemplate("prompts/add_references_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load add_references_user template: %w", err)
+	}
+
 	return &Client{
 		client:                        openai.NewClientWithConfig(config),
 		httpClient:                    &http.Client{},
@@ -189,7 +201,7 @@ func NewClient() (*Client, error) {
 		modelExtractEntities:          modelExtractEntities,
 		modelSuggestTopics:            modelSuggestTopics,
 		modelSummarizePlain:           modelSummarizePlain,
-		modelSummarizeJSON:           modelSummarizeJSON,
+		modelSummarizeJSON:            modelSummarizeJSON,
 		generateArticleSystemTemplate: generateArticleSystem,
 		generateArticleUserTemplate:   generateArticleUser,
 		extractEntitiesSystemTemplate: extractEntitiesSystem,
@@ -200,6 +212,8 @@ func NewClient() (*Client, error) {
 		summarizeSourceUserTemplate:   summarizeSourceUser,
 		convertSummarySystemTemplate:  convertSummarySystem,
 		convertSummaryUserTemplate:    convertSummaryUser,
+		addReferencesSystemTemplate:   addReferencesSystem,
+		addReferencesUserTemplate:     addReferencesUser,
 	}, nil
 }
 
@@ -374,6 +388,59 @@ func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string)
 		Content: resp.Choices[0].Message.Content,
 		Model:   c.modelGenerateArticle,
 	}, nil
+}
+
+// AddReferences takes an article and source summaries, and adds inline citations
+func (c *Client) AddReferences(ctx context.Context, article string, sources string) (string, error) {
+	log.Printf("AddReferences: Adding citations using model %s", c.modelGenerateArticle)
+
+	// Execute system template
+	var systemBuf bytes.Buffer
+	if err := c.addReferencesSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute add_references system template: %w", err)
+	}
+
+	// Execute user template
+	data := map[string]interface{}{
+		"Article": article,
+		"Sources": sources,
+	}
+	var userBuf bytes.Buffer
+	if err := c.addReferencesUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute add_references user template: %w", err)
+	}
+
+	// Use thinking mode if enabled (helps with accurate citation placement)
+	if c.ThinkingEnabled() {
+		log.Printf("AddReferences: Using thinking mode (%s)", c.thinkMode)
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.3)
+		if err != nil {
+			return "", err
+		}
+		return resp.Message.Content, nil
+	}
+
+	// Standard API call
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return resp.Choices[0].Message.Content, nil
 }
 
 func (c *Client) ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error) {

@@ -927,7 +927,8 @@ tags: %s
 		}
 	}
 
-	// Draft
+	// Step 1: Generate article content (without citations)
+	log.Printf("Generating article content for '%s'...", topic)
 	articleResult, err := a.llm.GenerateArticle(ctx, topic, contextData)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)
@@ -951,8 +952,27 @@ tags: %s
 	// Some LLMs wrap YAML frontmatter in ```yaml ... ``` which breaks rendering
 	content = stripCodeFences(content)
 
-	// Append References
+	// Step 2: Add citations using the source list (separate LLM call to prevent hallucination)
 	if len(references) > 0 {
+		log.Printf("Adding citations from %d sources...", len(references))
+		
+		// Build source list for citation step
+		var sourceList strings.Builder
+		for i, ref := range references {
+			// Extract title and URL from reference format "[^N]: [Title](URL)"
+			sourceList.WriteString(fmt.Sprintf("[%d] %s\n", i+1, ref))
+		}
+		
+		citedContent, err := a.llm.AddReferences(ctx, content, sourceList.String())
+		if err != nil {
+			slog.Warn("Failed to add citations, using uncited content", "error", err)
+			// Fall back to uncited content
+		} else {
+			content = stripCodeFences(citedContent)
+			log.Printf("Citations added successfully")
+		}
+		
+		// Append References section
 		content += "\n\n## References\n\n" + strings.Join(references, "\n")
 	}
 

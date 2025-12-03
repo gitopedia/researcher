@@ -77,6 +77,10 @@ func (m *MockLLM) GenerateArticle(ctx context.Context, t, c string) (*llm.Articl
 	}, nil
 }
 
+func (m *MockLLM) AddReferences(ctx context.Context, article, sources string) (string, error) {
+	return article, nil // Return article unchanged in mock
+}
+
 func (m *MockLLM) ExtractEntities(ctx context.Context, content string) ([]llm.ExtractedEntity, error) {
 	return []llm.ExtractedEntity{}, nil
 }
