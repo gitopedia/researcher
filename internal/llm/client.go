@@ -42,6 +42,17 @@ type Client struct {
 	convertSummaryUserTemplate       *template.Template
 	addReferencesSystemTemplate      *template.Template
 	addReferencesUserTemplate        *template.Template
+	// Multi-phase templates
+	outlineGenerationSystemTemplate  *template.Template
+	outlineGenerationUserTemplate    *template.Template
+	gapAnalysisSystemTemplate        *template.Template
+	gapAnalysisUserTemplate          *template.Template
+	sectionGenerationSystemTemplate  *template.Template
+	sectionGenerationUserTemplate    *template.Template
+	sectionDiscoverySystemTemplate   *template.Template
+	sectionDiscoveryUserTemplate     *template.Template
+	integrationSystemTemplate        *template.Template
+	integrationUserTemplate          *template.Template
 }
 
 // ThinkingCallback is called when thinking output is available
@@ -191,6 +202,57 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load add_references_user template: %w", err)
 	}
 
+	// Multi-phase templates
+	outlineGenerationSystem, err := loadTemplate("prompts/outline_generation_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load outline_generation_system template: %w", err)
+	}
+
+	outlineGenerationUser, err := loadTemplate("prompts/outline_generation_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load outline_generation_user template: %w", err)
+	}
+
+	gapAnalysisSystem, err := loadTemplate("prompts/gap_analysis_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load gap_analysis_system template: %w", err)
+	}
+
+	gapAnalysisUser, err := loadTemplate("prompts/gap_analysis_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load gap_analysis_user template: %w", err)
+	}
+
+	sectionGenerationSystem, err := loadTemplate("prompts/section_generation_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load section_generation_system template: %w", err)
+	}
+
+	sectionGenerationUser, err := loadTemplate("prompts/section_generation_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load section_generation_user template: %w", err)
+	}
+
+	sectionDiscoverySystem, err := loadTemplate("prompts/section_discovery_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load section_discovery_system template: %w", err)
+	}
+
+	sectionDiscoveryUser, err := loadTemplate("prompts/section_discovery_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load section_discovery_user template: %w", err)
+	}
+
+	integrationSystem, err := loadTemplate("prompts/integration_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load integration_system template: %w", err)
+	}
+
+	integrationUser, err := loadTemplate("prompts/integration_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load integration_user template: %w", err)
+	}
+
 	return &Client{
 		client:                        openai.NewClientWithConfig(config),
 		httpClient:                    &http.Client{},
@@ -214,6 +276,17 @@ func NewClient() (*Client, error) {
 		convertSummaryUserTemplate:    convertSummaryUser,
 		addReferencesSystemTemplate:   addReferencesSystem,
 		addReferencesUserTemplate:     addReferencesUser,
+		// Multi-phase templates
+		outlineGenerationSystemTemplate: outlineGenerationSystem,
+		outlineGenerationUserTemplate:   outlineGenerationUser,
+		gapAnalysisSystemTemplate:       gapAnalysisSystem,
+		gapAnalysisUserTemplate:         gapAnalysisUser,
+		sectionGenerationSystemTemplate: sectionGenerationSystem,
+		sectionGenerationUserTemplate:   sectionGenerationUser,
+		sectionDiscoverySystemTemplate:  sectionDiscoverySystem,
+		sectionDiscoveryUserTemplate:    sectionDiscoveryUser,
+		integrationSystemTemplate:       integrationSystem,
+		integrationUserTemplate:         integrationUser,
 	}, nil
 }
 
@@ -1013,4 +1086,219 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// Multi-phase article generation methods
+
+// GenerateOutline creates an article outline from sources
+func (c *Client) GenerateOutline(ctx context.Context, topic, sources string) (string, error) {
+	log.Printf("GenerateOutline: Creating outline for '%s'", topic)
+
+	var systemBuf bytes.Buffer
+	if err := c.outlineGenerationSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":   topic,
+		"Sources": sources,
+	}
+	var userBuf bytes.Buffer
+	if err := c.outlineGenerationUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return resp.Choices[0].Message.Content, nil
+}
+
+// AnalyzeGaps identifies gaps in the research
+func (c *Client) AnalyzeGaps(ctx context.Context, topic, outline, sources string) (string, error) {
+	log.Printf("AnalyzeGaps: Analyzing gaps for '%s'", topic)
+
+	var systemBuf bytes.Buffer
+	if err := c.gapAnalysisSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":   topic,
+		"Outline": outline,
+		"Sources": sources,
+	}
+	var userBuf bytes.Buffer
+	if err := c.gapAnalysisUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return resp.Choices[0].Message.Content, nil
+}
+
+// GenerateSection generates content for a single section
+func (c *Client) GenerateSection(ctx context.Context, topic, heading, headingLevel string, wordTarget int, points, sources, contextText string) (string, error) {
+	log.Printf("GenerateSection: Generating '%s' section", heading)
+
+	var systemBuf bytes.Buffer
+	if err := c.sectionGenerationSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":        topic,
+		"SectionHeading": heading,
+		"HeadingLevel": headingLevel,
+		"WordTarget":   wordTarget,
+		"Points":       points,
+		"Sources":      sources,
+		"Context":      contextText,
+	}
+	var userBuf bytes.Buffer
+	if err := c.sectionGenerationUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute user template: %w", err)
+	}
+
+	// Use thinking mode if enabled for better quality
+	if c.ThinkingEnabled() {
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.7)
+		if err != nil {
+			return "", err
+		}
+		return resp.Message.Content, nil
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.7,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return resp.Choices[0].Message.Content, nil
+}
+
+// DiscoverSections suggests additional sections based on sources
+func (c *Client) DiscoverSections(ctx context.Context, topic, currentSections, sources string) (string, error) {
+	log.Printf("DiscoverSections: Finding additional sections for '%s'", topic)
+
+	var systemBuf bytes.Buffer
+	if err := c.sectionDiscoverySystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":           topic,
+		"CurrentSections": currentSections,
+		"Sources":         sources,
+	}
+	var userBuf bytes.Buffer
+	if err := c.sectionDiscoveryUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return resp.Choices[0].Message.Content, nil
+}
+
+// IntegrateArticle polishes and integrates all sections
+func (c *Client) IntegrateArticle(ctx context.Context, topic, article string) (string, error) {
+	log.Printf("IntegrateArticle: Polishing article for '%s'", topic)
+
+	var systemBuf bytes.Buffer
+	if err := c.integrationSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":   topic,
+		"Article": article,
+	}
+	var userBuf bytes.Buffer
+	if err := c.integrationUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute user template: %w", err)
+	}
+
+	// Use thinking mode if enabled
+	if c.ThinkingEnabled() {
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.5)
+		if err != nil {
+			return "", err
+		}
+		return resp.Message.Content, nil
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.5,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return resp.Choices[0].Message.Content, nil
 }

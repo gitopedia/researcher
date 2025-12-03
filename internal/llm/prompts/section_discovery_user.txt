@@ -1,0 +1,50 @@
+Based on the available sources, suggest additional sections that would enhance the encyclopedia article about "{{.Topic}}".
+
+**Current Sections:**
+{{.CurrentSections}}
+
+**All Available Sources:**
+{{.Sources}}
+
+**Instructions:**
+1. Review all sources for information not covered by current sections
+2. Identify 2-5 additional sections that would add value
+3. Focus on sections that have good source support
+4. Consider: case studies, notable examples, regional variations, related topics, impact/significance
+
+**Output Format:**
+Return ONLY a JSON object with this structure:
+```json
+{
+  "suggested_sections": [
+    {
+      "heading": "Notable Case Studies",
+      "rationale": "Sources contain several detailed examples worth highlighting",
+      "points": ["Case study 1 from source 3", "Case study 2 from source 7"],
+      "word_target": 400,
+      "relevant_sources": [3, 7, 12],
+      "position": "after Applications"
+    },
+    {
+      "heading": "Regional Variations",
+      "rationale": "Sources show significant differences across regions",
+      "points": ["North American approach", "European approach", "Asian approach"],
+      "word_target": 350,
+      "relevant_sources": [5, 8, 11],
+      "position": "before Current Status"
+    }
+  ],
+  "skip_reason": null
+}
+```
+
+If no additional sections are warranted, return:
+```json
+{
+  "suggested_sections": [],
+  "skip_reason": "Current sections adequately cover the available source material"
+}
+```
+
+Return ONLY the JSON object, no additional text or explanation.
+

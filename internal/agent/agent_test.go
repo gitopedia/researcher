@@ -148,6 +148,27 @@ func (m *MockLLM) CategorizeArticle(ctx context.Context, title string, tags []st
 	}, nil
 }
 
+// Multi-phase methods
+func (m *MockLLM) GenerateOutline(ctx context.Context, topic, sources string) (string, error) {
+	return `{"title":"Mock Article","summary":"A mock summary","sections":[{"heading":"Introduction","level":2,"points":["Point 1"],"word_target":400}],"total_word_target":3000}`, nil
+}
+
+func (m *MockLLM) AnalyzeGaps(ctx context.Context, topic, outline, sources string) (string, error) {
+	return `{"gaps":[],"suggested_sections":[],"overall_assessment":"No gaps found"}`, nil
+}
+
+func (m *MockLLM) GenerateSection(ctx context.Context, topic, heading, headingLevel string, wordTarget int, points, sources, contextText string) (string, error) {
+	return "## " + heading + "\n\nMock section content.", nil
+}
+
+func (m *MockLLM) DiscoverSections(ctx context.Context, topic, currentSections, sources string) (string, error) {
+	return `{"suggested_sections":[],"skip_reason":"No additional sections needed"}`, nil
+}
+
+func (m *MockLLM) IntegrateArticle(ctx context.Context, topic, article string) (string, error) {
+	return article, nil
+}
+
 func TestAgentRun(t *testing.T) {
 	agent := NewAgentWithDeps(&MockGitHub{}, &MockSearch{}, &MockLLM{})
 	if err := agent.Run(context.Background()); err != nil {

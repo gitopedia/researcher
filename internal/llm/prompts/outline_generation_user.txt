@@ -1,0 +1,57 @@
+Create a detailed outline for an encyclopedia article about "{{.Topic}}".
+
+**Available Sources:**
+{{.Sources}}
+
+**Instructions:**
+1. Analyze the sources to identify key themes, concepts, and information
+2. Create a comprehensive outline with main sections and subsections
+3. Each section should have:
+   - A clear heading (## for main sections, ### for subsections)
+   - 2-3 bullet points describing what should be covered
+   - Estimated word count target (aim for 300-800 words per main section)
+
+**Required Sections:**
+- Introduction/Overview (300-500 words)
+- History/Background (400-600 words)
+- Key Concepts/Fundamentals (500-800 words, with subsections)
+- Applications/Uses (400-600 words)
+- Current Status and Future Directions (300-500 words)
+- Additional sections as appropriate based on the sources
+
+**Output Format:**
+Return ONLY a JSON object with this structure:
+```json
+{
+  "title": "Article Title",
+  "summary": "2-3 sentence summary of the article",
+  "sections": [
+    {
+      "heading": "Introduction",
+      "level": 2,
+      "points": ["Point 1 to cover", "Point 2 to cover"],
+      "word_target": 400,
+      "relevant_sources": [1, 3, 5]
+    },
+    {
+      "heading": "History and Development",
+      "level": 2,
+      "points": ["Origins", "Key milestones", "Evolution"],
+      "word_target": 500,
+      "subsections": [
+        {
+          "heading": "Early History",
+          "level": 3,
+          "points": ["Founding events", "Initial development"],
+          "word_target": 250
+        }
+      ],
+      "relevant_sources": [2, 4]
+    }
+  ],
+  "total_word_target": 3500
+}
+```
+
+Return ONLY the JSON object, no additional text or explanation.
+

@@ -53,6 +53,13 @@ type Generator interface {
 	SuggestTopics(ctx context.Context, category string, existingTopics []string) ([]string, error)
 	SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error)
 	CategorizeArticle(ctx context.Context, title string, tags []string, content string, existingCategories []string) (*ArticleCategory, error)
+
+	// Multi-phase article generation methods
+	GenerateOutline(ctx context.Context, topic, sources string) (string, error)
+	AnalyzeGaps(ctx context.Context, topic, outline, sources string) (string, error)
+	GenerateSection(ctx context.Context, topic, heading, headingLevel string, wordTarget int, points, sources, context string) (string, error)
+	DiscoverSections(ctx context.Context, topic, currentSections, sources string) (string, error)
+	IntegrateArticle(ctx context.Context, topic, article string) (string, error)
 }
 
 // Ensure Client implements Generator

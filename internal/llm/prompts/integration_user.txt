@@ -1,0 +1,28 @@
+Review and polish the following encyclopedia article about "{{.Topic}}".
+
+**Current Article:**
+{{.Article}}
+
+**Instructions:**
+1. Add smooth transitions between sections
+2. Ensure consistent tone and style throughout
+3. Add a compelling introduction paragraph if weak
+4. Add a conclusion/summary paragraph if missing
+5. Fix any repetition or redundancy
+6. Ensure the article flows logically
+7. Maintain all factual content - do not remove information
+8. Do NOT add citations - they will be added separately
+
+**Output:**
+Return the complete polished article in Markdown format. Include the YAML front matter exactly as provided (or create one if missing):
+
+---
+title: "Article Title"
+summary: "2-3 sentence summary"
+tags: ["Tag1", "Tag2"]
+---
+
+Then the article body starting with # Title.
+
+Return ONLY the article, no meta-commentary or explanations.
+

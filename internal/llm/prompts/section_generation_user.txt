@@ -1,0 +1,26 @@
+Write the "{{.SectionHeading}}" section for an encyclopedia article about "{{.Topic}}".
+
+**Section Requirements:**
+- Heading Level: {{.HeadingLevel}}
+- Target Word Count: {{.WordTarget}} words
+- Key Points to Cover:
+{{.Points}}
+
+**Relevant Sources:**
+{{.Sources}}
+
+**Context from Other Sections:**
+{{.Context}}
+
+**Instructions:**
+1. Write a comprehensive section covering all the key points
+2. Use information from the provided sources
+3. Maintain an encyclopedic, neutral tone
+4. Include specific facts, dates, names, and examples where available
+5. Use ### subheadings if the section is long (400+ words)
+6. Do NOT include citations in this step - they will be added later
+7. Start with the section heading (## or ### as appropriate)
+
+**Output:**
+Write ONLY the section content in Markdown format. Do not include any meta-commentary or explanations.
+
