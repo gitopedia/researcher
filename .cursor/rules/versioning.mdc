@@ -6,14 +6,15 @@ This project uses semantic versioning. When making changes, follow these guideli
 
 The current version is stored in `VERSION` at the repository root. This is a plain text file containing just the version number (e.g., `0.3.0`).
 
-## Development Versions
+## Auto-Incrementing Patch Versions
 
-Git hooks automatically manage development version suffixes:
+Git hooks automatically increment the patch version after each commit:
 
-- **Locally**: VERSION shows `0.3.0-abc1234` (with commit hash)
-- **In repo**: VERSION shows `0.3.0` (clean base version)
+```
+0.3.0 → 0.3.1 → 0.3.2 → 0.3.3 ...
+```
 
-This means every local build is uniquely identified by its commit hash without polluting the git history.
+This means every commit gets a unique version number without manual intervention.
 
 ### Setup
 
@@ -24,12 +25,17 @@ Run once to install the git hooks:
 
 ### How it works
 
-1. **pre-commit hook**: Strips any `-hash` suffix from VERSION before committing
-2. **post-commit hook**: Adds the new commit hash to VERSION after committing
+The **post-commit hook** automatically increments the patch version after each commit.
 
-You can also manually update the version:
-```bash
-./scripts/update-version.sh
+### Manual Version Bumps
+
+- **Minor version** (new features): Edit VERSION to `0.4.0`
+- **Major version** (breaking changes): Edit VERSION to `1.0.0`
+
+After manually setting a new minor/major version, the patch will auto-increment from there:
+```
+Manual: 0.4.0
+Next commits: 0.4.1 → 0.4.2 → 0.4.3 ...
 ```
 
 ## When to Update Version

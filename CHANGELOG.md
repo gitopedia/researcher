@@ -7,11 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Git hooks for automatic development version tracking
-- `scripts/install-hooks.sh` to set up pre/post-commit hooks
-- `scripts/update-version.sh` for manual version updates
-- Development builds now show commit hash (e.g., `0.3.0-abc1234`)
+### Changed
+- Simplified version auto-increment: patch version bumps on each commit (0.3.1 → 0.3.2 → 0.3.3)
+- Removed commit hash suffix in favor of clean semver numbers
 
 ## [0.3.0] - 2025-12-03
 

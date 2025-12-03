@@ -1,5 +1,5 @@
 #!/bin/bash
-# Updates VERSION file with git commit info for development builds
+# Auto-increments patch version on each commit
 # Called by post-commit hook or manually
 
 set -e
@@ -8,24 +8,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VERSION_FILE="$REPO_ROOT/VERSION"
 
-# Read base version (first line, strip any existing suffix)
-BASE_VERSION=$(head -1 "$VERSION_FILE" | sed 's/-.*//')
+# Read current version
+CURRENT_VERSION=$(head -1 "$VERSION_FILE")
 
-# Get short commit hash
-COMMIT_HASH=$(git rev-parse --short HEAD)
+# Parse version components
+MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
 
-# Check if working directory is dirty
-if [[ -n $(git status --porcelain) ]]; then
-    DIRTY="-dirty"
-else
-    DIRTY=""
-fi
-
-# Build full version string
-FULL_VERSION="${BASE_VERSION}-${COMMIT_HASH}${DIRTY}"
+# Increment patch
+NEW_PATCH=$((PATCH + 1))
+NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 
 # Write to VERSION file
-echo "$FULL_VERSION" > "$VERSION_FILE"
+echo "$NEW_VERSION" > "$VERSION_FILE"
 
-echo "Updated VERSION to: $FULL_VERSION"
+echo "Updated VERSION: $CURRENT_VERSION → $NEW_VERSION"
 
