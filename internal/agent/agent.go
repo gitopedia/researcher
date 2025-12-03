@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -472,20 +473,192 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 
 func (a *Agent) processTopic(ctx context.Context, topic, category, branchName string, authMgr *authority.Manager, progress *ProgressTracker) error {
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
+	config := GetPhaseConfig()
 
+	// Optional debug mode
+	debugSources := false
+	if v := os.Getenv("RESEARCH_DEBUG_SOURCES"); strings.EqualFold(v, "1") || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") {
+		debugSources = true
+	}
+
+	// ========================================
+	// PHASE 1: Foundation Research
+	// ========================================
+	log.Printf("=== PHASE 1: Foundation Research for '%s' ===", topic)
+
+	sources, references, err := a.gatherSources(ctx, topic, slug, branchName, authMgr, progress, debugSources)
+	if err != nil {
+		return fmt.Errorf("phase 1 failed: %w", err)
+	}
+
+	if len(sources) == 0 {
+		return fmt.Errorf("no valid sources collected for topic %s", topic)
+	}
+
+	// Generate outline from sources
+	outline, err := a.Phase1GenerateOutline(ctx, topic, sources)
+	if err != nil {
+		slog.Warn("Outline generation failed, falling back to simple structure", "error", err)
+		// Create a simple default outline
+		outline = &ArticleOutline{
+			Title:           topic,
+			Summary:         fmt.Sprintf("An overview of %s", topic),
+			TotalWordTarget: 3000,
+			Sections: []SectionOutline{
+				{Heading: "Overview", Level: 2, WordTarget: 500, Points: []string{"Introduction", "Key concepts"}},
+				{Heading: "History", Level: 2, WordTarget: 600, Points: []string{"Origins", "Development"}},
+				{Heading: "Key Aspects", Level: 2, WordTarget: 800, Points: []string{"Main features", "Characteristics"}},
+				{Heading: "Applications", Level: 2, WordTarget: 600, Points: []string{"Uses", "Impact"}},
+				{Heading: "Current State", Level: 2, WordTarget: 500, Points: []string{"Modern developments", "Future"}},
+			},
+		}
+	}
+
+	// ========================================
+	// PHASE 2: Gap Analysis
+	// ========================================
+	log.Printf("=== PHASE 2: Gap Analysis ===")
+
+	gaps, err := a.Phase2AnalyzeGaps(ctx, topic, outline, sources)
+	if err != nil {
+		slog.Warn("Gap analysis failed, proceeding without gap filling", "error", err)
+		gaps = &GapAnalysis{Gaps: nil, SuggestedSections: nil}
+	}
+
+	// ========================================
+	// PHASE 3: Targeted Research (if gaps found)
+	// ========================================
+	allSources := sources
+	maxRounds := config.MaxResearchRounds
+	for round := 0; round < maxRounds && len(gaps.Gaps) > 0; round++ {
+		log.Printf("=== PHASE 3: Targeted Research (Round %d/%d) ===", round+1, maxRounds)
+
+		newSources, err := a.Phase3TargetedResearch(ctx, gaps, allSources)
+		if err != nil {
+			slog.Warn("Targeted research failed", "round", round+1, "error", err)
+			break
+		}
+
+		if len(newSources) == 0 {
+			log.Printf("No new sources found in round %d", round+1)
+			break
+		}
+
+		// Save new sources to _incoming/sources
+		for _, src := range newSources {
+			if err := a.saveSourceSummary(ctx, src, topic, slug, branchName, authMgr, debugSources); err != nil {
+				slog.Warn("Failed to save new source", "url", src.URL, "error", err)
+			}
+			references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", src.Index, src.Title, src.URL))
+		}
+
+		allSources = append(allSources, newSources...)
+
+		// Re-analyze gaps with new sources
+		gaps, err = a.Phase2AnalyzeGaps(ctx, topic, outline, allSources)
+		if err != nil {
+			slog.Warn("Re-analysis failed", "error", err)
+			break
+		}
+	}
+
+	// ========================================
+	// PHASE 4: Section-by-Section Generation
+	// ========================================
+	log.Printf("=== PHASE 4: Section Generation ===")
+
+	if err := a.Phase4GenerateSections(ctx, topic, outline, allSources, config); err != nil {
+		slog.Warn("Section generation had errors", "error", err)
+	}
+
+	// ========================================
+	// PHASE 5: Discover Additional Sections
+	// ========================================
+	log.Printf("=== PHASE 5: Section Discovery ===")
+
+	discovery, err := a.Phase5DiscoverSections(ctx, topic, outline, allSources)
+	if err != nil {
+		slog.Warn("Section discovery failed", "error", err)
+	} else if len(discovery.SuggestedSections) > 0 {
+		// Add discovered sections to outline and generate content
+		for _, suggested := range discovery.SuggestedSections {
+			newSection := SectionOutline{
+				Heading:         suggested.Heading,
+				Level:           2,
+				Points:          suggested.Points,
+				WordTarget:      suggested.WordTarget,
+				RelevantSources: suggested.RelevantSources,
+			}
+			outline.Sections = append(outline.Sections, newSection)
+
+			// Generate content for new section
+			relevantSources := selectRelevantSources(&newSection, allSources, config.SourcesPerSection)
+			content, err := a.generateSection(ctx, topic, &newSection, relevantSources, "")
+			if err != nil {
+				slog.Warn("Failed to generate discovered section", "section", suggested.Heading, "error", err)
+				continue
+			}
+			outline.Sections[len(outline.Sections)-1].Content = content
+		}
+	}
+
+	// ========================================
+	// PHASE 6: Integration & Polish
+	// ========================================
+	log.Printf("=== PHASE 6: Integration ===")
+
+	articleContent, err := a.Phase6IntegrateArticle(ctx, topic, outline)
+	if err != nil {
+		return fmt.Errorf("article integration failed: %w", err)
+	}
+
+	// Save thinking trace if enabled
+	if debugSources {
+		thinkingPath := fmt.Sprintf("Compendium/_debug/articles/%s/outline.json", slug)
+		outlineJSON, _ := json.MarshalIndent(outline, "", "  ")
+		if err := a.gh.CreateFile(branchName, thinkingPath, "Add outline for "+topic, string(outlineJSON)); err != nil {
+			slog.Warn("Failed to save outline", "error", err)
+		}
+	}
+
+	// ========================================
+	// PHASE 7: Add Citations
+	// ========================================
+	log.Printf("=== PHASE 7: Citation Addition ===")
+
+	if len(references) > 0 {
+		var sourceList strings.Builder
+		for i, ref := range references {
+			sourceList.WriteString(fmt.Sprintf("[%d] %s\n", i+1, ref))
+		}
+
+		citedContent, err := a.llm.AddReferences(ctx, articleContent, sourceList.String())
+		if err != nil {
+			slog.Warn("Failed to add citations, using uncited content", "error", err)
+		} else {
+			articleContent = stripCodeFences(citedContent)
+			log.Printf("Citations added successfully")
+		}
+
+		// Append References section
+		articleContent += "\n\n## References\n\n" + strings.Join(references, "\n")
+	}
+
+	// ========================================
+	// Final: Entity Extraction & Save Article
+	// ========================================
+	log.Printf("=== Finalizing Article ===")
+
+	return a.finalizeArticle(ctx, topic, category, slug, branchName, articleContent, authMgr)
+}
+
+// gatherSources performs initial web research and returns sources and references
+func (a *Agent) gatherSources(ctx context.Context, topic, slug, branchName string, authMgr *authority.Manager, progress *ProgressTracker, debugSources bool) ([]SourceInfo, []string, error) {
 	// Research - generate multiple search queries for variety
 	numQueries := 5
 	if envVal := os.Getenv("PHASE1_SEARCH_NUM_QUERIES"); envVal != "" {
 		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
 			numQueries = v
-		}
-	}
-	// Backwards compatibility with old variable name
-	if numQueries == 5 {
-		if envVal := os.Getenv("SEARCH_NUM_QUERIES"); envVal != "" {
-			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
-				numQueries = v
-			}
 		}
 	}
 
@@ -503,12 +676,6 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 	queries := baseQueries
 	if numQueries < len(baseQueries) {
 		queries = baseQueries[:numQueries]
-	} else if numQueries > len(baseQueries) {
-		// Extend with variations if more queries requested
-		extra := numQueries - len(baseQueries)
-		for i := 0; i < extra; i++ {
-			queries = append(queries, fmt.Sprintf("%s information", topic))
-		}
 	}
 
 	type resultWithQuery struct {
@@ -520,10 +687,9 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 	seenURLs := make(map[string]bool)
 
 	for queryIdx, q := range queries {
-		// Check for cancellation
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, nil, ctx.Err()
 		default:
 		}
 
@@ -534,78 +700,30 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		}
 		log.Printf("Search '%s' returned %d results", q, len(res))
 		for _, r := range res {
-			if !seenURLs[r.Href] {
+			if !seenURLs[r.Href] && !strings.HasSuffix(r.Href, ".pdf") {
 				results = append(results, resultWithQuery{result: r, queryIndex: queryIdx})
 				seenURLs[r.Href] = true
 			}
 		}
 
-		// Check for cancellation before sleeping
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, nil, ctx.Err()
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
 
-	// Deep Research: Fetch content for top results
-	contextData := "Sources:\n"
-	var references []string
-
-	limit := 30
+	// Target sources
+	limit := 20
 	if envVal := os.Getenv("PHASE1_TARGET_SOURCES"); envVal != "" {
 		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
 			limit = v
 		}
 	}
-	// Backwards compatibility with old variable names
-	if limit == 30 {
-		if envVal := os.Getenv("TARGET_SOURCES_PHASE1"); envVal != "" {
-			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
-				limit = v
-			}
-		}
-	}
-	if limit == 30 {
-		if envVal := os.Getenv("SEARCH_MAX_SOURCES"); envVal != "" {
-			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
-				limit = v
-			}
-		}
-	}
-	log.Printf("Total unique search results: %d (target successful summaries: %d)", len(results), limit)
+	log.Printf("Total unique search results: %d (target: %d)", len(results), limit)
 
-	// Prepare targets - include ALL non-PDF results so we can keep processing
-	// until we reach the target number of successful summaries
-	type targetWithQuery struct {
-		result     search.Result
-		queryIndex int
-		index      int // Original index in targets slice
-	}
-
-	var targets []targetWithQuery
-	targetIndex := 0
-	for _, rwq := range results {
-		if !strings.HasSuffix(rwq.result.Href, ".pdf") {
-			targets = append(targets, targetWithQuery{
-				result:     rwq.result,
-				queryIndex: rwq.queryIndex,
-				index:      targetIndex,
-			})
-			targetIndex++
-		}
-	}
-	log.Printf("Prepared %d targets for fetching (excluding PDFs)", len(targets))
-
-	// Set the target for progress tracking (PHASE1_TARGET_SOURCES)
 	if progress != nil {
 		progress.SetTotal(limit)
-	}
-
-	// Adjust limit if we don't have enough targets
-	if len(targets) < limit {
-		slog.Warn("Fewer targets available than limit", "available", len(targets), "limit", limit)
-		limit = len(targets)
 	}
 
 	// Fetch content in parallel
@@ -614,10 +732,9 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		content string
 		err     error
 	}
-	resultsChan := make(chan fetchResult, len(targets))
+	resultsChan := make(chan fetchResult, len(results))
 	var wg sync.WaitGroup
 
-	// Use a semaphore to limit concurrency if needed (configurable, default 3)
 	semSize := 3
 	if envVal := os.Getenv("SEARCH_MAX_FETCH_CONCURRENCY"); envVal != "" {
 		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
@@ -626,29 +743,23 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 	}
 	sem := make(chan struct{}, semSize)
 
-	for _, t := range targets {
+	for i, r := range results {
 		wg.Add(1)
 		go func(idx int, urlStr string) {
 			defer wg.Done()
-			sem <- struct{}{}        // Acquire
-			defer func() { <-sem }() // Release
-
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			content, err := a.search.FetchContent(urlStr)
 			resultsChan <- fetchResult{idx, content, err}
-		}(t.index, t.result.Href)
+		}(i, r.result.Href)
 	}
 
-	// Collect fetched page contents
 	fetchedContents := make(map[int]string)
-
-	// Start a goroutine to collect results
 	done := make(chan bool)
 	go func() {
 		for res := range resultsChan {
 			if res.err == nil && len(res.content) >= 100 {
 				fetchedContents[res.index] = res.content
-			} else if res.err != nil {
-				slog.Warn("Failed to fetch URL", "url", targets[res.index].result.Href, "error", res.err)
 			}
 		}
 		done <- true
@@ -656,224 +767,118 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 
 	wg.Wait()
 	close(resultsChan)
-	<-done // Wait for collection to finish
+	<-done
 
-	log.Printf("Successfully fetched %d/%d sources", len(fetchedContents), len(targets))
+	log.Printf("Successfully fetched %d/%d sources", len(fetchedContents), len(results))
 
-	// Target number of summaries to collect per query
-	targetSummariesPerQuery := 2
-	if envVal := os.Getenv("TARGET_SUMMARIES_PER_QUERY"); envVal != "" {
+	// Process and summarize sources
+	var sources []SourceInfo
+	var references []string
+	processedCount := 0
+
+	minWords := 200
+	if envVal := os.Getenv("SOURCE_SUMMARY_MIN_WORDS"); envVal != "" {
 		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
-			targetSummariesPerQuery = v
+			minWords = v
 		}
 	}
 
-	// Track summaries collected per query
-	summariesPerQuery := make(map[int]int)
-	processedCount := 0
-	skippedCount := 0
-	skippedReasons := make(map[string]int)
+	for i, r := range results {
+		if processedCount >= limit {
+			break
+		}
 
-	// Optional debug mode: when enabled, save raw fetched pages and LLM outputs
-	debugSources := false
-	if v := os.Getenv("RESEARCH_DEBUG_SOURCES"); strings.EqualFold(v, "1") || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") {
-		debugSources = true
-	}
-	for _, t := range targets {
-		// Check for cancellation
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return sources, references, ctx.Err()
 		default:
 		}
 
-		content, ok := fetchedContents[t.index]
+		content, ok := fetchedContents[i]
 		if !ok {
-			skippedCount++
-			skippedReasons["fetch failed"]++
 			continue
 		}
 
-		// If debug is enabled, save the raw fetched page content for inspection.
-		if debugSources {
-			if u, err := url.Parse(t.result.Href); err == nil {
-				domain := strings.ReplaceAll(u.Host, ".", "-")
-				rawPath := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/raw.txt", slug, domain, t.index+1)
-				if err := a.gh.CreateFile(branchName, rawPath, "Add debug raw source: "+t.result.Title, content); err != nil {
-					slog.Warn("Failed to save debug raw source", "path", rawPath, "error", err)
-				}
-			}
-		}
-
-		// Summarize and filter source using LLM
-		log.Printf("Summarizing source %d/%d: %s", processedCount+1, limit, t.result.Href)
-		summary, err := a.llm.SummarizeSource(ctx, topic, t.result.Href, content)
-		if err != nil {
-			slog.Warn("Failed to summarize source", "url", t.result.Href, "error", err)
-			// If we have the raw LLM output, save it for debugging.
-			if debugSources {
-				if u, errParse := url.Parse(t.result.Href); errParse == nil {
-					domain := strings.ReplaceAll(u.Host, ".", "-")
-					// Save step 1 output if available
-					if summary.Step1Output != "" {
-						step1Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_1.txt", slug, domain, t.index+1)
-						if errSave := a.gh.CreateFile(branchName, step1Path, "Add debug phase 1 step 1 output (error): "+t.result.Title, summary.Step1Output); errSave != nil {
-							slog.Warn("Failed to save debug step 1 output", "path", step1Path, "error", errSave)
-						}
-					}
-					// Save step 2 output if available
-					if summary.Raw != "" {
-						step2Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_2.txt", slug, domain, t.index+1)
-						if errSave := a.gh.CreateFile(branchName, step2Path, "Add debug phase 1 step 2 output (error): "+t.result.Title, summary.Raw); errSave != nil {
-							slog.Warn("Failed to save debug step 2 output", "path", step2Path, "error", errSave)
-						}
-					}
-				}
-			}
+		log.Printf("Summarizing source %d/%d: %s", processedCount+1, limit, r.result.Href)
+		summary, err := a.llm.SummarizeSource(ctx, topic, r.result.Href, content)
+		if err != nil || !summary.Relevant {
 			continue
-		}
-
-		// In debug mode, save both step outputs for the source.
-		if debugSources {
-			if u, err := url.Parse(t.result.Href); err == nil {
-				domain := strings.ReplaceAll(u.Host, ".", "-")
-				// Save phase 1 step 1 output (plain-text summarization)
-				if summary.Step1Output != "" {
-					step1Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_1.txt", slug, domain, t.index+1)
-					if err := a.gh.CreateFile(branchName, step1Path, "Add debug phase 1 step 1 output: "+t.result.Title, summary.Step1Output); err != nil {
-						slog.Warn("Failed to save debug step 1 output", "path", step1Path, "error", err)
-					}
-				}
-				// Save phase 1 step 2 output (JSON conversion)
-				if summary.Raw != "" {
-					step2Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_2.txt", slug, domain, t.index+1)
-					if err := a.gh.CreateFile(branchName, step2Path, "Add debug phase 1 step 2 output: "+t.result.Title, summary.Raw); err != nil {
-						slog.Warn("Failed to save debug step 2 output", "path", step2Path, "error", err)
-					}
-				}
-			}
-		}
-
-		// In debug mode, save step outputs even if source is not relevant
-		if !summary.Relevant {
-			if debugSources {
-				if u, err := url.Parse(t.result.Href); err == nil {
-					domain := strings.ReplaceAll(u.Host, ".", "-")
-					// Save phase 1 step 1 output (plain-text summarization)
-					if summary.Step1Output != "" {
-						step1Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_1.txt", slug, domain, t.index+1)
-						if err := a.gh.CreateFile(branchName, step1Path, "Add debug phase 1 step 1 output (not relevant): "+t.result.Title, summary.Step1Output); err != nil {
-							slog.Warn("Failed to save debug step 1 output", "path", step1Path, "error", err)
-						}
-					}
-					// Save phase 1 step 2 output if available (may not exist if marked NOT_RELEVANT in step 1)
-					if summary.Raw != "" && summary.Raw != summary.Step1Output {
-						step2Path := fmt.Sprintf("Compendium/_debug/sources/%s--%s-%d/phase_1/step_2.txt", slug, domain, t.index+1)
-						if err := a.gh.CreateFile(branchName, step2Path, "Add debug phase 1 step 2 output (not relevant): "+t.result.Title, summary.Raw); err != nil {
-							slog.Warn("Failed to save debug step 2 output", "path", step2Path, "error", err)
-						}
-					}
-				}
-			}
-			log.Printf("Skipping source as not relevant: %s (reason: %s)", t.result.Href, summary.Reason)
-			skippedCount++
-			skippedReasons["not relevant"]++
-			continue
-		}
-
-		// Validate summary length (configurable via environment variables)
-		minWords := 400
-		if envVal := os.Getenv("SOURCE_SUMMARY_MIN_WORDS"); envVal != "" {
-			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
-				minWords = v
-			}
 		}
 
 		wordCount := len(strings.Fields(summary.Summary))
 		if wordCount < minWords {
-			log.Printf("Skipping source %s: summary too short (%d words, minimum %d)", t.result.Href, wordCount, minWords)
-			skippedCount++
-			skippedReasons["too short"]++
-			continue
-		}
-		// Summaries above minimum are accepted (target is 1200-2000 but not enforced)
-
-		// Check if this query has already reached its target (only count successful summaries)
-		if summariesPerQuery[t.queryIndex] >= targetSummariesPerQuery {
-			log.Printf("Skipping source from query %d (limit %d successful summaries reached): %s - continuing to other queries", t.queryIndex, targetSummariesPerQuery, t.result.Href)
-			skippedCount++
-			skippedReasons["query limit reached"]++
 			continue
 		}
 
-		// Extract entities FIRST - skip source entirely if this fails
-		sourceEntities, err := a.llm.ExtractEntities(ctx, summary.Summary)
-		if err != nil {
-			slog.Warn("Entity extraction failed for source after retries, skipping source entirely",
-				"error", err, "url", t.result.Href)
-			skippedCount++
-			skippedReasons["entity extraction failed"]++
-			continue
-		}
-
-		// Increment summary count for this query (only successful summaries count)
-		summariesPerQuery[t.queryIndex]++
 		processedCount++
-
-		// Print progress after each successful summary
 		if progress != nil {
 			progress.Update(processedCount)
 		}
-		contextData += fmt.Sprintf("[%d] Title: %s\nURL: %s\nSummary: %s\n\n", processedCount, t.result.Title, t.result.Href, summary.Summary)
-		references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", processedCount, t.result.Title, t.result.Href))
 
-		// Save source summary with extracted entities
-		if u, err := url.Parse(t.result.Href); err == nil {
-			domain := strings.ReplaceAll(u.Host, ".", "-")
-			sourceID := ulid.Make().String()
-			sourcePath := fmt.Sprintf("Compendium/_incoming/sources/%s--%s-%d.md", slug, domain, processedCount)
+		src := SourceInfo{
+			Index:   processedCount,
+			URL:     r.result.Href,
+			Title:   r.result.Title,
+			Summary: summary.Summary,
+		}
+		sources = append(sources, src)
+		references = append(references, fmt.Sprintf("[^%d]: [%s](%s)", processedCount, r.result.Title, r.result.Href))
 
-			// Add the parent topic as an entity
-			sourceEntities = append(sourceEntities, llm.ExtractedEntity{Name: topic, Type: llm.Topic})
+		// Save source summary
+		if err := a.saveSourceSummary(ctx, src, topic, slug, branchName, authMgr, debugSources); err != nil {
+			slog.Warn("Failed to save source", "url", src.URL, "error", err)
+		}
+	}
 
-			// Resolve entities to authority IDs
-			resolvedSource, err := authMgr.ResolveEntities(sourceEntities)
-			if err != nil {
-				slog.Warn("Entity resolution failed for source", "error", err)
-				resolvedSource = make(map[string][]string)
-			}
+	log.Printf("Phase 1 completed: collected %d sources", len(sources))
+	return sources, references, nil
+}
 
-			// Build tags from topics
-			var sourceTags []string
-			if topicIDs, ok := resolvedSource["topic"]; ok {
-				sourceTags = topicIDs
-			}
-			sourceTagsStr := fmt.Sprintf("[\"%s\"]", strings.Join(sourceTags, "\", \""))
+// saveSourceSummary saves a source summary to the repository
+func (a *Agent) saveSourceSummary(ctx context.Context, src SourceInfo, topic, slug, branchName string, authMgr *authority.Manager, debugSources bool) error {
+	u, err := url.Parse(src.URL)
+	if err != nil {
+		return err
+	}
 
-			// Build facets block for people, orgs, places
-			sourceFacets := ""
-			if ids, ok := resolvedSource["person"]; ok && len(ids) > 0 {
-				sourceFacets += fmt.Sprintf("people: [\"%s\"]\n", strings.Join(ids, "\", \""))
-			}
-			if ids, ok := resolvedSource["org"]; ok && len(ids) > 0 {
-				sourceFacets += fmt.Sprintf("orgs: [\"%s\"]\n", strings.Join(ids, "\", \""))
-			}
-			if ids, ok := resolvedSource["place"]; ok && len(ids) > 0 {
-				sourceFacets += fmt.Sprintf("places: [\"%s\"]\n", strings.Join(ids, "\", \""))
-			}
+	domain := strings.ReplaceAll(u.Host, ".", "-")
+	sourceID := ulid.Make().String()
+	sourcePath := fmt.Sprintf("Compendium/_incoming/sources/%s--%s-%d.md", slug, domain, src.Index)
 
-			// Build front matter with optional fields
-			sourceModelField := ""
-			if summary.Model != "" {
-				sourceModelField = fmt.Sprintf("model: \"%s\"\n", summary.Model)
-			}
-			languageField := ""
-			if summary.Language != "" {
-				languageField = fmt.Sprintf("language: \"%s\"\n", summary.Language)
-			}
-			sourceVersionField := fmt.Sprintf("researcher_version: \"%s\"\n", Version)
+	// Extract entities
+	sourceEntities, err := a.llm.ExtractEntities(ctx, src.Summary)
+	if err != nil {
+		slog.Warn("Entity extraction failed for source", "error", err)
+		sourceEntities = nil
+	}
+	sourceEntities = append(sourceEntities, llm.ExtractedEntity{Name: topic, Type: llm.Topic})
 
-			sourceContent := fmt.Sprintf(`---
+	// Resolve entities
+	resolvedSource, err := authMgr.ResolveEntities(sourceEntities)
+	if err != nil {
+		resolvedSource = make(map[string][]string)
+	}
+
+	// Build tags
+	var sourceTags []string
+	if topicIDs, ok := resolvedSource["topic"]; ok {
+		sourceTags = topicIDs
+	}
+	sourceTagsStr := fmt.Sprintf("[\"%s\"]", strings.Join(sourceTags, "\", \""))
+
+	// Build facets
+	sourceFacets := ""
+	if ids, ok := resolvedSource["person"]; ok && len(ids) > 0 {
+		sourceFacets += fmt.Sprintf("people: [\"%s\"]\n", strings.Join(ids, "\", \""))
+	}
+	if ids, ok := resolvedSource["org"]; ok && len(ids) > 0 {
+		sourceFacets += fmt.Sprintf("orgs: [\"%s\"]\n", strings.Join(ids, "\", \""))
+	}
+	if ids, ok := resolvedSource["place"]; ok && len(ids) > 0 {
+		sourceFacets += fmt.Sprintf("places: [\"%s\"]\n", strings.Join(ids, "\", \""))
+	}
+
+	sourceContent := fmt.Sprintf(`---
 id: %s
 slug: "%s--%s-%d"
 title: "Source: %s"
@@ -883,106 +888,25 @@ related_article: "%s"
 created: %s
 tags: %s
 %ssummary: "Summarized source material for %s"
-%s%s%s---
+researcher_version: "%s"
+---
 
 %s
-`, sourceID, slug, domain, processedCount, t.result.Title, t.result.Href, slug, time.Now().UTC().Format("2006-01-02T15:04:05Z"), sourceTagsStr, sourceFacets, topic, sourceModelField, languageField, sourceVersionField, summary.Summary)
+`, sourceID, slug, domain, src.Index, src.Title, src.URL, slug,
+		time.Now().UTC().Format("2006-01-02T15:04:05Z"), sourceTagsStr, sourceFacets, topic, Version, src.Summary)
 
-			if err := a.gh.CreateFile(branchName, sourcePath, "Add source: "+t.result.Title, sourceContent); err != nil {
-				slog.Error("Failed to save source", "path", sourcePath, "error", err)
-				// Check if this is a 401 error - if so, stop processing as token is invalid
-				if strings.Contains(err.Error(), "401") {
-					return fmt.Errorf("authentication failed while saving source: %w", err)
-				}
-			}
-		}
+	return a.gh.CreateFile(branchName, sourcePath, "Add source: "+src.Title, sourceContent)
+}
 
-		// Stop Phase 1 if we've reached the target number of sources (PHASE1_TARGET_SOURCES)
-		if processedCount >= limit {
-			log.Printf("Reached Phase 1 target of %d summaries, stopping source processing", limit)
-			break
-		}
-	}
-
-	// Log summary of processing results
-	if processedCount < limit {
-		log.Printf("Phase 1 completed with %d/%d sources (target: %d). Skipped %d sources:", processedCount, len(targets), limit, skippedCount)
-		// Show per-query summary
-		log.Printf("Summaries per query:")
-		for qIdx, count := range summariesPerQuery {
-			log.Printf("  - Query %d: %d summaries (limit: %d)", qIdx, count, targetSummariesPerQuery)
-		}
-		for reason, count := range skippedReasons {
-			log.Printf("  - %s: %d", reason, count)
-		}
-		if processedCount == 0 {
-			return fmt.Errorf("no valid sources collected for topic %s", topic)
-		}
-	} else {
-		log.Printf("Phase 1 completed: collected %d/%d sources", processedCount, limit)
-		// Show per-query summary
-		log.Printf("Summaries per query:")
-		for qIdx, count := range summariesPerQuery {
-			log.Printf("  - Query %d: %d summaries (limit: %d)", qIdx, count, targetSummariesPerQuery)
-		}
-	}
-
-	// Step 1: Generate article content (without citations)
-	log.Printf("Generating article content for '%s'...", topic)
-	articleResult, err := a.llm.GenerateArticle(ctx, topic, contextData)
-	if err != nil {
-		return fmt.Errorf("generation failed: %w", err)
-	}
-	content := articleResult.Content
-	articleModel := articleResult.Model
-
-	// Save thinking trace to debug directory if enabled
-	if articleResult.Thinking != "" && debugSources {
-		thinkingPath := fmt.Sprintf("Compendium/_debug/articles/%s/thinking.txt", slug)
-		thinkingContent := fmt.Sprintf("# Thinking Trace for: %s\n# Model: %s\n# Generated: %s\n\n%s",
-			topic, articleModel, time.Now().UTC().Format(time.RFC3339), articleResult.Thinking)
-		if err := a.gh.CreateFile(branchName, thinkingPath, "Add thinking trace for "+topic, thinkingContent); err != nil {
-			slog.Warn("Failed to save thinking trace", "path", thinkingPath, "error", err)
-		} else {
-			log.Printf("Saved thinking trace (%d chars) to %s", len(articleResult.Thinking), thinkingPath)
-		}
-	}
-
-	// Strip code fences if the LLM wrapped the content in them
-	// Some LLMs wrap YAML frontmatter in ```yaml ... ``` which breaks rendering
-	content = stripCodeFences(content)
-
-	// Step 2: Add citations using the source list (separate LLM call to prevent hallucination)
-	if len(references) > 0 {
-		log.Printf("Adding citations from %d sources...", len(references))
-		
-		// Build source list for citation step
-		var sourceList strings.Builder
-		for i, ref := range references {
-			// Extract title and URL from reference format "[^N]: [Title](URL)"
-			sourceList.WriteString(fmt.Sprintf("[%d] %s\n", i+1, ref))
-		}
-		
-		citedContent, err := a.llm.AddReferences(ctx, content, sourceList.String())
-		if err != nil {
-			slog.Warn("Failed to add citations, using uncited content", "error", err)
-			// Fall back to uncited content
-		} else {
-			content = stripCodeFences(citedContent)
-			log.Printf("Citations added successfully")
-		}
-		
-		// Append References section
-		content += "\n\n## References\n\n" + strings.Join(references, "\n")
-	}
-
-	// Entities
+// finalizeArticle extracts entities and saves the final article
+func (a *Agent) finalizeArticle(ctx context.Context, topic, category, slug, branchName, content string, authMgr *authority.Manager) error {
+	// Extract entities from article
 	extracted, err := a.llm.ExtractEntities(ctx, content)
 	if err != nil {
 		slog.Warn("Entity extraction failed", "error", err)
 	}
 
-	// Add Category as a topic if missing
+	// Add category and topic
 	foundCat := false
 	for _, e := range extracted {
 		if strings.EqualFold(e.Name, category) {
@@ -993,7 +917,6 @@ tags: %s
 	if !foundCat {
 		extracted = append(extracted, llm.ExtractedEntity{Name: category, Type: llm.Topic})
 	}
-	// Add Topic itself
 	extracted = append(extracted, llm.ExtractedEntity{Name: topic, Type: llm.Topic})
 
 	resolved, err := authMgr.ResolveEntities(extracted)
@@ -1001,9 +924,8 @@ tags: %s
 		slog.Warn("Entity resolution failed", "error", err)
 	}
 
-	// Front Matter
+	// Build frontmatter
 	id := ulid.Make()
-	// slug is already defined at start of function
 	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
 	var tags []string
@@ -1023,15 +945,11 @@ tags: %s
 		facetsBlock += fmt.Sprintf("places: [\"%s\"]\n", strings.Join(ids, "\", \""))
 	}
 
-	// Build model and version fields for frontmatter
-	modelField := ""
-	if articleModel != "" {
-		modelField = fmt.Sprintf("model: \"%s\"\n", articleModel)
-	}
 	versionField := fmt.Sprintf("researcher_version: \"%s\"\n", Version)
 
 	var fullContent string
 	if strings.HasPrefix(strings.TrimSpace(content), "---") {
+		// Article already has frontmatter, inject our fields
 		lines := strings.Split(content, "\n")
 		if len(lines) > 1 {
 			systemFields := fmt.Sprintf("id: %s\nslug: \"%s\"\ncreated: %s", id, slug, date)
@@ -1042,23 +960,24 @@ tags: %s
 				}
 				cleanedLines = append(cleanedLines, line)
 			}
-			injection := fmt.Sprintf("%s\ntags: %s\n%s%s%s", systemFields, tagsStr, facetsBlock, modelField, versionField)
+			injection := fmt.Sprintf("%s\ntags: %s\n%s%s", systemFields, tagsStr, facetsBlock, versionField)
 			newLines := append([]string{cleanedLines[0], injection}, cleanedLines[1:]...)
 			fullContent = strings.Join(newLines, "\n")
 		} else {
 			fullContent = content
 		}
 	} else {
+		// Create frontmatter
 		frontMatter := fmt.Sprintf(`---
 id: %s
 title: "%s"
 slug: "%s"
 created: %s
 tags: %s
-%s%s%ssummary: ""
+%s%ssummary: ""
 ---
 
-`, id, topic, slug, date, tagsStr, facetsBlock, modelField, versionField)
+`, id, topic, slug, date, tagsStr, facetsBlock, versionField)
 		fullContent = frontMatter + content
 	}
 

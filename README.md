@@ -1,90 +1,138 @@
 # Gitopedia Researcher
 
-The Researcher is an AI-powered agent that automatically creates encyclopedia articles for Gitopedia. It monitors GitHub issues for research requests, gathers information from web sources, and generates well-sourced Markdown articles.
+The Researcher is an AI-powered agent that automatically creates encyclopedia articles for Gitopedia using a **multi-phase generation pipeline**. It monitors GitHub issues for research requests, gathers information from web sources, and generates well-sourced, comprehensive Markdown articles.
 
-## Architecture
+## Multi-Phase Architecture
+
+The researcher builds articles iteratively through 7 phases, allowing for deeper research and higher quality output:
 
 ```mermaid
 flowchart TB
-    subgraph Input
-        Issues["GitHub Issues<br/>(research-request)"]
-        OpenPRs["Open PRs<br/>(pending merge)"]
-    end
-
-    subgraph Agent["Researcher Agent"]
-        Monitor["Issue Monitor"]
-        Merger["PR Merger"]
-        Generator["Article Generator"]
-    end
-
-    subgraph Research["Research Pipeline"]
-        WebSearch["DuckDuckGo<br/>Search"]
-        Fetch["Headless Chrome<br/>Page Fetch"]
-        Summarize["Source<br/>Summarization"]
-    end
-
-    subgraph LLM["Multi-Model LLM"]
-        Fast["qwen3:8b<br/>(fast tasks)"]
-        Medium["qwen3:14b<br/>(entity extraction)"]
-        Large["qwen3:32b<br/>(article generation)"]
-    end
-
-    subgraph Output
-        PR["Draft PR"]
+    subgraph Phase1["Phase 1: Foundation Research"]
+        Search["Web Search<br/>(DuckDuckGo)"]
+        Fetch["Fetch Pages<br/>(Headless Chrome)"]
+        Summarize["Summarize Sources<br/>(qwen3:14b)"]
         Sources["Source Summaries"]
-        Article["Article + References"]
     end
 
-    Issues --> Monitor
-    OpenPRs --> Merger
-    Monitor --> Generator
-    
-    Generator --> WebSearch
-    WebSearch --> Fetch
-    Fetch --> Summarize
-    Summarize --> Fast
-    Summarize --> Medium
-    Medium --> Large
-    
-    Large --> PR
-    Summarize --> Sources
-    Large --> Article
+    subgraph Phase2["Phase 2: Outline & Gap Analysis"]
+        Outline["Generate Outline<br/>(qwen3:32b)"]
+        Gaps["Identify Gaps<br/>(qwen3:14b)"]
+    end
+
+    subgraph Phase3["Phase 3: Targeted Research"]
+        TargetSearch["Targeted Searches"]
+        NewSources["Additional Sources"]
+    end
+
+    subgraph Phase4["Phase 4: Section Generation"]
+        Section1["Section 1"]
+        Section2["Section 2"]
+        SectionN["Section N"]
+    end
+
+    subgraph Phase5["Phase 5: Section Discovery"]
+        Discover["Suggest New Sections<br/>(qwen3:14b)"]
+        NewSections["Generate New Sections"]
+    end
+
+    subgraph Phase6["Phase 6: Integration"]
+        Integrate["Polish & Integrate<br/>(qwen3:32b)"]
+    end
+
+    subgraph Phase7["Phase 7: Citations"]
+        AddRefs["Add References<br/>(qwen3:14b)"]
+        Final["Final Article"]
+    end
+
+    Search --> Fetch --> Summarize --> Sources
+    Sources --> Outline --> Gaps
+    Gaps -->|"Has gaps"| TargetSearch --> NewSources
+    NewSources -->|"Re-analyze"| Gaps
+    Gaps -->|"No gaps"| Section1 & Section2 & SectionN
+    Section1 & Section2 & SectionN --> Discover
+    Discover --> NewSections --> Integrate
+    Integrate --> AddRefs --> Final
 ```
 
-## Features
+## Phase Details
 
-- **Multi-Model LLM Support**: Uses different models for different task complexities
-- **Thinking Mode**: Leverages Ollama's thinking capability for better instruction following
-- **Two-Step Article Generation**: Separates content creation from citation addition to prevent hallucinated references
-- **Automatic PR Merging**: Resolves merge conflicts in authority files and category indexes
-- **Version Tracking**: Embeds researcher version in article frontmatter
-- **Debug Output**: Optional saving of thinking traces and raw sources
+### Phase 1: Foundation Research
+- Executes multiple search queries for topic variety
+- Fetches page content via headless Chrome
+- Summarizes sources using LLM with thinking mode
+- Filters for relevance and minimum word count
+- Saves source summaries to `_incoming/sources/`
+
+### Phase 2: Outline & Gap Analysis
+- Generates structured article outline from sources
+- Identifies gaps in research coverage
+- Suggests additional sections needed
+
+### Phase 3: Targeted Research (Iterative)
+- Performs focused searches to fill identified gaps
+- Adds new sources to the knowledge base
+- Re-analyzes gaps after each round
+- Configurable max rounds (default: 2)
+
+### Phase 4: Section Generation
+- Generates each section individually
+- Uses RAG to select relevant sources per section
+- Maintains coherence with already-written sections
+
+### Phase 5: Section Discovery
+- Analyzes sources for missed topics
+- Suggests additional sections to add
+- Generates content for discovered sections
+
+### Phase 6: Integration & Polish
+- Merges all sections into cohesive article
+- Improves transitions and flow
+- Ensures consistent style and tone
+
+### Phase 7: Citation Addition
+- Adds footnote markers `[^N]` to article
+- Uses only provided sources (prevents hallucination)
+- Appends References section
+
+## Multi-Model Configuration
+
+Different models are used for different task complexities:
+
+| Task | Model | Thinking Mode |
+|------|-------|---------------|
+| Topic Suggestion | qwen3:8b | No |
+| Source Summarization | qwen3:14b | Yes |
+| Entity Extraction | qwen3:14b | Yes |
+| Outline Generation | qwen3:32b | No |
+| Gap Analysis | qwen3:14b | No |
+| Section Generation | qwen3:32b | Yes |
+| Section Discovery | qwen3:14b | No |
+| Article Integration | qwen3:32b | No |
+| Reference Addition | qwen3:14b | No |
 
 ## Prerequisites
 
 ### GitHub CLI
 
 ```bash
-# Install gh CLI (see https://cli.github.com/)
 gh auth login
 gh auth status
 ```
 
 ### Ollama
 
-The researcher requires Ollama with the following models:
-
 ```bash
-# Fast model (topic suggestion, JSON conversion)
+# Fast model
 ollama pull qwen3:8b
 
-# Medium model (entity extraction, source summarization)
+# Medium model
 ollama pull qwen3:14b
 
-# Large model (article generation)
+# Large model
 ollama pull qwen3:32b
 
-# Embedding model (for knowledge-base integration)
+# Embedding model (for knowledge-base)
 ollama pull nomic-embed-text
 ```
 
@@ -100,19 +148,18 @@ LLM_MODEL_FAST=qwen3:8b      # Fast tasks
 LLM_MODEL_ENTITY=qwen3:14b   # Entity extraction
 LLM_MODEL_ARTICLE=qwen3:32b  # Article generation
 
-# LLM Thinking Mode (improves instruction following)
+# LLM Thinking Mode
 LLM_THINK_MODE=true
 
 # Research settings
-PHASE1_TARGET_SOURCES=20     # Sources to gather per topic
-MAX_TOPICS_PER_RUN=10        # Topics to process per run
+PHASE1_TARGET_SOURCES=20     # Initial sources to gather
+MAX_RESEARCH_ROUNDS=2        # Gap-filling iterations
+SOURCES_PER_SECTION=8        # Sources per section (RAG)
 
 # Knowledge-base integration (optional)
 USE_KNOWLEDGE_BASE=false
 KB_API_URL=http://localhost:8081
 ```
-
-See `config/base.env` for all available options.
 
 ## Running
 
@@ -141,7 +188,7 @@ go run . --once
 go run . --merge-only
 ```
 
-## Workflow
+## Workflow Sequence
 
 ```mermaid
 sequenceDiagram
@@ -150,46 +197,47 @@ sequenceDiagram
     participant Web as Web Search
     participant LLM as Ollama
     participant PR as GitHub PR
-    participant KB as Knowledge-Base
 
     Issue->>Agent: research-request label
     
-    Agent->>Web: Search for topic
-    Web->>Agent: Search results
-    
+    Note over Agent: Phase 1: Foundation
+    Agent->>Web: Search queries
+    Web->>Agent: Results
     loop For each result
-        Agent->>Web: Fetch page content
-        Web->>Agent: HTML content
-        Agent->>LLM: Summarize (qwen3:14b + thinking)
-        LLM->>Agent: Source summary
+        Agent->>Web: Fetch page
+        Agent->>LLM: Summarize (14b + think)
     end
     
-    Agent->>LLM: Extract entities (qwen3:14b + thinking)
-    LLM->>Agent: People, orgs, concepts
+    Note over Agent: Phase 2: Outline
+    Agent->>LLM: Generate outline (32b)
+    Agent->>LLM: Analyze gaps (14b)
     
-    Agent->>LLM: Generate article (qwen3:32b + thinking)
-    LLM->>Agent: Article content (no refs)
+    Note over Agent: Phase 3: Targeted Research
+    loop While gaps exist
+        Agent->>Web: Targeted searches
+        Agent->>LLM: Summarize new sources
+        Agent->>LLM: Re-analyze gaps
+    end
     
-    Agent->>LLM: Add references (qwen3:14b)
-    LLM->>Agent: Article with citations
+    Note over Agent: Phase 4: Sections
+    loop For each section
+        Agent->>LLM: Generate section (32b + think)
+    end
     
-    Agent->>PR: Create PR with article + sources
+    Note over Agent: Phase 5: Discovery
+    Agent->>LLM: Discover sections (14b)
+    Agent->>LLM: Generate new sections
     
-    Note over Agent,KB: After PR merge
-    KB->>KB: Ingest sources
-    KB->>KB: Generate embeddings
+    Note over Agent: Phase 6: Integration
+    Agent->>LLM: Integrate article (32b)
+    
+    Note over Agent: Phase 7: Citations
+    Agent->>LLM: Add references (14b)
+    
+    Agent->>PR: Create PR with article
 ```
 
-## Article Generation
-
-### Two-Step Process
-
-1. **Content Generation**: The LLM generates the article without any references
-2. **Citation Addition**: A separate LLM call adds footnote markers `[^N]` based only on the provided sources
-
-This prevents hallucinated references by ensuring all citations come from actual gathered sources.
-
-### Output Format
+## Output Format
 
 Articles are created with YAML frontmatter:
 
@@ -198,11 +246,10 @@ Articles are created with YAML frontmatter:
 id: 01KBCVQXJS3QK3JCRGTWBFH2A6
 title: Quantum Mechanics
 author: Gitopedia Researcher
-summary: An overview of quantum mechanics...
+summary: A comprehensive overview of quantum mechanics...
 tags: [physics, quantum, science]
 created: 2025-12-03T04:06:38Z
-model: qwen3:32b
-researcher_version: 0.3.5
+researcher_version: 0.3.6
 ---
 
 # Quantum Mechanics
@@ -220,7 +267,7 @@ Content with citations[^1] to sources[^2]...
 The researcher uses semantic versioning:
 
 - Version stored in `VERSION` file
-- Patch version auto-increments on each commit (via git hook)
+- Patch version auto-increments on commit (via git hook)
 - Changes documented in `CHANGELOG.md`
 - Version embedded in generated articles
 
@@ -233,13 +280,14 @@ cd researcher
 
 ## Debugging
 
-Enable debug output to save thinking traces and raw sources:
+Enable debug output to save thinking traces and intermediate outputs:
 
 ```bash
 RESEARCH_DEBUG_SOURCES=true
 ```
 
 Debug files are saved to `Compendium/_debug/` in the PR branch:
+- `articles/{slug}/outline.json` - Generated outline
 - `articles/{slug}/thinking.txt` - LLM reasoning traces
 - `sources/{slug}/` - Raw fetched pages and summaries
 
@@ -252,7 +300,9 @@ researcher/
 ├── config/
 │   └── base.env         # Default configuration
 ├── internal/
-│   ├── agent/           # Main agent logic
+│   ├── agent/
+│   │   ├── agent.go     # Main agent logic
+│   │   └── phases.go    # Multi-phase generation
 │   ├── authority/       # Entity authority management
 │   ├── github/          # GitHub API client
 │   ├── kb/              # Knowledge-base client

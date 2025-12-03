@@ -74,17 +74,15 @@ type SourceInfo struct {
 
 // PhaseConfig holds configuration for multi-phase generation
 type PhaseConfig struct {
-	EnableMultiPhase    bool
-	MaxResearchRounds   int
-	SourcesPerSection   int
-	KBClient            *kb.Client
-	UseKnowledgeBase    bool
+	MaxResearchRounds int
+	SourcesPerSection int
+	KBClient          *kb.Client
+	UseKnowledgeBase  bool
 }
 
 // GetPhaseConfig returns the phase configuration from environment
 func GetPhaseConfig() PhaseConfig {
 	config := PhaseConfig{
-		EnableMultiPhase:  os.Getenv("ENABLE_MULTI_PHASE") == "true",
 		MaxResearchRounds: 2,
 		SourcesPerSection: 8,
 		UseKnowledgeBase:  os.Getenv("USE_KNOWLEDGE_BASE") == "true",
