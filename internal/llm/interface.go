@@ -60,6 +60,9 @@ type Generator interface {
 	GenerateSection(ctx context.Context, topic, heading, headingLevel string, wordTarget int, points, sources, context string) (string, error)
 	DiscoverSections(ctx context.Context, topic, currentSections, sources string) (string, error)
 	IntegrateArticle(ctx context.Context, topic, article string) (string, error)
+	
+	// New section polishing method
+	PolishSection(ctx context.Context, topic, heading, headingLevel, content, prevContext, nextContext string) (string, error)
 }
 
 // Ensure Client implements Generator

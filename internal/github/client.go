@@ -633,7 +633,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
-	
+
 	// Get the SHA of main's HEAD
 	mainRef, _, err := c.client.Git.GetRef(c.ctx, c.owner, c.repo, "heads/main")
 	if err != nil {
@@ -684,7 +684,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	// Collect tree entries for files that need special handling
 	var treeEntries []*github.TreeEntry
 	newFilesCount := 0
-	
+
 	// 1. Add files from PR branch that don't exist in main (new articles, sources, etc.)
 	log.Printf("[MergeCommit] Step 1: Adding new files from branch...")
 	for _, file := range branchFiles {
@@ -719,7 +719,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		"authority/orgs.json",
 		"authority/places.json",
 	}
-	
+
 	for _, path := range authorityFiles {
 		mainContent, _, err := c.GetFile("main", path)
 		if err != nil {
@@ -731,7 +731,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 			log.Printf("[MergeCommit] Skipping %s: not in branch (%v)", path, err)
 			continue
 		}
-		
+
 		// Parse and merge
 		var mainEntries, branchEntries []AuthorityEntry
 		if err := json.Unmarshal([]byte(mainContent), &mainEntries); err != nil {
@@ -742,7 +742,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 			log.Printf("[MergeCommit] Skipping %s: failed to parse branch content (%v)", path, err)
 			continue
 		}
-		
+
 		log.Printf("[MergeCommit] %s: main has %d entries, branch has %d entries", path, len(mainEntries), len(branchEntries))
 		
 		// Merge: start with main, add unique entries from branch
@@ -759,13 +759,13 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 				newEntriesCount++
 			}
 		}
-		
+
 		mergedJSON, err := json.MarshalIndent(merged, "", "  ")
 		if err != nil {
 			log.Printf("[MergeCommit] Skipping %s: failed to marshal merged content (%v)", path, err)
 			continue
 		}
-		
+
 		treeEntries = append(treeEntries, &github.TreeEntry{
 			Path:    github.String(path),
 			Mode:    github.String("100644"),
@@ -774,7 +774,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		})
 		log.Printf("[MergeCommit] Merged %s: %d total entries (+%d new from branch)", path, len(merged), newEntriesCount)
 	}
-	
+
 	// 3. Handle index.md files - regenerate based on combined articles
 	log.Printf("[MergeCommit] Step 3: Regenerating index.md files...")
 	// Get all markdown files from both branches
@@ -787,10 +787,10 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	}
 	log.Printf("[MergeCommit] Total unique files across both branches: %d", len(allFiles))
 	
-	// Group articles by directory
-	articlesByDir := make(map[string][]string)
+		// Group articles by directory
+		articlesByDir := make(map[string][]string)
 	indexDirs := make(map[string]bool)
-	
+
 	for file := range allFiles {
 		if !strings.HasSuffix(file, ".md") || !strings.HasPrefix(file, "Compendium/") {
 			continue
@@ -805,21 +805,21 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		}
 		dir := file[:lastSlash]
 		filename := file[lastSlash+1:]
-		
-		if filename == "index.md" {
+
+				if filename == "index.md" {
 			indexDirs[dir] = true
-		} else if !strings.HasPrefix(filename, "_") {
-			articlesByDir[dir] = append(articlesByDir[dir], filename)
+				} else if !strings.HasPrefix(filename, "_") {
+					articlesByDir[dir] = append(articlesByDir[dir], filename)
+			}
 		}
-	}
-	
+
 	// Generate merged index.md for each directory
 	for dir := range indexDirs {
-		articles := articlesByDir[dir]
-		if len(articles) == 0 {
-			continue
-		}
-		
+			articles := articlesByDir[dir]
+			if len(articles) == 0 {
+				continue
+			}
+
 		// Sort articles
 		for i := 0; i < len(articles)-1; i++ {
 			for j := i + 1; j < len(articles); j++ {
@@ -830,33 +830,33 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		}
 		
 		// Get category name
-		parts := strings.Split(dir, "/")
-		categoryName := parts[len(parts)-1]
-		
+			parts := strings.Split(dir, "/")
+			categoryName := parts[len(parts)-1]
+
 		// Generate content
-		var sb strings.Builder
-		sb.WriteString("# ")
-		sb.WriteString(categoryName)
-		sb.WriteString(" Articles\n\n")
-		
+			var sb strings.Builder
+			sb.WriteString("# ")
+			sb.WriteString(categoryName)
+			sb.WriteString(" Articles\n\n")
+
 		for _, article := range articles {
-			title := strings.TrimSuffix(article, ".md")
-			title = strings.ReplaceAll(title, "-", " ")
-			words := strings.Fields(title)
-			for i, word := range words {
-				if len(word) > 0 {
-					words[i] = strings.ToUpper(word[:1]) + word[1:]
+				title := strings.TrimSuffix(article, ".md")
+				title = strings.ReplaceAll(title, "-", " ")
+				words := strings.Fields(title)
+				for i, word := range words {
+					if len(word) > 0 {
+						words[i] = strings.ToUpper(word[:1]) + word[1:]
+					}
 				}
+				title = strings.Join(words, " ")
+				sb.WriteString("- [")
+				sb.WriteString(title)
+				sb.WriteString("](")
+				sb.WriteString(article)
+				sb.WriteString(")\n")
 			}
-			title = strings.Join(words, " ")
-			sb.WriteString("- [")
-			sb.WriteString(title)
-			sb.WriteString("](")
-			sb.WriteString(article)
-			sb.WriteString(")\n")
-		}
-		sb.WriteString("\n")
-		
+			sb.WriteString("\n")
+
 		indexPath := dir + "/index.md"
 		treeEntries = append(treeEntries, &github.TreeEntry{
 			Path:    github.String(indexPath),
@@ -871,8 +871,8 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	
 	if len(treeEntries) == 0 {
 		return fmt.Errorf("no files to merge - this may indicate the branch is already up to date or has no new content")
-	}
-	
+			}
+
 	// Create a new tree based on main's tree with our modifications
 	log.Printf("[MergeCommit] Creating new tree based on main's tree (%s)...", baseTreeSHA[:7])
 	newTree, _, err := c.client.Git.CreateTree(c.ctx, c.owner, c.repo, baseTreeSHA, treeEntries)
@@ -906,7 +906,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	if err != nil {
 		return fmt.Errorf("failed to update branch ref: %w", err)
 	}
-	
+
 	log.Printf("[MergeCommit] SUCCESS: Updated %s to %s", branch, newCommit.GetSHA()[:7])
 	return nil
 }

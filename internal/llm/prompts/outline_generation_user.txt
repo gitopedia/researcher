@@ -3,20 +3,27 @@ Create a detailed outline for an encyclopedia article about "{{.Topic}}".
 **Available Sources:**
 {{.Sources}}
 
+**GOAL: Create a COMPREHENSIVE, IN-DEPTH reference article**
+This should be a substantial encyclopedia entry comparable to a detailed Wikipedia article.
+Cover the topic thoroughly - leave no important aspect unexplored.
+
 **Instructions:**
-1. Analyze the sources to identify key themes, concepts, and information
-2. Create a comprehensive outline with main sections and subsections
+1. Analyze the sources to identify ALL key themes, concepts, and information
+2. Create a comprehensive outline with main sections AND multiple subsections
 3. Each section should have:
    - A clear heading (## for main sections, ### for subsections)
-   - 2-3 bullet points describing what should be covered
-   - Estimated word count target (aim for 300-800 words per main section)
+   - 3-5 bullet points describing what should be covered in detail
+4. Include as many sections as needed to thoroughly cover the topic
+5. Every major concept deserves its own section or subsection
 
 **Required Sections:**
-- Introduction/Overview (300-500 words)
-- History/Background (400-600 words)
-- Key Concepts/Fundamentals (500-800 words, with subsections)
-- Applications/Uses (400-600 words)
-- Current Status and Future Directions (300-500 words)
+- Introduction/Overview - comprehensive introduction, scope, significance
+- History/Background (with subsections for different eras/developments)
+- Key Concepts/Fundamentals (with subsections covering different aspects)
+- Applications/Uses (with subsections for different domains)
+- Current Status and Future Directions
+- Challenges and Controversies
+- Impact and Significance
 - Additional sections as appropriate based on the sources
 
 **Output Format:**
@@ -29,29 +36,49 @@ Return ONLY a JSON object with this structure:
     {
       "heading": "Introduction",
       "level": 2,
-      "points": ["Point 1 to cover", "Point 2 to cover"],
-      "word_target": 400,
+      "points": ["Define the topic precisely", "Explain significance and relevance", "Outline scope and structure", "Provide historical context"],
       "relevant_sources": [1, 3, 5]
     },
     {
       "heading": "History and Development",
       "level": 2,
-      "points": ["Origins", "Key milestones", "Evolution"],
-      "word_target": 500,
+      "points": ["Origins and early development", "Key milestones", "Major turning points", "Evolution to present day"],
       "subsections": [
         {
           "heading": "Early History",
           "level": 3,
-          "points": ["Founding events", "Initial development"],
-          "word_target": 250
+          "points": ["Founding events", "Initial development", "Key figures"]
+        },
+        {
+          "heading": "Modern Developments",
+          "level": 3,
+          "points": ["Recent advances", "Current state"]
         }
       ],
       "relevant_sources": [2, 4]
+    },
+    {
+      "heading": "Key Concepts and Fundamentals",
+      "level": 2,
+      "points": ["Core principles", "Terminology", "Mechanisms", "Theoretical foundations"],
+      "subsections": [
+        {
+          "heading": "Core Principles",
+          "level": 3,
+          "points": ["Fundamental concept 1", "Fundamental concept 2"]
+        }
+      ],
+      "relevant_sources": [1, 2, 3]
     }
   ],
-  "total_word_target": 3500
+  "total_word_target": 0
 }
 ```
+
+IMPORTANT: 
+- Include 8-12 main sections or more if the topic warrants it
+- Use subsections extensively to organize complex topics
+- The goal is comprehensive coverage, not a specific length
 
 Return ONLY the JSON object, no additional text or explanation.
 

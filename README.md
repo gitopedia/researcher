@@ -143,18 +143,21 @@ Configuration is loaded from `config/base.env` with optional overrides in `.env`
 ### Key Settings
 
 ```bash
+# Run profile
+RUN_PROFILE=test             # Fast iteration (1 topic, fewer sources/sections)
+# RUN_PROFILE=prod           # Full-fidelity generation
+
 # Multi-model configuration
 LLM_MODEL_FAST=qwen3:8b      # Fast tasks
-LLM_MODEL_ENTITY=qwen3:14b   # Entity extraction
-LLM_MODEL_ARTICLE=qwen3:32b  # Article generation
+LLM_MODEL_ARTICLE=qwen3:32b  # Article generation & entity extraction
 
 # LLM Thinking Mode
 LLM_THINK_MODE=true
 
 # Research settings
 PHASE1_TARGET_SOURCES=20     # Initial sources to gather
-MAX_RESEARCH_ROUNDS=2        # Gap-filling iterations
-SOURCES_PER_SECTION=8        # Sources per section (RAG)
+MAX_RESEARCH_ROUNDS=2        # Gap-filling iterations (1 in RUN_PROFILE=test)
+SOURCES_PER_SECTION=8        # Sources per section (RAG) (3 in RUN_PROFILE=test)
 
 # Knowledge-base integration (optional)
 USE_KNOWLEDGE_BASE=false
@@ -278,18 +281,30 @@ cd researcher
 ./scripts/install-hooks.sh
 ```
 
-## Debugging
+## Debugging & Debug Artifacts
 
-Enable debug output to save thinking traces and intermediate outputs:
+Enable richer debug output to save intermediate artifacts for retrospective analysis.  
+Debug files are committed into the PR branch under `Compendium/_debug/`:
+
+- `articles/{slug}/outline.json` – Generated outline
+- `articles/{slug}/phase1_sources.json` – Phase 1 sources and references
+- `articles/{slug}/phase2_gap_analysis.json` – Gap analysis result
+- `articles/{slug}/phase3_targeted_research.json` – Targeted research inputs/outputs
+- `articles/{slug}/phase4_sections/section-*.md` – Section and subsection drafts
+- `articles/{slug}/phase5_discovery.json` – Discovered sections
+- `articles/{slug}/phase6_integrated.md` – Integrated article before citations
+- `articles/{slug}/phase7_cited.md` – Article after citation insertion
+- `articles/{slug}/entities.json` – Extracted and resolved entities
+
+Fast iteration workflow:
 
 ```bash
-RESEARCH_DEBUG_SOURCES=true
-```
+# Faster test runs
+RUN_PROFILE=test MAX_TOPICS_PER_RUN=1 go run . --once
 
-Debug files are saved to `Compendium/_debug/` in the PR branch:
-- `articles/{slug}/outline.json` - Generated outline
-- `articles/{slug}/thinking.txt` - LLM reasoning traces
-- `sources/{slug}/` - Raw fetched pages and summaries
+# Full-fidelity production-style run
+RUN_PROFILE=prod go run . --once
+```
 
 ## Project Structure
 

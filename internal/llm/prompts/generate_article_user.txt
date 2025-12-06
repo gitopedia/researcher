@@ -2,8 +2,9 @@ You are an expert encyclopedia author for Gitopedia.
 Write a comprehensive, in-depth encyclopedia article about "{{.Topic}}".
 
 **Goal**
-- Produce a LONG, DETAILED encyclopedia article (not a summary) that thoroughly explains the topic.
-- This should be a substantial reference work, not a brief overview.
+- Produce a DETAILED encyclopedia article that thoroughly explains the topic.
+- This should be a substantial reference work comparable to a detailed Wikipedia article.
+- Cover all important aspects - be as thorough as the topic requires.
 
 **Context**
 - Use the research context below as your primary source of information.
@@ -21,53 +22,64 @@ Write a comprehensive, in-depth encyclopedia article about "{{.Topic}}".
   tags: ["Tag1", "Tag2"]
   ---
 - CRITICAL: Do NOT wrap the front matter in code fences (```yaml or ```). Just use plain --- delimiters.
-- Do not include "id", "created", or "author" (these are added later).
+- Do NOT include "id", "created", "author", or "date" fields (these are added automatically).
 - After the front matter, start the article body with a Level 1 heading (# Title).
 
 **Required Sections (## headings)**
-Each section should be SUBSTANTIAL (multiple paragraphs, not just a few sentences):
+Each section should be as detailed as the topic requires:
 
-1. **Introduction/Overview** (300-500 words)
+1. **Introduction/Overview**
    - Define the topic precisely
    - Explain its significance and relevance
    - Provide high-level context and scope
+   - Outline the structure of the article
 
-2. **History/Background** (400-600 words)
+2. **History/Background** (with subsections)
    - Origins and early development
    - Key milestones and turning points
    - Important people, dates, and events
    - Evolution over time
 
-3. **Key Concepts/Fundamentals** (500-800 words)
+3. **Key Concepts/Fundamentals** (with subsections)
    - Core principles and terminology
    - Theoretical foundations
    - How it works (mechanisms, processes)
-   - Use ### subsections for different concepts
+   - Use ### subsections for each major concept
 
-4. **Applications/Uses** (400-600 words)
+4. **Applications/Uses** (with subsections)
    - Real-world applications
    - Concrete examples and case studies
    - Different domains where it applies
+   - Impact in various fields
 
-5. **Current Status and Future Directions** (300-500 words)
+5. **Current Status and Future Directions**
    - Recent developments and trends
    - Ongoing research and debates
    - Future possibilities and challenges
 
-6. **Additional Sections** as appropriate:
+6. **Challenges and Controversies**
+   - Known limitations
+   - Debates in the field
+   - Ethical considerations
+
+7. **Impact and Significance**
+   - Broader implications
+   - Influence on related fields
+   - Cultural or societal impact
+
+8. **Additional Sections** as appropriate:
    - Types/Classification
    - Notable Examples
-   - Impact and Significance
-   - Challenges and Controversies
+   - Regional Variations
    - Related Topics
 
-**Length and Depth Requirements**
-- MINIMUM 2500 words, aim for 3000-4000 words
-- Each major section should be 300-800 words (not short paragraphs)
+**Depth Requirements**
+- Each section should be as detailed as needed to thoroughly cover the topic
 - Use ### subsections to organize complex topics
 - Include specific facts, dates, names, statistics, and examples
 - Explain technical concepts clearly for non-experts
 - Build logical connections between sections
+- Write multiple paragraphs per point, not just brief mentions
 
 **IMPORTANT: NO CITATIONS IN THIS STEP**
 - Do NOT include any citation markers like [^1], [^2], [1], [2], etc.

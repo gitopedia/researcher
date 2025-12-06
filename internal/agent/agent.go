@@ -41,6 +41,39 @@ type Agent struct {
 	llm    llm.Generator
 }
 
+// debugBasePath returns the root debug directory for a given article slug.
+// All per-phase debug artifacts live under this tree and are committed to the PR branch.
+func debugBasePath(slug string) string {
+	// We keep debug artifacts under Compendium/_debug to align with existing behavior.
+	return fmt.Sprintf("Compendium/_debug/articles/%s", slug)
+}
+
+// saveDebugJSON marshals v as pretty JSON and writes it to the given path in the PR branch.
+// Debug artifacts are best-effort only – failures are logged but do not fail the run.
+func (a *Agent) saveDebugJSON(branchName, path, message string, v interface{}) {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		slog.Warn("Failed to marshal debug JSON", "path", path, "error", err)
+		return
+	}
+
+	if err := a.gh.CreateFile(branchName, path, message, string(data)); err != nil {
+		slog.Warn("Failed to save debug JSON", "path", path, "error", err)
+		return
+	}
+	log.Printf("Saved debug artifact: %s", path)
+}
+
+// saveDebugText writes raw text content to the given path in the PR branch.
+// Debug artifacts are best-effort only – failures are logged but do not fail the run.
+func (a *Agent) saveDebugText(branchName, path, message, content string) {
+	if err := a.gh.CreateFile(branchName, path, message, content); err != nil {
+		slog.Warn("Failed to save debug text", "path", path, "error", err)
+		return
+	}
+	log.Printf("Saved debug artifact: %s", path)
+}
+
 func NewAgent(ctx context.Context) (*Agent, error) {
 	ghClient, err := github.NewClient(ctx)
 	if err != nil {
@@ -420,7 +453,7 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 			// Try to get CI logs to understand the failure
 			if logs, err := a.gh.GetFailedCILogs(pr.Number); err == nil && logs != "" {
 				log.Printf("PR #%d CI failure details:\n%s", pr.Number, logs)
-				
+
 				// Check for common fixable issues
 				if strings.Contains(logs, "yaml:") || strings.Contains(logs, "front matter error") {
 					log.Printf("PR #%d: YAML parsing error detected - this may be due to invalid characters in entity names", pr.Number)
@@ -495,6 +528,15 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		return fmt.Errorf("no valid sources collected for topic %s", topic)
 	}
 
+	// Save Phase 1 sources and references as debug artifact
+	phase1DebugPath := fmt.Sprintf("%s/phase1_sources.json", debugBasePath(slug))
+	a.saveDebugJSON(branchName, phase1DebugPath, "Add debug: phase 1 sources "+topic, map[string]interface{}{
+		"topic":      topic,
+		"slug":       slug,
+		"sources":    sources,
+		"references": references,
+	})
+
 	// Generate outline from sources
 	outline, err := a.Phase1GenerateOutline(ctx, topic, sources)
 	if err != nil {
@@ -514,6 +556,10 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		}
 	}
 
+	// Save outline to debug directory (JSON)
+	outlineDebugPath := fmt.Sprintf("%s/outline.json", debugBasePath(slug))
+	a.saveDebugJSON(branchName, outlineDebugPath, "Add debug: outline "+topic, outline)
+
 	// ========================================
 	// PHASE 2: Gap Analysis
 	// ========================================
@@ -525,11 +571,23 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		gaps = &GapAnalysis{Gaps: nil, SuggestedSections: nil}
 	}
 
+	// Save Phase 2 gap analysis debug artifact
+	phase2DebugPath := fmt.Sprintf("%s/phase2_gap_analysis.json", debugBasePath(slug))
+	a.saveDebugJSON(branchName, phase2DebugPath, "Add debug: phase 2 gap analysis "+topic, map[string]interface{}{
+		"topic":    topic,
+		"slug":     slug,
+		"outline":  outline,
+		"gaps":     gaps,
+		"num_gaps": len(gaps.Gaps),
+		"num_sugs": len(gaps.SuggestedSections),
+	})
+
 	// ========================================
 	// PHASE 3: Targeted Research (if gaps found)
 	// ========================================
 	allSources := sources
 	maxRounds := config.MaxResearchRounds
+	var allNewSources []SourceInfo
 	for round := 0; round < maxRounds && len(gaps.Gaps) > 0; round++ {
 		log.Printf("=== PHASE 3: Targeted Research (Round %d/%d) ===", round+1, maxRounds)
 
@@ -553,6 +611,7 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		}
 
 		allSources = append(allSources, newSources...)
+		allNewSources = append(allNewSources, newSources...)
 
 		// Re-analyze gaps with new sources
 		gaps, err = a.Phase2AnalyzeGaps(ctx, topic, outline, allSources)
@@ -562,6 +621,18 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		}
 	}
 
+	// Save Phase 3 targeted research debug artifact
+	phase3DebugPath := fmt.Sprintf("%s/phase3_targeted_research.json", debugBasePath(slug))
+	a.saveDebugJSON(branchName, phase3DebugPath, "Add debug: phase 3 targeted research "+topic, map[string]interface{}{
+		"topic":               topic,
+		"slug":                slug,
+		"max_research_rounds": maxRounds,
+		"final_gaps":          gaps,
+		"initial_sources":     sources,
+		"new_sources":         allNewSources,
+		"all_sources":         allSources,
+	})
+
 	// ========================================
 	// PHASE 4: Section-by-Section Generation
 	// ========================================
@@ -569,6 +640,25 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 
 	if err := a.Phase4GenerateSections(ctx, topic, outline, allSources, config); err != nil {
 		slog.Warn("Section generation had errors", "error", err)
+	}
+
+	// Save Phase 4 sections as individual markdown files
+	for idx, section := range outline.Sections {
+		if section.Content == "" {
+			continue
+		}
+		sectionPath := fmt.Sprintf("%s/phase4_sections/section-%d-%s.md", debugBasePath(slug), idx+1, slug)
+		content := fmt.Sprintf("## %s\n\n%s\n", section.Heading, section.Content)
+		a.saveDebugText(branchName, sectionPath, "Add debug: phase 4 section "+section.Heading, content)
+
+		for subIdx, sub := range section.Subsections {
+			if sub.Content == "" {
+				continue
+			}
+			subPath := fmt.Sprintf("%s/phase4_sections/section-%d.%d-%s.md", debugBasePath(slug), idx+1, subIdx+1, slug)
+			subContent := fmt.Sprintf("### %s\n\n%s\n", sub.Heading, sub.Content)
+			a.saveDebugText(branchName, subPath, "Add debug: phase 4 subsection "+sub.Heading, subContent)
+		}
 	}
 
 	// ========================================
@@ -602,6 +692,21 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		}
 	}
 
+	// Save Phase 5 discovery debug artifact
+	phase5DebugPath := fmt.Sprintf("%s/phase5_discovery.json", debugBasePath(slug))
+	a.saveDebugJSON(branchName, phase5DebugPath, "Add debug: phase 5 discovery "+topic, map[string]interface{}{
+		"topic":     topic,
+		"slug":      slug,
+		"discovery": discovery,
+		"outline":   outline,
+		"num_suggested_sections": func() int {
+			if discovery == nil {
+				return 0
+			}
+			return len(discovery.SuggestedSections)
+		}(),
+	})
+
 	// ========================================
 	// PHASE 6: Integration & Polish
 	// ========================================
@@ -612,19 +717,17 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		return fmt.Errorf("article integration failed: %w", err)
 	}
 
-	// Save thinking trace if enabled
-	if debugSources {
-		thinkingPath := fmt.Sprintf("Compendium/_debug/articles/%s/outline.json", slug)
-		outlineJSON, _ := json.MarshalIndent(outline, "", "  ")
-		if err := a.gh.CreateFile(branchName, thinkingPath, "Add outline for "+topic, string(outlineJSON)); err != nil {
-			slog.Warn("Failed to save outline", "error", err)
-		}
-	}
+	// Save Phase 6 integrated article before citations
+	phase6Path := fmt.Sprintf("%s/phase6_integrated.md", debugBasePath(slug))
+	a.saveDebugText(branchName, phase6Path, "Add debug: phase 6 integrated article "+topic, articleContent)
 
 	// ========================================
 	// PHASE 7: Add Citations
 	// ========================================
 	log.Printf("=== PHASE 7: Citation Addition ===")
+
+	// Track integrated word count to detect large drops after citation phase
+	integratedWordCount := countWords(articleContent)
 
 	if len(references) > 0 {
 		var sourceList strings.Builder
@@ -644,6 +747,23 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 		articleContent += "\n\n## References\n\n" + strings.Join(references, "\n")
 	}
 
+	// Save Phase 7 cited article (after citations, before frontmatter/entity extraction)
+	phase7Path := fmt.Sprintf("%s/phase7_cited.md", debugBasePath(slug))
+	a.saveDebugText(branchName, phase7Path, "Add debug: phase 7 cited article "+topic, articleContent)
+
+	finalWordCount := countWords(articleContent)
+	log.Printf("[Phase 7] Final article: %d words", finalWordCount)
+
+	// Non-fatal sanity check: warn if final article is much shorter than integrated version
+	if integratedWordCount > 0 && finalWordCount*2 < integratedWordCount {
+		slog.Warn("Final article significantly shorter than integrated article",
+			"integrated_words", integratedWordCount,
+			"final_words", finalWordCount,
+			"debug_phase6_path", fmt.Sprintf("%s/phase6_integrated.md", debugBasePath(slug)),
+			"debug_phase7_path", fmt.Sprintf("%s/phase7_cited.md", debugBasePath(slug)),
+		)
+	}
+
 	// ========================================
 	// Final: Entity Extraction & Save Article
 	// ========================================
@@ -656,6 +776,9 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 func (a *Agent) gatherSources(ctx context.Context, topic, slug, branchName string, authMgr *authority.Manager, progress *ProgressTracker, debugSources bool) ([]SourceInfo, []string, error) {
 	// Research - generate multiple search queries for variety
 	numQueries := 5
+	if profile := os.Getenv("RUN_PROFILE"); profile == "test" {
+		numQueries = 3
+	}
 	if envVal := os.Getenv("PHASE1_SEARCH_NUM_QUERIES"); envVal != "" {
 		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
 			numQueries = v
@@ -924,6 +1047,15 @@ func (a *Agent) finalizeArticle(ctx context.Context, topic, category, slug, bran
 		slog.Warn("Entity resolution failed", "error", err)
 	}
 
+	// Save entity extraction debug artifact (raw + resolved)
+	entitiesDebugPath := fmt.Sprintf("%s/entities.json", debugBasePath(slug))
+	a.saveDebugJSON(branchName, entitiesDebugPath, "Add debug: entities "+topic, map[string]interface{}{
+		"topic":     topic,
+		"slug":      slug,
+		"extracted": extracted,
+		"resolved":  resolved,
+	})
+
 	// Build frontmatter
 	id := ulid.Make()
 	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
@@ -947,6 +1079,13 @@ func (a *Agent) finalizeArticle(ctx context.Context, topic, category, slug, bran
 
 	versionField := fmt.Sprintf("researcher_version: \"%s\"\n", Version)
 
+	// Get model info from environment for metadata
+	modelArticle := os.Getenv("LLM_MODEL_ARTICLE")
+	if modelArticle == "" {
+		modelArticle = "qwen3:32b"
+	}
+	modelField := fmt.Sprintf("model: \"%s\"\n", modelArticle)
+
 	var fullContent string
 	if strings.HasPrefix(strings.TrimSpace(content), "---") {
 		// Article already has frontmatter, inject our fields
@@ -955,12 +1094,16 @@ func (a *Agent) finalizeArticle(ctx context.Context, topic, category, slug, bran
 			systemFields := fmt.Sprintf("id: %s\nslug: \"%s\"\ncreated: %s", id, slug, date)
 			var cleanedLines []string
 			for _, line := range lines {
-				if strings.HasPrefix(strings.TrimSpace(line), "tags:") {
+				trimmed := strings.TrimSpace(line)
+				// Skip fields we manage ourselves or that are placeholders
+				if strings.HasPrefix(trimmed, "tags:") ||
+					strings.HasPrefix(trimmed, "author:") ||
+					strings.HasPrefix(trimmed, "date:") {
 					continue
 				}
 				cleanedLines = append(cleanedLines, line)
 			}
-			injection := fmt.Sprintf("%s\ntags: %s\n%s%s", systemFields, tagsStr, facetsBlock, versionField)
+			injection := fmt.Sprintf("%s\ntags: %s\n%s%s%s", systemFields, tagsStr, facetsBlock, versionField, modelField)
 			newLines := append([]string{cleanedLines[0], injection}, cleanedLines[1:]...)
 			fullContent = strings.Join(newLines, "\n")
 		} else {
@@ -974,10 +1117,10 @@ title: "%s"
 slug: "%s"
 created: %s
 tags: %s
-%s%ssummary: ""
+%s%s%ssummary: ""
 ---
 
-`, id, topic, slug, date, tagsStr, facetsBlock, versionField)
+`, id, topic, slug, date, tagsStr, facetsBlock, versionField, modelField)
 		fullContent = frontMatter + content
 	}
 

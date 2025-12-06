@@ -156,4 +156,5 @@ func main() {
 	}
 
 	log.Println("Researcher Agent stopped gracefully")
+	logging.Close()
 }

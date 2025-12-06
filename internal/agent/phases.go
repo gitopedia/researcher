@@ -78,6 +78,7 @@ type PhaseConfig struct {
 	SourcesPerSection int
 	KBClient          *kb.Client
 	UseKnowledgeBase  bool
+	RunProfile        string
 }
 
 // GetPhaseConfig returns the phase configuration from environment
@@ -86,6 +87,17 @@ func GetPhaseConfig() PhaseConfig {
 		MaxResearchRounds: 2,
 		SourcesPerSection: 8,
 		UseKnowledgeBase:  os.Getenv("USE_KNOWLEDGE_BASE") == "true",
+		RunProfile:        "prod",
+	}
+
+	// Profile-based defaults (test vs prod)
+	if profile := os.Getenv("RUN_PROFILE"); profile != "" {
+		config.RunProfile = profile
+	}
+	if config.RunProfile == "test" {
+		// Lighter defaults for faster local iteration
+		config.MaxResearchRounds = 1
+		config.SourcesPerSection = 3
 	}
 
 	if val := os.Getenv("MAX_RESEARCH_ROUNDS"); val != "" {
@@ -252,6 +264,7 @@ func (a *Agent) Phase3TargetedResearch(ctx context.Context, gaps *GapAnalysis, e
 func (a *Agent) Phase4GenerateSections(ctx context.Context, topic string, outline *ArticleOutline, sources []SourceInfo, config PhaseConfig) error {
 	log.Printf("[Phase 4] Generating %d sections", len(outline.Sections))
 
+	totalWords := 0
 	for i := range outline.Sections {
 		section := &outline.Sections[i]
 
@@ -274,8 +287,10 @@ func (a *Agent) Phase4GenerateSections(ctx context.Context, topic string, outlin
 		}
 
 		section.Content = content
-		log.Printf("[Phase 4] Generated section '%s' (%d words)",
-			section.Heading, countWords(content))
+		sectionWords := countWords(content)
+		totalWords += sectionWords
+		log.Printf("[Phase 4] Generated section '%s' (%d words, cumulative: %d)",
+			section.Heading, sectionWords, totalWords)
 
 		// Generate subsections
 		for j := range section.Subsections {
@@ -286,9 +301,14 @@ func (a *Agent) Phase4GenerateSections(ctx context.Context, topic string, outlin
 				continue
 			}
 			subsection.Content = subContent
+			subWords := countWords(subContent)
+			totalWords += subWords
+			log.Printf("[Phase 4]   Subsection '%s' (%d words, cumulative: %d)",
+				subsection.Heading, subWords, totalWords)
 		}
 	}
 
+	log.Printf("[Phase 4] Total words generated: %d", totalWords)
 	return nil
 }
 
@@ -331,32 +351,142 @@ func (a *Agent) Phase5DiscoverSections(ctx context.Context, topic string, outlin
 func (a *Agent) Phase6IntegrateArticle(ctx context.Context, topic string, outline *ArticleOutline) (string, error) {
 	log.Printf("[Phase 6] Integrating article")
 
-	// Build article from sections
-	var article strings.Builder
-	for _, section := range outline.Sections {
-		if section.Content != "" {
-			article.WriteString(section.Content)
-			article.WriteString("\n\n")
+	// Build raw concatenated article
+	var rawArticle strings.Builder
+	rawArticle.WriteString(fmt.Sprintf("# %s\n\n", topic))
+
+	// We'll iterate sections and polish them individually for better quality/length preservation
+	var polishedSections []string
+	
+	for i := range outline.Sections {
+		section := &outline.Sections[i]
+		if section.Content == "" {
+			continue
 		}
-		for _, sub := range section.Subsections {
-			if sub.Content != "" {
-				article.WriteString(sub.Content)
-				article.WriteString("\n\n")
+
+		// Context: Previous section content (last 500 chars) and next section heading
+		prevContext := ""
+		if i > 0 {
+			prevSec := outline.Sections[i-1]
+			// If prev section had subsections, use the last subsection's content
+			if len(prevSec.Subsections) > 0 {
+				lastSub := prevSec.Subsections[len(prevSec.Subsections)-1]
+				if len(lastSub.Content) > 500 {
+					prevContext = "..." + lastSub.Content[len(lastSub.Content)-500:]
+				} else {
+					prevContext = lastSub.Content
+				}
+			} else {
+				if len(prevSec.Content) > 500 {
+					prevContext = "..." + prevSec.Content[len(prevSec.Content)-500:]
+				} else {
+					prevContext = prevSec.Content
+				}
+			}
+		}
+
+		nextContext := ""
+		if i < len(outline.Sections)-1 {
+			nextContext = fmt.Sprintf("Next section: %s", outline.Sections[i+1].Heading)
+		}
+
+		// Polish main section
+		// Determine heading level: ## for main sections
+		headingLevel := "##"
+		polished, err := a.llm.PolishSection(ctx, topic, section.Heading, headingLevel, section.Content, prevContext, nextContext)
+		if err != nil {
+			slog.Warn("Failed to polish section, using raw content", "section", section.Heading, "error", err)
+			polished = fmt.Sprintf("%s %s\n\n%s", headingLevel, section.Heading, section.Content)
+		}
+		
+		// Strip code fences if the LLM wrapped the section
+		polished = stripCodeFences(polished)
+		polishedSections = append(polishedSections, polished)
+		
+		// Update prevContext for subsections
+		if len(polished) > 500 {
+			prevContext = "..." + polished[len(polished)-500:]
+		} else {
+			prevContext = polished
+		}
+
+		// Polish subsections
+		for j := range section.Subsections {
+			sub := &section.Subsections[j]
+			if sub.Content == "" {
+				continue
+			}
+
+			// Determine heading level: ### for subsections
+			headingLevel = "###"
+			
+			// Next context: either next subsection or next main section
+			subNextContext := ""
+			if j < len(section.Subsections)-1 {
+				subNextContext = fmt.Sprintf("Next subsection: %s", section.Subsections[j+1].Heading)
+			} else if i < len(outline.Sections)-1 {
+				subNextContext = fmt.Sprintf("Next section: %s", outline.Sections[i+1].Heading)
+			}
+
+			polishedSub, err := a.llm.PolishSection(ctx, topic, sub.Heading, headingLevel, sub.Content, prevContext, subNextContext)
+			if err != nil {
+				slog.Warn("Failed to polish subsection, using raw content", "subsection", sub.Heading, "error", err)
+				polishedSub = fmt.Sprintf("%s %s\n\n%s", headingLevel, sub.Heading, sub.Content)
+			}
+			
+			polishedSub = stripCodeFences(polishedSub)
+			polishedSections = append(polishedSections, polishedSub)
+			
+			// Update prevContext
+			if len(polishedSub) > 500 {
+				prevContext = "..." + polishedSub[len(polishedSub)-500:]
+			} else {
+				prevContext = polishedSub
 			}
 		}
 	}
 
-	// Polish the article
-	result, err := a.llm.IntegrateArticle(ctx, topic, article.String())
-	if err != nil {
-		return "", fmt.Errorf("integration failed: %w", err)
+	// Generate Intro and Conclusion
+	// Note: For now, we'll skip generating specific intro/conclusion separate calls to save time/complexity
+	// and rely on the section polishing to smooth transitions. 
+	// If an "Overview" section exists, it acts as Intro.
+	
+	// Assemble final article
+	finalArticle := fmt.Sprintf("# %s\n\n%s", topic, strings.Join(polishedSections, "\n\n"))
+
+	inputWordCount := 0
+	for _, s := range outline.Sections {
+		inputWordCount += countWords(s.Content)
+		for _, sub := range s.Subsections {
+			inputWordCount += countWords(sub.Content)
+		}
+	}
+	
+	outputWordCount := countWords(finalArticle)
+	log.Printf("[Phase 6] Input words: %d, Output words: %d", inputWordCount, outputWordCount)
+
+	// Validation: If output is significantly shorter (< 80%), fallback to raw concatenation
+	if outputWordCount < int(float64(inputWordCount)*0.8) {
+		slog.Warn("Polished article is significantly shorter than input, falling back to raw concatenation", 
+			"input", inputWordCount, "output", outputWordCount)
+		
+		// Rebuild raw
+		var raw strings.Builder
+		raw.WriteString(fmt.Sprintf("# %s\n\n", topic))
+		for _, s := range outline.Sections {
+			if s.Content != "" {
+				raw.WriteString(fmt.Sprintf("## %s\n\n%s\n\n", s.Heading, s.Content))
+			}
+			for _, sub := range s.Subsections {
+				if sub.Content != "" {
+					raw.WriteString(fmt.Sprintf("### %s\n\n%s\n\n", sub.Heading, sub.Content))
+				}
+			}
+		}
+		return raw.String(), nil
 	}
 
-	// Strip code fences if present
-	result = stripCodeFences(result)
-
-	log.Printf("[Phase 6] Integrated article (%d words)", countWords(result))
-	return result, nil
+	return finalArticle, nil
 }
 
 // generateSection generates content for a single section
@@ -461,4 +591,3 @@ func extractJSONObject(s string) string {
 	}
 	return s
 }
-

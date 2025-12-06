@@ -1,0 +1,22 @@
+Polish the following section of an article about "{{.Topic}}".
+
+**Context (Previous Section):**
+{{.PreviousContext}}
+
+**Section to Polish:**
+{{.Content}}
+
+**Context (Next Section):**
+{{.NextContext}}
+
+**Instructions:**
+1. Improve the flow and readability of the text.
+2. Ensure smooth transitions from the previous section and into the next section.
+3. Maintain a formal, encyclopedic tone.
+4. CRITICAL: Preserve ALL factual information, statistics, and examples.
+5. CRITICAL: Do NOT summarize or shorten the content. The output length should be similar to the input.
+6. Keep the same heading level ({{.HeadingLevel}}) and title ("{{.Heading}}").
+
+**Output:**
+Return the polished section in Markdown format, starting with the heading.
+

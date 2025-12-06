@@ -169,6 +169,10 @@ func (m *MockLLM) IntegrateArticle(ctx context.Context, topic, article string) (
 	return article, nil
 }
 
+func (m *MockLLM) PolishSection(ctx context.Context, topic, heading, headingLevel, content, prevContext, nextContext string) (string, error) {
+	return headingLevel + " " + heading + "\n\n" + content, nil
+}
+
 func TestAgentRun(t *testing.T) {
 	agent := NewAgentWithDeps(&MockGitHub{}, &MockSearch{}, &MockLLM{})
 	if err := agent.Run(context.Background()); err != nil {

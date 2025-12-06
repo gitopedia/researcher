@@ -6,10 +6,14 @@ import (
 	"io"
 	stdlog "log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"log/slog"
 )
+
+// logFile holds a reference to the log file so it can be closed on shutdown
+var logFile *os.File
 
 // isTerminal checks if the writer is a terminal (TTY).
 // This allows us to disable colors when output is piped to files.
@@ -160,8 +164,40 @@ func (h *ColorHandler) WithGroup(name string) slog.Handler {
 
 // Init configures logging with colored output.
 // Colors are always written (for file tailing) unless NO_COLOR is set.
+// If LOG_FILE environment variable is set, logs are written to both stderr and the file.
 func Init() {
-	colorHandler := NewColorHandler(os.Stderr, &slog.HandlerOptions{
+	var writers []io.Writer
+	writers = append(writers, os.Stderr)
+
+	// Check for log file configuration
+	logFilePath := os.Getenv("LOG_FILE")
+	if logFilePath == "" {
+		// Default log file location
+		logFilePath = "researcher.log"
+	}
+
+	// Create log directory if needed
+	logDir := filepath.Dir(logFilePath)
+	if logDir != "" && logDir != "." {
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not create log directory %s: %v\n", logDir, err)
+		}
+	}
+
+	// Open log file in append mode
+	var err error
+	logFile, err = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not open log file %s: %v\n", logFilePath, err)
+	} else {
+		writers = append(writers, logFile)
+		fmt.Fprintf(os.Stderr, "Logging to file: %s\n", logFilePath)
+	}
+
+	// Create a multi-writer for both outputs
+	multiWriter := io.MultiWriter(writers...)
+
+	colorHandler := NewColorHandler(multiWriter, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})
 
@@ -172,6 +208,15 @@ func Init() {
 	// Route standard log package through slog
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(slogWriter{handler: colorHandler})
+}
+
+// Close closes the log file if it was opened.
+// Should be called on shutdown.
+func Close() {
+	if logFile != nil {
+		logFile.Close()
+		logFile = nil
+	}
 }
 
 // slogWriter adapts log.Printf calls to go through our ColorHandler
@@ -193,5 +238,3 @@ func (w slogWriter) Write(p []byte) (n int, err error) {
 	}
 	return len(p), nil
 }
-
-
