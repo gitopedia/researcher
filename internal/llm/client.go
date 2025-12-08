@@ -455,60 +455,104 @@ func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string)
 // AddReferences takes an article and source summaries, and adds inline citations
 func (c *Client) AddReferences(ctx context.Context, article string, sources string) (string, error) {
 	startTime := time.Now()
+	inputLen := len(article)
 	log.Printf("AddReferences: Starting citation addition (article: %d chars, model: %s, thinking: %v)", 
-		len(article), c.modelGenerateArticle, c.ThinkingEnabled())
+		inputLen, c.modelGenerateArticle, c.ThinkingEnabled())
 
-	// Execute system template
-	var systemBuf bytes.Buffer
-	if err := c.addReferencesSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return "", fmt.Errorf("failed to execute add_references system template: %w", err)
-	}
+	const maxRetries = 3
+	var lastError error
 
-	// Execute user template
-	data := map[string]interface{}{
-		"Article": article,
-		"Sources": sources,
-	}
-	var userBuf bytes.Buffer
-	if err := c.addReferencesUserTemplate.Execute(&userBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute add_references user template: %w", err)
-	}
-
-	// Use thinking mode if enabled (helps with accurate citation placement)
-	if c.ThinkingEnabled() {
-		messages := []ollamaChatMessage{
-			{Role: "system", Content: systemBuf.String()},
-			{Role: "user", Content: userBuf.String()},
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Execute system template
+		var systemBuf bytes.Buffer
+		if err := c.addReferencesSystemTemplate.Execute(&systemBuf, nil); err != nil {
+			return "", fmt.Errorf("failed to execute add_references system template: %w", err)
 		}
-		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.3)
-		if err != nil {
-			log.Printf("AddReferences: FAILED after %v - %v", time.Since(startTime), err)
-			return "", err
+
+		// Execute user template
+		data := map[string]interface{}{
+			"Article": article,
+			"Sources": sources,
 		}
-		log.Printf("AddReferences: Completed in %v (%d chars)", time.Since(startTime), len(resp.Message.Content))
-		return resp.Message.Content, nil
+		var userBuf bytes.Buffer
+		if err := c.addReferencesUserTemplate.Execute(&userBuf, data); err != nil {
+			return "", fmt.Errorf("failed to execute add_references user template: %w", err)
+		}
+
+		// Add retry instruction if this is a retry
+		if attempt > 1 {
+			userBuf.WriteString("\n\nCRITICAL: Your previous response was too short and lost content. You MUST preserve ALL article content. The output must be at least as long as the input. Only add citation markers [^1], [^2], etc. - do NOT remove or summarize any content.")
+		}
+
+		// Use thinking mode if enabled (helps with accurate citation placement)
+		var result string
+		if c.ThinkingEnabled() {
+			messages := []ollamaChatMessage{
+				{Role: "system", Content: systemBuf.String()},
+				{Role: "user", Content: userBuf.String()},
+			}
+			resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.3)
+			if err != nil {
+				lastError = err
+				log.Printf("AddReferences: Attempt %d/%d failed after %v - %v", attempt, maxRetries, time.Since(startTime), err)
+				if attempt < maxRetries {
+					continue
+				}
+				return "", fmt.Errorf("add references failed after %d attempts: %w", maxRetries, err)
+			}
+			result = resp.Message.Content
+		} else {
+			// Standard API call
+			resp, err := c.client.CreateChatCompletion(
+				ctx,
+				openai.ChatCompletionRequest{
+					Model: c.modelGenerateArticle,
+					Messages: []openai.ChatCompletionMessage{
+						{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+						{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+					},
+					Temperature: 0.3,
+				},
+			)
+			if err != nil {
+				lastError = err
+				log.Printf("AddReferences: Attempt %d/%d failed after %v - %v", attempt, maxRetries, time.Since(startTime), err)
+				if attempt < maxRetries {
+					continue
+				}
+				return "", fmt.Errorf("add references failed after %d attempts: %w", maxRetries, err)
+			}
+			result = resp.Choices[0].Message.Content
+		}
+
+		// Validation: Output must not be shorter than input
+		outputLen := len(result)
+		if outputLen < inputLen {
+			log.Printf("AddReferences: Attempt %d/%d - Output is shorter than input (%d < %d chars). Retrying...", 
+				attempt, maxRetries, outputLen, inputLen)
+			lastError = fmt.Errorf("output too short: %d < %d chars", outputLen, inputLen)
+			if attempt < maxRetries {
+				continue
+			}
+			// Final attempt failed - return original article rather than truncated output
+			log.Printf("AddReferences: All attempts failed to preserve content length. Returning original article without citations.")
+			return article, nil
+		}
+
+		// Success
+		if attempt > 1 {
+			log.Printf("AddReferences: Succeeded on attempt %d", attempt)
+		}
+		log.Printf("AddReferences: Completed in %v (input: %d chars, output: %d chars)", time.Since(startTime), inputLen, outputLen)
+		return result, nil
 	}
 
-	// Standard API call
-	resp, err := c.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: c.modelGenerateArticle,
-			Messages: []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
-				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
-			},
-			Temperature: 0.3,
-		},
-	)
-	if err != nil {
-		log.Printf("AddReferences: FAILED after %v - %v", time.Since(startTime), err)
-		return "", err
+	// Should not reach here, but handle it
+	if lastError != nil {
+		return "", fmt.Errorf("add references failed after %d attempts: %w", maxRetries, lastError)
 	}
-
-	result := resp.Choices[0].Message.Content
-	log.Printf("AddReferences: Completed in %v (%d chars)", time.Since(startTime), len(result))
-	return result, nil
+	log.Printf("AddReferences: All attempts failed. Returning original article without citations.")
+	return article, nil
 }
 
 // ExtractEntities extracts named entities from content.
@@ -923,15 +967,26 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 		Summary  string   `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &converted); err != nil {
-		log.Printf("Warning: Failed to parse step 2 JSON: %v. Falling back to plain text.", err)
+		log.Printf("Warning: Failed to parse step 2 JSON: %v. Falling back to plain text. Raw JSON: %.200s...", err, rawJSON)
 		// Fallback: treat plain text as summary and assume relevant
 		summary.Summary = plain
 		summary.Relevant = true
 		summary.Reason = "Fallback from plain text summarization"
 	} else {
-		summary.Relevant = converted.Relevant
-		summary.Reason = converted.Reason
-		summary.Summary = converted.Summary
+		// Check if summary is empty even after successful JSON parse
+		if strings.TrimSpace(converted.Summary) == "" {
+			log.Printf("Warning: JSON conversion produced empty summary (relevant=%v, reason=%q). Falling back to plain text (plain length: %d chars)", 
+				converted.Relevant, converted.Reason, len(plain))
+			summary.Summary = plain
+			summary.Relevant = true
+			summary.Reason = "Fallback: JSON conversion produced empty summary"
+		} else {
+			summary.Relevant = converted.Relevant
+			summary.Reason = converted.Reason
+			summary.Summary = converted.Summary
+			log.Printf("Stage 2: Successfully converted to JSON (relevant=%v, summary length=%d chars)", 
+				summary.Relevant, len(summary.Summary))
+		}
 	}
 
 	return summary, nil

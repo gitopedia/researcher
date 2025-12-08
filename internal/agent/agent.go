@@ -724,44 +724,63 @@ func (a *Agent) processTopic(ctx context.Context, topic, category, branchName st
 	// ========================================
 	// PHASE 7: Add Citations
 	// ========================================
-	log.Printf("=== PHASE 7: Citation Addition ===")
-
-	// Track integrated word count to detect large drops after citation phase
-	integratedWordCount := countWords(articleContent)
-
-	if len(references) > 0 {
-		var sourceList strings.Builder
-		for i, ref := range references {
-			sourceList.WriteString(fmt.Sprintf("[%d] %s\n", i+1, ref))
+	// Check if Phase 7 is disabled
+	disabledPhases := strings.Split(os.Getenv("DISABLE_PHASES"), ",")
+	phase7Disabled := false
+	for _, phase := range disabledPhases {
+		if strings.TrimSpace(strings.ToLower(phase)) == "phase7" {
+			phase7Disabled = true
+			break
 		}
-
-		citedContent, err := a.llm.AddReferences(ctx, articleContent, sourceList.String())
-		if err != nil {
-			slog.Warn("Failed to add citations, using uncited content", "error", err)
-		} else {
-			articleContent = stripCodeFences(citedContent)
-			log.Printf("Citations added successfully")
-		}
-
-		// Append References section
-		articleContent += "\n\n## References\n\n" + strings.Join(references, "\n")
 	}
 
-	// Save Phase 7 cited article (after citations, before frontmatter/entity extraction)
-	phase7Path := fmt.Sprintf("%s/phase7_cited.md", debugBasePath(slug))
-	a.saveDebugText(branchName, phase7Path, "Add debug: phase 7 cited article "+topic, articleContent)
+	if phase7Disabled {
+		log.Printf("=== PHASE 7: Citation Addition (DISABLED) ===")
+		log.Printf("Phase 7 is disabled via DISABLE_PHASES. Skipping citation addition.")
+		// Still append References section at the end
+		if len(references) > 0 {
+			articleContent += "\n\n## References\n\n" + strings.Join(references, "\n")
+		}
+	} else {
+		log.Printf("=== PHASE 7: Citation Addition ===")
 
-	finalWordCount := countWords(articleContent)
-	log.Printf("[Phase 7] Final article: %d words", finalWordCount)
+		// Track integrated word count to detect large drops after citation phase
+		integratedWordCount := countWords(articleContent)
 
-	// Non-fatal sanity check: warn if final article is much shorter than integrated version
-	if integratedWordCount > 0 && finalWordCount*2 < integratedWordCount {
-		slog.Warn("Final article significantly shorter than integrated article",
-			"integrated_words", integratedWordCount,
-			"final_words", finalWordCount,
-			"debug_phase6_path", fmt.Sprintf("%s/phase6_integrated.md", debugBasePath(slug)),
-			"debug_phase7_path", fmt.Sprintf("%s/phase7_cited.md", debugBasePath(slug)),
-		)
+		if len(references) > 0 {
+			var sourceList strings.Builder
+			for i, ref := range references {
+				sourceList.WriteString(fmt.Sprintf("[%d] %s\n", i+1, ref))
+			}
+
+			citedContent, err := a.llm.AddReferences(ctx, articleContent, sourceList.String())
+			if err != nil {
+				slog.Warn("Failed to add citations, using uncited content", "error", err)
+			} else {
+				articleContent = stripCodeFences(citedContent)
+				log.Printf("Citations added successfully")
+			}
+
+			// Append References section
+			articleContent += "\n\n## References\n\n" + strings.Join(references, "\n")
+		}
+
+		// Save Phase 7 cited article (after citations, before frontmatter/entity extraction)
+		phase7Path := fmt.Sprintf("%s/phase7_cited.md", debugBasePath(slug))
+		a.saveDebugText(branchName, phase7Path, "Add debug: phase 7 cited article "+topic, articleContent)
+
+		finalWordCount := countWords(articleContent)
+		log.Printf("[Phase 7] Final article: %d words", finalWordCount)
+
+		// Non-fatal sanity check: warn if final article is much shorter than integrated version
+		if integratedWordCount > 0 && finalWordCount*2 < integratedWordCount {
+			slog.Warn("Final article significantly shorter than integrated article",
+				"integrated_words", integratedWordCount,
+				"final_words", finalWordCount,
+				"debug_phase6_path", fmt.Sprintf("%s/phase6_integrated.md", debugBasePath(slug)),
+				"debug_phase7_path", fmt.Sprintf("%s/phase7_cited.md", debugBasePath(slug)),
+			)
+		}
 	}
 
 	// ========================================
@@ -924,12 +943,18 @@ func (a *Agent) gatherSources(ctx context.Context, topic, slug, branchName strin
 
 		log.Printf("Summarizing source %d/%d: %s", processedCount+1, limit, r.result.Href)
 		summary, err := a.llm.SummarizeSource(ctx, topic, r.result.Href, content)
-		if err != nil || !summary.Relevant {
+		if err != nil {
+			slog.Warn("Source summarization failed", "url", r.result.Href, "error", err)
+			continue
+		}
+		if !summary.Relevant {
+			log.Printf("Source filtered: not relevant (reason: %s)", summary.Reason)
 			continue
 		}
 
 		wordCount := len(strings.Fields(summary.Summary))
 		if wordCount < minWords {
+			log.Printf("Source filtered: word count too low (%d < %d)", wordCount, minWords)
 			continue
 		}
 
