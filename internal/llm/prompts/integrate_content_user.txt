@@ -1,0 +1,9 @@
+Topic: {{.Topic}}
+
+Existing Article:
+{{.Article}}
+
+New Content to Integrate:
+{{.NewContent}}
+
+Integrate the new content into the article. Return the full updated article.

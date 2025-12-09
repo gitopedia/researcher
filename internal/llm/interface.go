@@ -46,6 +46,16 @@ type ArticleResult struct {
 	Thinking string // The model's reasoning trace (if thinking mode enabled)
 }
 
+type RelevanceResult struct {
+	Relevant bool   `json:"relevant"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+type RedundancyResult struct {
+	IsRedundant bool   `json:"redundant"`
+	Reason      string `json:"reason,omitempty"`
+}
+
 type Generator interface {
 	GenerateArticle(ctx context.Context, topic, contextData string) (*ArticleResult, error)
 	AddReferences(ctx context.Context, article string, sources string) (string, error)
@@ -54,15 +64,11 @@ type Generator interface {
 	SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error)
 	CategorizeArticle(ctx context.Context, title string, tags []string, content string, existingCategories []string) (*ArticleCategory, error)
 
-	// Multi-phase article generation methods
-	GenerateOutline(ctx context.Context, topic, sources string) (string, error)
-	AnalyzeGaps(ctx context.Context, topic, outline, sources string) (string, error)
-	GenerateSection(ctx context.Context, topic, heading, headingLevel string, wordTarget int, points, sources, context string) (string, error)
-	DiscoverSections(ctx context.Context, topic, currentSections, sources string) (string, error)
-	IntegrateArticle(ctx context.Context, topic, article string) (string, error)
-	
-	// New section polishing method
-	PolishSection(ctx context.Context, topic, heading, headingLevel, content, prevContext, nextContext string) (string, error)
+    // Incremental workflow methods
+    GenerateMiniArticle(ctx context.Context, topic, sourceTitle, sourceSummary string) (string, error)
+    CheckRelevance(ctx context.Context, topic, content string) (*RelevanceResult, error)
+    CheckRedundancy(ctx context.Context, topic, existingArticle, newContent string) (*RedundancyResult, error)
+    IntegrateContent(ctx context.Context, topic, existingArticle, newContent string) (string, error)
 }
 
 // Ensure Client implements Generator

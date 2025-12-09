@@ -148,29 +148,21 @@ func (m *MockLLM) CategorizeArticle(ctx context.Context, title string, tags []st
 	}, nil
 }
 
-// Multi-phase methods
-func (m *MockLLM) GenerateOutline(ctx context.Context, topic, sources string) (string, error) {
-	return `{"title":"Mock Article","summary":"A mock summary","sections":[{"heading":"Introduction","level":2,"points":["Point 1"],"word_target":400}],"total_word_target":3000}`, nil
+// Incremental workflow methods
+func (m *MockLLM) GenerateMiniArticle(ctx context.Context, topic, sourceTitle, sourceSummary string) (string, error) {
+	return "## Mini Article\n\nContent about " + topic, nil
 }
 
-func (m *MockLLM) AnalyzeGaps(ctx context.Context, topic, outline, sources string) (string, error) {
-	return `{"gaps":[],"suggested_sections":[],"overall_assessment":"No gaps found"}`, nil
+func (m *MockLLM) CheckRelevance(ctx context.Context, topic, content string) (*llm.RelevanceResult, error) {
+	return &llm.RelevanceResult{Relevant: true, Reason: "Mock relevant"}, nil
 }
 
-func (m *MockLLM) GenerateSection(ctx context.Context, topic, heading, headingLevel string, wordTarget int, points, sources, contextText string) (string, error) {
-	return "## " + heading + "\n\nMock section content.", nil
+func (m *MockLLM) CheckRedundancy(ctx context.Context, topic, existingArticle, newContent string) (*llm.RedundancyResult, error) {
+	return &llm.RedundancyResult{IsRedundant: false, Reason: "Mock unique"}, nil
 }
 
-func (m *MockLLM) DiscoverSections(ctx context.Context, topic, currentSections, sources string) (string, error) {
-	return `{"suggested_sections":[],"skip_reason":"No additional sections needed"}`, nil
-}
-
-func (m *MockLLM) IntegrateArticle(ctx context.Context, topic, article string) (string, error) {
-	return article, nil
-}
-
-func (m *MockLLM) PolishSection(ctx context.Context, topic, heading, headingLevel, content, prevContext, nextContext string) (string, error) {
-	return headingLevel + " " + heading + "\n\n" + content, nil
+func (m *MockLLM) IntegrateContent(ctx context.Context, topic, existingArticle, newContent string) (string, error) {
+	return existingArticle + "\n\n" + newContent, nil
 }
 
 func TestAgentRun(t *testing.T) {

@@ -1,0 +1,7 @@
+Existing Article:
+{{.Article}}
+
+New Section:
+{{.Section}}
+
+Is the information in the New Section already covered in the Existing Article?

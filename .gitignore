@@ -25,6 +25,13 @@ bin/
 # Local configuration
 .env
 
+# Log files
+*.log
+
+# Temporary binaries
+cleanup
+replay-phase
+
 
 
 

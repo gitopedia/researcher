@@ -22,47 +22,43 @@ import (
 var promptsFS embed.FS
 
 type Client struct {
-	client                      *openai.Client
-	httpClient                  *http.Client
-	modelGenerateArticle        string
-	modelExtractEntities        string
-	modelSuggestTopics          string
-	modelSummarizePlain         string
-	modelSummarizeJSON          string
-	thinkMode                   string // "false", "true", "low", "medium", "high"
-	ollamaBaseUrl               string
-	generateArticleSystemTemplate *template.Template
-	generateArticleUserTemplate   *template.Template
-	extractEntitiesSystemTemplate *template.Template
-	extractEntitiesUserTemplate   *template.Template
-	suggestTopicsSystemTemplate   *template.Template
-	suggestTopicsUserTemplate     *template.Template
-	summarizeSourceSystemTemplate *template.Template
-	summarizeSourceUserTemplate   *template.Template
-	convertSummarySystemTemplate  *template.Template
-	convertSummaryUserTemplate    *template.Template
-	addReferencesSystemTemplate   *template.Template
-	addReferencesUserTemplate     *template.Template
-	outlineGenerationSystemTemplate *template.Template
-	outlineGenerationUserTemplate   *template.Template
-	gapAnalysisSystemTemplate       *template.Template
-	gapAnalysisUserTemplate         *template.Template
-	sectionGenerationSystemTemplate *template.Template
-	sectionGenerationUserTemplate   *template.Template
-	sectionDiscoverySystemTemplate  *template.Template
-	sectionDiscoveryUserTemplate    *template.Template
-	integrationSystemTemplate       *template.Template
-	integrationUserTemplate         *template.Template
-	polishSectionSystemTemplate     *template.Template
-	polishSectionUserTemplate       *template.Template
+	client                            *openai.Client
+	httpClient                        *http.Client
+	modelGenerateArticle              string
+	modelExtractEntities              string
+	modelSuggestTopics                string
+	modelSummarizePlain               string
+	modelSummarizeJSON                string
+	thinkMode                         string // "false", "true", "low", "medium", "high"
+	ollamaBaseUrl                     string
+	generateArticleSystemTemplate     *template.Template
+	generateArticleUserTemplate       *template.Template
+	extractEntitiesSystemTemplate     *template.Template
+	extractEntitiesUserTemplate       *template.Template
+	suggestTopicsSystemTemplate       *template.Template
+	suggestTopicsUserTemplate         *template.Template
+	summarizeSourceSystemTemplate     *template.Template
+	summarizeSourceUserTemplate       *template.Template
+	convertSummarySystemTemplate      *template.Template
+	convertSummaryUserTemplate        *template.Template
+	addReferencesSystemTemplate       *template.Template
+	addReferencesUserTemplate         *template.Template
+	generateMiniArticleSystemTemplate *template.Template
+	generateMiniArticleUserTemplate   *template.Template
+	checkRelevanceSystemTemplate      *template.Template
+	checkRelevanceUserTemplate        *template.Template
+	checkRedundancySystemTemplate     *template.Template
+	checkRedundancyUserTemplate       *template.Template
+	integrateContentSystemTemplate    *template.Template
+	integrateContentUserTemplate      *template.Template
 }
 
 type ollamaChatRequest struct {
-	Model    string                 `json:"model"`
-	Messages []ollamaChatMessage    `json:"messages"`
-	Stream   bool                   `json:"stream"`
-	Think    interface{}            `json:"think,omitempty"` // boolean or string ("low", "medium", "high")
-	Options  map[string]float64     `json:"options,omitempty"`
+	Model    string              `json:"model"`
+	Messages []ollamaChatMessage `json:"messages"`
+	Stream   bool                `json:"stream"`
+	Think    interface{}         `json:"think,omitempty"` // boolean or string ("low", "medium", "high")
+	Options  map[string]float64  `json:"options,omitempty"`
 }
 
 type ollamaChatMessage struct {
@@ -83,7 +79,7 @@ type ollamaChatResponse struct {
 func NewClient() (*Client, error) {
 	apiKey := os.Getenv("LLM_API_KEY")
 	baseUrl := os.Getenv("LLM_BASE_URL")
-	
+
 	if apiKey == "" {
 		apiKey = "ollama" // Default for Ollama
 	}
@@ -101,10 +97,10 @@ func NewClient() (*Client, error) {
 
 	// Determine thinking mode
 	thinkMode := os.Getenv("LLM_THINK_MODE")
-	
+
 	// Model selection
 	var modelGenerateArticle, modelExtractEntities, modelSuggestTopics, modelSummarizePlain, modelSummarizeJSON string
-	
+
 	// Legacy fallback
 	if legacyModel := os.Getenv("LLM_MODEL"); legacyModel != "" {
 		modelGenerateArticle = legacyModel
@@ -127,7 +123,7 @@ func NewClient() (*Client, error) {
 				modelFast = "qwen3:7b"
 			}
 		}
-		
+
 		// Article generation and entity extraction: large model for reliability
 		// Entity extraction uses the same large model because smaller models struggle
 		// to consistently output valid JSON with large inputs and thinking mode enabled
@@ -135,14 +131,14 @@ func NewClient() (*Client, error) {
 		if modelArticle == "" {
 			modelArticle = "qwen3:32b"
 		}
-		
+
 		// Assign models to tasks
 		modelGenerateArticle = modelArticle
-		modelExtractEntities = modelArticle  // Use large model for reliable JSON output
+		modelExtractEntities = modelArticle // Use large model for reliable JSON output
 		modelSuggestTopics = modelFast
-		modelSummarizePlain = modelFast  // Use fast model for source summarization
-		modelSummarizeJSON = modelFast   // Use fast model for JSON conversion
-		
+		modelSummarizePlain = modelFast // Use fast model for source summarization
+		modelSummarizeJSON = modelFast  // Use fast model for JSON conversion
+
 		log.Printf("Multi-model configuration: Fast=%s, Article/Entity=%s", modelFast, modelArticle)
 	}
 
@@ -211,100 +207,76 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load add_references_user template: %w", err)
 	}
 
-	outlineGenerationSystem, err := loadTemplate("prompts/outline_generation_system.txt")
+	generateMiniArticleSystem, err := loadTemplate("prompts/generate_mini_article_system.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load outline_generation_system template: %w", err)
+		return nil, fmt.Errorf("failed to load generate_mini_article_system template: %w", err)
 	}
 
-	outlineGenerationUser, err := loadTemplate("prompts/outline_generation_user.txt")
+	generateMiniArticleUser, err := loadTemplate("prompts/generate_mini_article_user.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load outline_generation_user template: %w", err)
+		return nil, fmt.Errorf("failed to load generate_mini_article_user template: %w", err)
 	}
 
-	gapAnalysisSystem, err := loadTemplate("prompts/gap_analysis_system.txt")
+	checkRelevanceSystem, err := loadTemplate("prompts/check_relevance_system.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load gap_analysis_system template: %w", err)
+		return nil, fmt.Errorf("failed to load check_relevance_system template: %w", err)
 	}
 
-	gapAnalysisUser, err := loadTemplate("prompts/gap_analysis_user.txt")
+	checkRelevanceUser, err := loadTemplate("prompts/check_relevance_user.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load gap_analysis_user template: %w", err)
+		return nil, fmt.Errorf("failed to load check_relevance_user template: %w", err)
 	}
 
-	sectionGenerationSystem, err := loadTemplate("prompts/section_generation_system.txt")
+	checkRedundancySystem, err := loadTemplate("prompts/check_redundancy_system.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load section_generation_system template: %w", err)
+		return nil, fmt.Errorf("failed to load check_redundancy_system template: %w", err)
 	}
 
-	sectionGenerationUser, err := loadTemplate("prompts/section_generation_user.txt")
+	checkRedundancyUser, err := loadTemplate("prompts/check_redundancy_user.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load section_generation_user template: %w", err)
+		return nil, fmt.Errorf("failed to load check_redundancy_user template: %w", err)
 	}
 
-	sectionDiscoverySystem, err := loadTemplate("prompts/section_discovery_system.txt")
+	integrateContentSystem, err := loadTemplate("prompts/integrate_content_system.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load section_discovery_system template: %w", err)
+		return nil, fmt.Errorf("failed to load integrate_content_system template: %w", err)
 	}
 
-	sectionDiscoveryUser, err := loadTemplate("prompts/section_discovery_user.txt")
+	integrateContentUser, err := loadTemplate("prompts/integrate_content_user.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load section_discovery_user template: %w", err)
-	}
-
-	integrationSystem, err := loadTemplate("prompts/integration_system.txt")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load integration_system template: %w", err)
-	}
-
-	integrationUser, err := loadTemplate("prompts/integration_user.txt")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load integration_user template: %w", err)
-	}
-
-	polishSectionSystem, err := loadTemplate("prompts/polish_section_system.txt")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load polish_section_system template: %w", err)
-	}
-
-	polishSectionUser, err := loadTemplate("prompts/polish_section_user.txt")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load polish_section_user template: %w", err)
+		return nil, fmt.Errorf("failed to load integrate_content_user template: %w", err)
 	}
 
 	return &Client{
-		client:                      openai.NewClientWithConfig(config),
-		httpClient:                  httpClient,
-		modelGenerateArticle:        modelGenerateArticle,
-		modelExtractEntities:        modelExtractEntities,
-		modelSuggestTopics:          modelSuggestTopics,
-		modelSummarizePlain:         modelSummarizePlain,
-		modelSummarizeJSON:          modelSummarizeJSON,
-		thinkMode:                   thinkMode,
-		ollamaBaseUrl:               ollamaBaseUrl,
-		generateArticleSystemTemplate: generateArticleSystem,
-		generateArticleUserTemplate:   generateArticleUser,
-		extractEntitiesSystemTemplate: extractEntitiesSystem,
-		extractEntitiesUserTemplate:   extractEntitiesUser,
-		suggestTopicsSystemTemplate:   suggestTopicsSystem,
-		suggestTopicsUserTemplate:     suggestTopicsUser,
-		summarizeSourceSystemTemplate: summarizeSourceSystem,
-		summarizeSourceUserTemplate:   summarizeSourceUser,
-		convertSummarySystemTemplate:  convertSummarySystem,
-		convertSummaryUserTemplate:    convertSummaryUser,
-		addReferencesSystemTemplate:   addReferencesSystem,
-		addReferencesUserTemplate:     addReferencesUser,
-		outlineGenerationSystemTemplate: outlineGenerationSystem,
-		outlineGenerationUserTemplate:   outlineGenerationUser,
-		gapAnalysisSystemTemplate:       gapAnalysisSystem,
-		gapAnalysisUserTemplate:         gapAnalysisUser,
-		sectionGenerationSystemTemplate: sectionGenerationSystem,
-		sectionGenerationUserTemplate:   sectionGenerationUser,
-		sectionDiscoverySystemTemplate:  sectionDiscoverySystem,
-		sectionDiscoveryUserTemplate:    sectionDiscoveryUser,
-		integrationSystemTemplate:       integrationSystem,
-		integrationUserTemplate:         integrationUser,
-		polishSectionSystemTemplate:     polishSectionSystem,
-		polishSectionUserTemplate:       polishSectionUser,
+		client:                            openai.NewClientWithConfig(config),
+		httpClient:                        httpClient,
+		modelGenerateArticle:              modelGenerateArticle,
+		modelExtractEntities:              modelExtractEntities,
+		modelSuggestTopics:                modelSuggestTopics,
+		modelSummarizePlain:               modelSummarizePlain,
+		modelSummarizeJSON:                modelSummarizeJSON,
+		thinkMode:                         thinkMode,
+		ollamaBaseUrl:                     ollamaBaseUrl,
+		generateArticleSystemTemplate:     generateArticleSystem,
+		generateArticleUserTemplate:       generateArticleUser,
+		extractEntitiesSystemTemplate:     extractEntitiesSystem,
+		extractEntitiesUserTemplate:       extractEntitiesUser,
+		suggestTopicsSystemTemplate:       suggestTopicsSystem,
+		suggestTopicsUserTemplate:         suggestTopicsUser,
+		summarizeSourceSystemTemplate:     summarizeSourceSystem,
+		summarizeSourceUserTemplate:       summarizeSourceUser,
+		convertSummarySystemTemplate:      convertSummarySystem,
+		convertSummaryUserTemplate:        convertSummaryUser,
+		addReferencesSystemTemplate:       addReferencesSystem,
+		addReferencesUserTemplate:         addReferencesUser,
+		generateMiniArticleSystemTemplate: generateMiniArticleSystem,
+		generateMiniArticleUserTemplate:   generateMiniArticleUser,
+		checkRelevanceSystemTemplate:      checkRelevanceSystem,
+		checkRelevanceUserTemplate:        checkRelevanceUser,
+		checkRedundancySystemTemplate:     checkRedundancySystem,
+		checkRedundancyUserTemplate:       checkRedundancyUser,
+		integrateContentSystemTemplate:    integrateContentSystem,
+		integrateContentUserTemplate:      integrateContentUser,
 	}, nil
 }
 
@@ -456,7 +428,7 @@ func (c *Client) GenerateArticle(ctx context.Context, topic, contextData string)
 func (c *Client) AddReferences(ctx context.Context, article string, sources string) (string, error) {
 	startTime := time.Now()
 	inputLen := len(article)
-	log.Printf("AddReferences: Starting citation addition (article: %d chars, model: %s, thinking: %v)", 
+	log.Printf("AddReferences: Starting citation addition (article: %d chars, model: %s, thinking: %v)",
 		inputLen, c.modelGenerateArticle, c.ThinkingEnabled())
 
 	const maxRetries = 3
@@ -528,7 +500,7 @@ func (c *Client) AddReferences(ctx context.Context, article string, sources stri
 		// Validation: Output must not be shorter than input
 		outputLen := len(result)
 		if outputLen < inputLen {
-			log.Printf("AddReferences: Attempt %d/%d - Output is shorter than input (%d < %d chars). Retrying...", 
+			log.Printf("AddReferences: Attempt %d/%d - Output is shorter than input (%d < %d chars). Retrying...",
 				attempt, maxRetries, outputLen, inputLen)
 			lastError = fmt.Errorf("output too short: %d < %d chars", outputLen, inputLen)
 			if attempt < maxRetries {
@@ -658,7 +630,7 @@ func (c *Client) ExtractEntities(ctx context.Context, content string) ([]Extract
 // extractEntitiesChunked processes large content by splitting into chunks
 func (c *Client) extractEntitiesChunked(ctx context.Context, content string, chunkSize int) ([]ExtractedEntity, error) {
 	startTime := time.Now()
-	
+
 	// Split content into chunks at sentence boundaries
 	chunks := splitIntoChunks(content, chunkSize)
 	log.Printf("ExtractEntities: Split into %d chunks", len(chunks))
@@ -668,7 +640,7 @@ func (c *Client) extractEntitiesChunked(ctx context.Context, content string, chu
 
 	for i, chunk := range chunks {
 		log.Printf("ExtractEntities: Processing chunk %d/%d (%d chars)", i+1, len(chunks), len(chunk))
-		
+
 		entities, err := c.extractEntitiesSingle(ctx, chunk)
 		if err != nil {
 			log.Printf("ExtractEntities: Chunk %d failed: %v (continuing)", i+1, err)
@@ -715,7 +687,7 @@ func (c *Client) extractEntitiesSingle(ctx context.Context, content string) ([]E
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// Create a context with timeout
 		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		
+
 		messages := []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
 			{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
@@ -841,7 +813,7 @@ func (c *Client) SuggestTopics(ctx context.Context, category string, existingTop
 
 	rawContent := resp.Choices[0].Message.Content
 	jsonStr, found := extractJSONArray(rawContent)
-	
+
 	if !found {
 		log.Printf("Warning: Topic suggestion returned non-JSON response, returning empty topics. Raw response: %.200s...", rawContent)
 		return []string{}, nil
@@ -868,7 +840,7 @@ func extractJSONArray(s string) (string, bool) {
 func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error) {
 	// Step 1: Summarize content to plain text
 	var plain string
-	
+
 	var systemBuf bytes.Buffer
 	if err := c.summarizeSourceSystemTemplate.Execute(&systemBuf, nil); err != nil {
 		return SourceSummary{}, fmt.Errorf("failed to execute summarize_source system template: %w", err)
@@ -926,7 +898,7 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 
 	// Step 2: Convert plain text summary to structured JSON
 	log.Printf("Stage 2: Converting summary to JSON (model: %s)", c.modelSummarizeJSON)
-	
+
 	var sysBuf2 bytes.Buffer
 	if err := c.convertSummarySystemTemplate.Execute(&sysBuf2, nil); err != nil {
 		return summary, fmt.Errorf("failed to execute convert_summary system template: %w", err)
@@ -962,9 +934,9 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 
 	jsonStr := extractJSONObject(rawJSON)
 	var converted struct {
-		Relevant bool     `json:"relevant"`
-		Reason   string   `json:"reason,omitempty"`
-		Summary  string   `json:"summary"`
+		Relevant bool   `json:"relevant"`
+		Reason   string `json:"reason,omitempty"`
+		Summary  string `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &converted); err != nil {
 		log.Printf("Warning: Failed to parse step 2 JSON: %v. Falling back to plain text. Raw JSON: %.200s...", err, rawJSON)
@@ -975,7 +947,7 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	} else {
 		// Check if summary is empty even after successful JSON parse
 		if strings.TrimSpace(converted.Summary) == "" {
-			log.Printf("Warning: JSON conversion produced empty summary (relevant=%v, reason=%q). Falling back to plain text (plain length: %d chars)", 
+			log.Printf("Warning: JSON conversion produced empty summary (relevant=%v, reason=%q). Falling back to plain text (plain length: %d chars)",
 				converted.Relevant, converted.Reason, len(plain))
 			summary.Summary = plain
 			summary.Relevant = true
@@ -984,7 +956,7 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 			summary.Relevant = converted.Relevant
 			summary.Reason = converted.Reason
 			summary.Summary = converted.Summary
-			log.Printf("Stage 2: Successfully converted to JSON (relevant=%v, summary length=%d chars)", 
+			log.Printf("Stage 2: Successfully converted to JSON (relevant=%v, summary length=%d chars)",
 				summary.Relevant, len(summary.Summary))
 		}
 	}
@@ -1017,110 +989,24 @@ func (c *Client) CategorizeArticle(ctx context.Context, title string, tags []str
 	}, nil
 }
 
-func (c *Client) GenerateOutline(ctx context.Context, topic, sources string) (string, error) {
+func (c *Client) GenerateMiniArticle(ctx context.Context, topic, sourceTitle, sourceSummary string) (string, error) {
 	startTime := time.Now()
-	
+
 	// Execute system template
 	var systemBuf bytes.Buffer
-	if err := c.outlineGenerationSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return "", fmt.Errorf("failed to execute outline_generation system template: %w", err)
+	if err := c.generateMiniArticleSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute generate_mini_article system template: %w", err)
 	}
 
 	// Execute user template
 	data := map[string]interface{}{
-		"Topic":   topic,
-		"Sources": sources,
+		"Topic":         topic,
+		"SourceTitle":   sourceTitle,
+		"SourceSummary": sourceSummary,
 	}
 	var userBuf bytes.Buffer
-	if err := c.outlineGenerationUserTemplate.Execute(&userBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute outline_generation user template: %w", err)
-	}
-
-	resp, err := c.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: c.modelGenerateArticle,
-			Messages: []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
-				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
-			},
-			Temperature: 0.3,
-		},
-	)
-	if err != nil {
-		return "", err
-	}
-
-	result := resp.Choices[0].Message.Content
-	log.Printf("GenerateOutline: Completed in %v (%d chars)", time.Since(startTime), len(result))
-	return result, nil
-}
-
-func (c *Client) AnalyzeGaps(ctx context.Context, topic, outline, sources string) (string, error) {
-	startTime := time.Now()
-	log.Printf("AnalyzeGaps: Starting gap analysis for '%s' (model: %s)", topic, c.modelGenerateArticle)
-
-	// Execute system template
-	var systemBuf bytes.Buffer
-	if err := c.gapAnalysisSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return "", fmt.Errorf("failed to execute gap_analysis system template: %w", err)
-	}
-
-	// Execute user template
-	data := map[string]interface{}{
-		"Topic":   topic,
-		"Outline": outline,
-		"Sources": sources,
-	}
-	var userBuf bytes.Buffer
-	if err := c.gapAnalysisUserTemplate.Execute(&userBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute gap_analysis user template: %w", err)
-	}
-
-	resp, err := c.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: c.modelGenerateArticle,
-			Messages: []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
-				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
-			},
-			Temperature: 0.3,
-		},
-	)
-	if err != nil {
-		return "", err
-	}
-
-	result := resp.Choices[0].Message.Content
-	log.Printf("AnalyzeGaps: Completed in %v (%d chars)", time.Since(startTime), len(result))
-	return result, nil
-}
-
-func (c *Client) GenerateSection(ctx context.Context, topic, heading, headingLevel string, wordTarget int, points, sources, context string) (string, error) {
-	startTime := time.Now()
-	log.Printf("GenerateSection: Starting '%s' section (target: %d words, model: %s, thinking: %v)", 
-		heading, wordTarget, c.modelGenerateArticle, c.ThinkingEnabled())
-
-	// Execute system template
-	var systemBuf bytes.Buffer
-	if err := c.sectionGenerationSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return "", fmt.Errorf("failed to execute section_generation system template: %w", err)
-	}
-
-	// Execute user template
-	data := map[string]interface{}{
-		"Topic":        topic,
-		"Heading":      heading,
-		"HeadingLevel": headingLevel,
-		"WordTarget":   wordTarget,
-		"Points":       points,
-		"Sources":      sources,
-		"Context":      context,
-	}
-	var userBuf bytes.Buffer
-	if err := c.sectionGenerationUserTemplate.Execute(&userBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute section_generation user template: %w", err)
+	if err := c.generateMiniArticleUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute generate_mini_article user template: %w", err)
 	}
 
 	// Use thinking mode if enabled
@@ -1131,10 +1017,9 @@ func (c *Client) GenerateSection(ctx context.Context, topic, heading, headingLev
 		}
 		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.7)
 		if err != nil {
-			log.Printf("GenerateSection: '%s' FAILED after %v - %v", heading, time.Since(startTime), err)
 			return "", err
 		}
-		log.Printf("GenerateSection: '%s' completed in %v (%d chars)", heading, time.Since(startTime), len(resp.Message.Content))
+		log.Printf("GenerateMiniArticle: Completed in %v (%d chars)", time.Since(startTime), len(resp.Message.Content))
 		return resp.Message.Content, nil
 	}
 
@@ -1150,151 +1035,187 @@ func (c *Client) GenerateSection(ctx context.Context, topic, heading, headingLev
 		},
 	)
 	if err != nil {
-		log.Printf("GenerateSection: '%s' FAILED after %v - %v", heading, time.Since(startTime), err)
 		return "", err
 	}
 
 	result := resp.Choices[0].Message.Content
-	log.Printf("GenerateSection: '%s' completed in %v (%d chars)", heading, time.Since(startTime), len(result))
+	log.Printf("GenerateMiniArticle: Completed in %v (%d chars)", time.Since(startTime), len(result))
 	return result, nil
 }
 
-func (c *Client) DiscoverSections(ctx context.Context, topic, currentSections, sources string) (string, error) {
+func (c *Client) CheckRelevance(ctx context.Context, topic, content string) (*RelevanceResult, error) {
 	startTime := time.Now()
-	log.Printf("DiscoverSections: Starting section discovery for '%s' (model: %s)", topic, c.modelGenerateArticle)
 
 	// Execute system template
 	var systemBuf bytes.Buffer
-	if err := c.sectionDiscoverySystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return "", fmt.Errorf("failed to execute section_discovery system template: %w", err)
-	}
-
-	// Execute user template
-	data := map[string]interface{}{
-		"Topic":           topic,
-		"CurrentSections": currentSections,
-		"Sources":         sources,
-	}
-	var userBuf bytes.Buffer
-	if err := c.sectionDiscoveryUserTemplate.Execute(&userBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute section_discovery user template: %w", err)
-	}
-
-	resp, err := c.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: c.modelGenerateArticle,
-			Messages: []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
-				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
-			},
-			Temperature: 0.3,
-		},
-	)
-	if err != nil {
-		return "", err
-	}
-
-	result := resp.Choices[0].Message.Content
-	log.Printf("DiscoverSections: Completed in %v (%d chars)", time.Since(startTime), len(result))
-	return result, nil
-}
-
-func (c *Client) IntegrateArticle(ctx context.Context, topic, article string) (string, error) {
-	startTime := time.Now()
-	log.Printf("IntegrateArticle: Starting article polish for '%s' (input: %d chars, model: %s, thinking: %v)", 
-		topic, len(article), c.modelGenerateArticle, c.ThinkingEnabled())
-
-	// Execute system template
-	var systemBuf bytes.Buffer
-	if err := c.integrationSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return "", fmt.Errorf("failed to execute integration system template: %w", err)
+	if err := c.checkRelevanceSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute check_relevance system template: %w", err)
 	}
 
 	// Execute user template
 	data := map[string]interface{}{
 		"Topic":   topic,
-		"Article": article,
+		"Content": content,
 	}
 	var userBuf bytes.Buffer
-	if err := c.integrationUserTemplate.Execute(&userBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute integration user template: %w", err)
+	if err := c.checkRelevanceUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute check_relevance user template: %w", err)
 	}
 
-	// Use thinking mode if enabled
+	// Use fast model for checks, low temp
+	model := c.modelSuggestTopics // Using fast model
 	if c.ThinkingEnabled() {
+		// Even with thinking enabled, validation checks are better on low temp
 		messages := []ollamaChatMessage{
 			{Role: "system", Content: systemBuf.String()},
 			{Role: "user", Content: userBuf.String()},
 		}
-		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.5)
+		resp, err := c.chatWithThinking(ctx, model, messages, 0.1)
 		if err != nil {
-			log.Printf("IntegrateArticle: FAILED after %v - %v", time.Since(startTime), err)
-			return "", err
+			return nil, err
 		}
-		log.Printf("IntegrateArticle: Completed in %v (%d chars)", time.Since(startTime), len(resp.Message.Content))
-		return resp.Message.Content, nil
+
+		jsonStr := extractJSONObject(resp.Message.Content)
+		if !strings.Contains(jsonStr, "{") {
+			// Try to extract JSON from thinking trace if available
+			if resp.Message.Thinking != "" {
+				jsonStr = extractJSONObject(resp.Message.Thinking)
+			}
+			if !strings.Contains(jsonStr, "{") {
+				log.Printf("CheckRelevance: Raw response (first 500 chars): %.500s", resp.Message.Content)
+				return nil, fmt.Errorf("non-JSON response from check_relevance")
+			}
+		}
+
+		var result RelevanceResult
+		if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+			return nil, fmt.Errorf("failed to parse check_relevance JSON: %w", err)
+		}
+		log.Printf("CheckRelevance: %v (%s) in %v", result.Relevant, result.Reason, time.Since(startTime))
+		return &result, nil
 	}
 
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model: c.modelGenerateArticle,
+			Model: model,
 			Messages: []openai.ChatCompletionMessage{
 				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
 				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
 			},
-			Temperature: 0.5,
+			Temperature: 0.1,
 		},
 	)
 	if err != nil {
-		log.Printf("IntegrateArticle: FAILED after %v - %v", time.Since(startTime), err)
-		return "", err
+		return nil, err
 	}
 
-	result := resp.Choices[0].Message.Content
-	log.Printf("IntegrateArticle: Completed in %v (%d chars)", time.Since(startTime), len(result))
-	return result, nil
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result RelevanceResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse check_relevance JSON: %w", err)
+	}
+	log.Printf("CheckRelevance: %v (%s) in %v", result.Relevant, result.Reason, time.Since(startTime))
+	return &result, nil
 }
 
-// PolishSection polishes a single section while maintaining context
-func (c *Client) PolishSection(ctx context.Context, topic, heading, headingLevel, content, prevContext, nextContext string) (string, error) {
+func (c *Client) CheckRedundancy(ctx context.Context, topic, existingArticle, newContent string) (*RedundancyResult, error) {
 	startTime := time.Now()
-	log.Printf("PolishSection: '%s' (model: %s)", heading, c.modelGenerateArticle)
 
 	// Execute system template
 	var systemBuf bytes.Buffer
-	if err := c.polishSectionSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return "", fmt.Errorf("failed to execute polish_section system template: %w", err)
+	if err := c.checkRedundancySystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute check_redundancy system template: %w", err)
 	}
 
 	// Execute user template
 	data := map[string]interface{}{
 		"Topic":           topic,
-		"Heading":         heading,
-		"HeadingLevel":    headingLevel,
-		"Content":         content,
-		"PreviousContext": prevContext,
-		"NextContext":     nextContext,
+		"ExistingArticle": existingArticle,
+		"NewContent":      newContent,
 	}
 	var userBuf bytes.Buffer
-	if err := c.polishSectionUserTemplate.Execute(&userBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute polish_section user template: %w", err)
+	if err := c.checkRedundancyUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute check_redundancy user template: %w", err)
 	}
 
-	// Use thinking mode if enabled, but with lower temperature for stability
+	// Use fast model for checks
+	model := c.modelSuggestTopics
+
 	if c.ThinkingEnabled() {
 		messages := []ollamaChatMessage{
 			{Role: "system", Content: systemBuf.String()},
 			{Role: "user", Content: userBuf.String()},
 		}
-		// Lower temperature to discourage creative rewriting/summarization
+		resp, err := c.chatWithThinking(ctx, model, messages, 0.1)
+		if err != nil {
+			return nil, err
+		}
+
+		jsonStr := extractJSONObject(resp.Message.Content)
+		var result RedundancyResult
+		if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+			return nil, fmt.Errorf("failed to parse check_redundancy JSON: %w", err)
+		}
+		log.Printf("CheckRedundancy: %v (%s) in %v", result.IsRedundant, result.Reason, time.Since(startTime))
+		return &result, nil
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: model,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.1,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result RedundancyResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse check_redundancy JSON: %w", err)
+	}
+	log.Printf("CheckRedundancy: %v (%s) in %v", result.IsRedundant, result.Reason, time.Since(startTime))
+	return &result, nil
+}
+
+func (c *Client) IntegrateContent(ctx context.Context, topic, existingArticle, newContent string) (string, error) {
+	startTime := time.Now()
+
+	// Execute system template
+	var systemBuf bytes.Buffer
+	if err := c.integrateContentSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute integrate_content system template: %w", err)
+	}
+
+	// Execute user template
+	data := map[string]interface{}{
+		"Topic":           topic,
+		"ExistingArticle": existingArticle,
+		"NewContent":      newContent,
+	}
+	var userBuf bytes.Buffer
+	if err := c.integrateContentUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute integrate_content user template: %w", err)
+	}
+
+	// Use thinking mode if enabled - integration requires careful thought
+	if c.ThinkingEnabled() {
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
 		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.3)
 		if err != nil {
-			log.Printf("PolishSection: FAILED after %v - %v", time.Since(startTime), err)
 			return "", err
 		}
-		log.Printf("PolishSection: Completed in %v (%d chars)", time.Since(startTime), len(resp.Message.Content))
+		log.Printf("IntegrateContent: Completed in %v (%d chars)", time.Since(startTime), len(resp.Message.Content))
 		return resp.Message.Content, nil
 	}
 
@@ -1310,11 +1231,10 @@ func (c *Client) PolishSection(ctx context.Context, topic, heading, headingLevel
 		},
 	)
 	if err != nil {
-		log.Printf("PolishSection: FAILED after %v - %v", time.Since(startTime), err)
 		return "", err
 	}
 
 	result := resp.Choices[0].Message.Content
-	log.Printf("PolishSection: Completed in %v (%d chars)", time.Since(startTime), len(result))
+	log.Printf("IntegrateContent: Completed in %v (%d chars)", time.Since(startTime), len(result))
 	return result, nil
 }
