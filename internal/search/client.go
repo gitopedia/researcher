@@ -16,9 +16,9 @@ import (
 )
 
 type Client struct {
-	httpClient      *http.Client
-	apiBaseURL      string
-	maxChars        int
+	httpClient         *http.Client
+	apiBaseURL         string
+	maxChars           int
 	maxResultsPerQuery int
 }
 
@@ -45,9 +45,9 @@ func NewClient() *Client {
 	}
 
 	return &Client{
-		httpClient:      &http.Client{Timeout: 10 * time.Second},
-		apiBaseURL:      "https://api.duckduckgo.com/",
-		maxChars:        maxChars,
+		httpClient:         &http.Client{Timeout: 10 * time.Second},
+		apiBaseURL:         "https://api.duckduckgo.com/",
+		maxChars:           maxChars,
 		maxResultsPerQuery: maxResultsPerQuery,
 	}
 }
@@ -60,12 +60,12 @@ func (c *Client) Search(query string) ([]Result, error) {
 	time.Sleep(2 * time.Second)
 
 	u := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
-	
+
 	// Retry logic for rate limiting
 	maxRetries := 3
 	var resp *http.Response
 	var err error
-	
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			// Exponential backoff: 2s, 4s, 8s
@@ -73,11 +73,11 @@ func (c *Client) Search(query string) ([]Result, error) {
 			log.Printf("Retrying search (attempt %d/%d) after %v...", attempt+1, maxRetries, backoff)
 			time.Sleep(backoff)
 		}
-		
+
 		req, _ := http.NewRequest("GET", u, nil)
 		// Use a generic User-Agent to avoid being blocked immediately
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-		
+
 		resp, err = c.httpClient.Do(req)
 		if err != nil {
 			if attempt < maxRetries-1 {
@@ -94,11 +94,11 @@ func (c *Client) Search(query string) ([]Result, error) {
 			}
 			return nil, fmt.Errorf("bad status: %s (rate limited?)", resp.Status)
 		}
-		
+
 		if resp.StatusCode == http.StatusOK {
 			break
 		}
-		
+
 		// Other non-200 status - retry once more
 		if attempt < maxRetries-1 {
 			continue
@@ -167,9 +167,9 @@ func (c *Client) Search(query string) ([]Result, error) {
 		// Skip if it's still a DuckDuckGo domain (likely an ad or tracking page)
 		if strings.Contains(parsedURL.Host, "duckduckgo.com") {
 			return
-			}
+		}
 
-			results = append(results, Result{Title: title, Href: href, Body: snippet})
+		results = append(results, Result{Title: title, Href: href, Body: snippet})
 	})
 
 	return results, nil
@@ -182,8 +182,8 @@ func (c *Client) FetchContent(targetURL string) (string, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),              // Required for Docker/root
-		chromedp.Flag("disable-dev-shm-usage", true),   // Prevent shared memory issues in Docker
+		chromedp.Flag("no-sandbox", true),            // Required for Docker/root
+		chromedp.Flag("disable-dev-shm-usage", true), // Prevent shared memory issues in Docker
 		chromedp.Flag("ignore-certificate-errors", true),
 	)
 

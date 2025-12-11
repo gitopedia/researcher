@@ -69,4 +69,3 @@ func TestSanitizeSlug(t *testing.T) {
 		})
 	}
 }
-

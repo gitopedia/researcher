@@ -24,7 +24,7 @@ type SourceSummary struct {
 	Reason   string `json:"reason,omitempty"`
 	Summary  string `json:"summary"`
 	Language string `json:"language,omitempty"` // Detected language code (e.g., "en", "es", "fr")
-	Model    string `json:"model,omitempty"`   // Model used for summarization
+	Model    string `json:"model,omitempty"`    // Model used for summarization
 	// Raw contains the raw LLM response used for debugging and logging.
 	// It is not part of the JSON contract with the model.
 	Raw string `json:"-"`
@@ -34,9 +34,9 @@ type SourceSummary struct {
 
 // ArticleCategory represents the LLM's categorization decision for an article
 type ArticleCategory struct {
-	Category    string `json:"category"`     // e.g., "Science/Physics"
-	Subcategory string `json:"subcategory"`  // e.g., "Quantum Mechanics" (optional)
-	Reasoning   string `json:"reasoning"`    // Why this category was chosen
+	Category    string `json:"category"`    // e.g., "Science/Physics"
+	Subcategory string `json:"subcategory"` // e.g., "Quantum Mechanics" (optional)
+	Reasoning   string `json:"reasoning"`   // Why this category was chosen
 }
 
 // ArticleResult contains the generated article content and metadata
@@ -64,11 +64,11 @@ type Generator interface {
 	SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error)
 	CategorizeArticle(ctx context.Context, title string, tags []string, content string, existingCategories []string) (*ArticleCategory, error)
 
-    // Incremental workflow methods
-    GenerateMiniArticle(ctx context.Context, topic, sourceTitle, sourceSummary string) (string, error)
-    CheckRelevance(ctx context.Context, topic, content string) (*RelevanceResult, error)
-    CheckRedundancy(ctx context.Context, topic, existingArticle, newContent string) (*RedundancyResult, error)
-    IntegrateContent(ctx context.Context, topic, existingArticle, newContent string) (string, error)
+	// Incremental workflow methods
+	GenerateMiniArticle(ctx context.Context, topic, sourceTitle, sourceSummary string) (string, error)
+	CheckRelevance(ctx context.Context, topic, content string) (*RelevanceResult, error)
+	CheckRedundancy(ctx context.Context, topic, existingArticle, newContent string) (*RedundancyResult, error)
+	IntegrateContent(ctx context.Context, topic, existingArticle, newContent string) (string, error)
 }
 
 // Ensure Client implements Generator

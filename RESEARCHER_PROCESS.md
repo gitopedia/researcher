@@ -387,3 +387,5 @@ Key environment variables that affect iterations and LLM calls:
 - `LLM_THINK_MODE`: Enable thinking mode (default: varies)
 - `DISABLE_PHASES`: Comma-separated list of phases to skip
 
+
+

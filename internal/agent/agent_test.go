@@ -41,8 +41,8 @@ func (m *MockGitHub) GetPRStatus(prNumber int) (*github.PRStatus, error) {
 func (m *MockGitHub) MergePR(prNumber int, commitMessage string) error { return nil }
 func (m *MockGitHub) ClosePR(prNumber int) error                       { return nil }
 func (m *MockGitHub) CommentOnPR(prNumber int, body string) error      { return nil }
-func (m *MockGitHub) CloseIssue(issueNumber int) error                   { return nil }
-func (m *MockGitHub) ReopenIssue(issueNumber int) error                  { return nil }
+func (m *MockGitHub) CloseIssue(issueNumber int) error                 { return nil }
+func (m *MockGitHub) ReopenIssue(issueNumber int) error                { return nil }
 func (m *MockGitHub) ListClosedIssuesWithLabel(label string, limit int) ([]*gh.Issue, error) {
 	return nil, nil
 }

@@ -286,4 +286,3 @@ func (c *Client) IsAvailable(ctx context.Context) bool {
 	health, err := c.Health(ctx)
 	return err == nil && health.Status == "ok"
 }
-

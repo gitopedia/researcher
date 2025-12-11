@@ -20,13 +20,13 @@ var promptsFS embed.FS
 
 func main() {
 	var (
-		rawFile     = flag.String("raw", "", "Path to raw source file to test")
-		topic       = flag.String("topic", "", "Topic for summarization")
-		url         = flag.String("url", "", "URL of the source")
-		model       = flag.String("model", "", "Model to use for summarization")
-		baseURL     = flag.String("base-url", "http://localhost:11434/v1", "Ollama base URL")
-		apiKey      = flag.String("api-key", "ollama", "API key")
-		outputDir   = flag.String("output", "test_output", "Output directory for results")
+		rawFile   = flag.String("raw", "", "Path to raw source file to test")
+		topic     = flag.String("topic", "", "Topic for summarization")
+		url       = flag.String("url", "", "URL of the source")
+		model     = flag.String("model", "", "Model to use for summarization")
+		baseURL   = flag.String("base-url", "http://localhost:11434/v1", "Ollama base URL")
+		apiKey    = flag.String("api-key", "ollama", "API key")
+		outputDir = flag.String("output", "test_output", "Output directory for results")
 	)
 	flag.Parse()
 
@@ -106,7 +106,7 @@ func main() {
 
 	// Try to extract JSON
 	jsonStr := extractJSONObject(rawOutput)
-	
+
 	// Parse JSON
 	var summary struct {
 		Relevant bool   `json:"relevant"`
@@ -138,15 +138,15 @@ func main() {
 	// Save results
 	modelName := sanitizeFilename(*model)
 	results := map[string]interface{}{
-		"model":        *model,
-		"topic":        *topic,
-		"url":          *url,
-		"relevant":     summary.Relevant,
-		"reason":       summary.Reason,
-		"word_count":   wordCount,
+		"model":       *model,
+		"topic":       *topic,
+		"url":         *url,
+		"relevant":    summary.Relevant,
+		"reason":      summary.Reason,
+		"word_count":  wordCount,
 		"duration_ms": duration.Milliseconds(),
-		"summary":      summary.Summary,
-		"raw_output":   rawOutput,
+		"summary":     summary.Summary,
+		"raw_output":  rawOutput,
 	}
 
 	resultsJSON, err := json.MarshalIndent(results, "", "  ")
@@ -161,7 +161,6 @@ func main() {
 
 	fmt.Printf("\nResults saved to: %s\n", outputPath)
 }
-
 
 func extractJSONObject(text string) string {
 	// Find first {
@@ -196,4 +195,3 @@ func truncate(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
-

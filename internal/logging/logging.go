@@ -72,12 +72,12 @@ func NewColorHandler(w io.Writer, opts *slog.HandlerOptions) *ColorHandler {
 	if opts == nil {
 		opts = &slog.HandlerOptions{}
 	}
-	
+
 	// Enable colors by default (so they work when tailing log files)
 	// Disable only if NO_COLOR is explicitly set
 	// This allows colors to be written to files and interpreted by terminals when tailing
 	useColor := os.Getenv("NO_COLOR") == ""
-	
+
 	return &ColorHandler{
 		w:        w,
 		opts:     opts,
@@ -104,7 +104,7 @@ func (h *ColorHandler) Handle(ctx context.Context, r slog.Record) error {
 		colorStart = []byte{}
 		colorEnd = []byte{}
 	}
-	
+
 	buf := make([]byte, 0, 1024)
 
 	// Write color at the start of the entire line
@@ -230,7 +230,7 @@ func (w slogWriter) Write(p []byte) (n int, err error) {
 	if len(msg) > 0 && msg[len(msg)-1] == '\n' {
 		msg = msg[:len(msg)-1]
 	}
-	
+
 	r := slog.NewRecord(time.Now(), slog.LevelInfo, msg, 0)
 	err = w.handler.Handle(context.Background(), r)
 	if err != nil {

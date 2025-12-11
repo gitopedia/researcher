@@ -188,7 +188,7 @@ func splitIntoSentences(text string) []string {
 func ExtractTopicsFromContent(content string) []string {
 	var topics []string
 	lines := strings.Split(content, "\n")
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		// Look for heading lines starting with #
@@ -199,7 +199,7 @@ func ExtractTopicsFromContent(content string) []string {
 			}
 		}
 	}
-	
+
 	// If no headings found, extract from content structure
 	if len(topics) == 0 {
 		// Look for short title-like lines (subheadings preserved from source)
@@ -217,15 +217,11 @@ func ExtractTopicsFromContent(content string) []string {
 			}
 		}
 	}
-	
+
 	// Default if nothing found
 	if len(topics) == 0 {
 		topics = []string{"Overview"}
 	}
-	
+
 	return topics
 }
-
-
-
-

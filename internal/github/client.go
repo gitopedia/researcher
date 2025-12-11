@@ -32,14 +32,14 @@ func NewClient(ctx context.Context) (*Client, error) {
 		owner: "gitopedia", // Default, can be made configurable
 		repo:  "gitopedia",
 	}
-	
+
 	// Check if using GitHub App auth
 	c.useAppAuth = os.Getenv("GITHUB_APP_ID") != ""
-	
+
 	if err := c.refreshClient(); err != nil {
 		return nil, err
 	}
-	
+
 	return c, nil
 }
 
@@ -73,7 +73,7 @@ func (c *Client) refreshClient() error {
 	)
 	tc := oauth2.NewClient(c.ctx, ts)
 	c.client = github.NewClient(tc)
-	
+
 	return nil
 }
 
@@ -241,7 +241,7 @@ func (c *Client) GetResearchRequests() ([]*github.Issue, error) {
 	if err := c.ensureValidToken(); err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
-	
+
 	// Use pagination to get all issues with the "research category" label
 	opts := &github.IssueListByRepoOptions{
 		State:  "open",
@@ -250,7 +250,7 @@ func (c *Client) GetResearchRequests() ([]*github.Issue, error) {
 			PerPage: 100,
 		},
 	}
-	
+
 	var allIssues []*github.Issue
 	for {
 		issues, resp, err := c.client.Issues.ListByRepo(c.ctx, c.owner, c.repo, opts)
@@ -263,7 +263,7 @@ func (c *Client) GetResearchRequests() ([]*github.Issue, error) {
 		}
 		opts.Page = resp.NextPage
 	}
-	
+
 	return allIssues, nil
 }
 
@@ -271,7 +271,7 @@ func (c *Client) CreateBranch(baseBranch, newBranch string) error {
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
-	
+
 	// Get reference of base branch
 	ref, _, err := c.client.Git.GetRef(c.ctx, c.owner, c.repo, "heads/"+baseBranch)
 	if err != nil {
@@ -293,14 +293,14 @@ func (c *Client) CreateFile(branch, path, message, content string) error {
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
-	
+
 	opts := &github.RepositoryContentFileOptions{
 		Message: github.String(message),
 		Content: []byte(content),
 		Branch:  github.String(branch),
 	}
 	_, _, err := c.client.Repositories.CreateFile(c.ctx, c.owner, c.repo, path, opts)
-	
+
 	// If 401 error, try refreshing token and retry once
 	if is401Error(err) {
 		log.Printf("Got 401 error, refreshing token and retrying...")
@@ -309,7 +309,7 @@ func (c *Client) CreateFile(branch, path, message, content string) error {
 		}
 		_, _, err = c.client.Repositories.CreateFile(c.ctx, c.owner, c.repo, path, opts)
 	}
-	
+
 	return err
 }
 
@@ -412,7 +412,7 @@ func (c *Client) GetPRStatus(prNumber int) (*PRStatus, error) {
 	// Get combined status for the head SHA
 	if pr.Head != nil && pr.Head.SHA != nil {
 		hasChecks := false
-		
+
 		// Check combined commit status (older status API)
 		combined, _, err := c.client.Repositories.GetCombinedStatus(c.ctx, c.owner, c.repo, *pr.Head.SHA, nil)
 		if err == nil && combined != nil && len(combined.Statuses) > 0 {
@@ -431,14 +431,14 @@ func (c *Client) GetPRStatus(prNumber int) (*PRStatus, error) {
 			for _, run := range checkRuns.CheckRuns {
 				runStatus := run.GetStatus()
 				conclusion := run.GetConclusion()
-				
+
 				// Check if still running
 				if runStatus == "in_progress" || runStatus == "queued" || runStatus == "waiting" {
 					anyPending = true
 					allSuccess = false
 					continue
 				}
-				
+
 				// Check completed runs
 				if runStatus == "completed" {
 					switch conclusion {
@@ -463,7 +463,7 @@ func (c *Client) GetPRStatus(prNumber int) (*PRStatus, error) {
 				status.CIStatus = "success"
 			}
 		}
-		
+
 		// If no checks at all, it's considered passing (no CI required)
 		if !hasChecks {
 			status.CIStatus = "success"
@@ -523,11 +523,11 @@ func (c *Client) ListClosedIssuesWithLabel(label string, limit int) ([]*github.I
 	if err := c.ensureValidToken(); err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
-	
+
 	opts := &github.IssueListByRepoOptions{
-		State:  "closed",
-		Labels: []string{label},
-		Sort:   "updated",
+		State:     "closed",
+		Labels:    []string{label},
+		Sort:      "updated",
 		Direction: "desc",
 		ListOptions: github.ListOptions{
 			PerPage: limit,
@@ -553,7 +553,7 @@ func (c *Client) GetFailedCILogs(prNumber int) (string, error) {
 
 	// List check runs for the commit
 	checkRuns, _, err := c.client.Checks.ListCheckRunsForRef(c.ctx, c.owner, c.repo, headSHA, &github.ListCheckRunsOptions{
-		Status: github.String("completed"),
+		Status:      github.String("completed"),
 		ListOptions: github.ListOptions{PerPage: 50},
 	})
 	if err != nil {
@@ -564,7 +564,7 @@ func (c *Client) GetFailedCILogs(prNumber int) (string, error) {
 	for _, run := range checkRuns.CheckRuns {
 		if run.GetConclusion() == "failure" {
 			failedLogs.WriteString(fmt.Sprintf("## Failed: %s\n", run.GetName()))
-			
+
 			// Try to get annotations which often contain error details
 			annotations, _, err := c.client.Checks.ListCheckRunAnnotations(c.ctx, c.owner, c.repo, run.GetID(), &github.ListOptions{PerPage: 50})
 			if err == nil && len(annotations) > 0 {
@@ -572,7 +572,7 @@ func (c *Client) GetFailedCILogs(prNumber int) (string, error) {
 					failedLogs.WriteString(fmt.Sprintf("- %s:%d: %s\n", ann.GetPath(), ann.GetStartLine(), ann.GetMessage()))
 				}
 			}
-			
+
 			// Include the output summary if available
 			if run.Output != nil && run.Output.Summary != nil {
 				summary := run.Output.GetSummary()
@@ -581,7 +581,7 @@ func (c *Client) GetFailedCILogs(prNumber int) (string, error) {
 				}
 				failedLogs.WriteString(fmt.Sprintf("Summary: %s\n", summary))
 			}
-			
+
 			// Include the output text if available (often contains error details)
 			if run.Output != nil && run.Output.Text != nil {
 				text := run.Output.GetText()
@@ -590,7 +590,7 @@ func (c *Client) GetFailedCILogs(prNumber int) (string, error) {
 				}
 				failedLogs.WriteString(fmt.Sprintf("Details:\n%s\n", text))
 			}
-			
+
 			failedLogs.WriteString("\n")
 		}
 	}
@@ -629,7 +629,7 @@ type AuthorityEntry struct {
 // This uses the Git Data API to create a commit with two parents.
 func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	log.Printf("[MergeCommit] Starting merge commit creation for branch: %s", branch)
-	
+
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -641,7 +641,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	}
 	mainSHA := mainRef.Object.GetSHA()
 	log.Printf("[MergeCommit] Main HEAD: %s", mainSHA[:7])
-	
+
 	// Get the SHA of the branch's HEAD
 	branchRef, _, err := c.client.Git.GetRef(c.ctx, c.owner, c.repo, "heads/"+branch)
 	if err != nil {
@@ -649,9 +649,9 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	}
 	branchSHA := branchRef.Object.GetSHA()
 	log.Printf("[MergeCommit] Branch HEAD: %s", branchSHA[:7])
-	
+
 	log.Printf("[MergeCommit] Creating merge commit: main(%s) + %s(%s)", mainSHA[:7], branch, branchSHA[:7])
-	
+
 	// Get the tree from main (this will be our base)
 	mainCommit, _, err := c.client.Git.GetCommit(c.ctx, c.owner, c.repo, mainSHA)
 	if err != nil {
@@ -659,7 +659,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 	}
 	baseTreeSHA := mainCommit.Tree.GetSHA()
 	log.Printf("[MergeCommit] Base tree SHA: %s", baseTreeSHA[:7])
-	
+
 	// Get all files from the PR branch that need to be added/merged
 	log.Printf("[MergeCommit] Listing files in branch: %s", branch)
 	branchFiles, err := c.ListFilesInBranch(branch, "")
@@ -667,20 +667,20 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		return fmt.Errorf("failed to list branch files: %w", err)
 	}
 	log.Printf("[MergeCommit] Branch has %d files", len(branchFiles))
-	
+
 	log.Printf("[MergeCommit] Listing files in main")
 	mainFiles, err := c.ListFilesInBranch("main", "")
 	if err != nil {
 		return fmt.Errorf("failed to list main files: %w", err)
 	}
 	log.Printf("[MergeCommit] Main has %d files", len(mainFiles))
-	
+
 	// Build a set of main files for quick lookup
 	mainFileSet := make(map[string]bool)
 	for _, f := range mainFiles {
 		mainFileSet[f] = true
 	}
-	
+
 	// Collect tree entries for files that need special handling
 	var treeEntries []*github.TreeEntry
 	newFilesCount := 0
@@ -691,14 +691,14 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		if mainFileSet[file] {
 			continue // File exists in both - handle conflicts separately
 		}
-		
+
 		// Get file content from branch
 		content, _, err := c.GetFile(branch, file)
 		if err != nil {
 			log.Printf("[MergeCommit] Warning: could not get %s from branch: %v", file, err)
 			continue
 		}
-		
+
 		mode := "100644" // Regular file
 		fileType := "blob"
 		treeEntries = append(treeEntries, &github.TreeEntry{
@@ -710,7 +710,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		newFilesCount++
 	}
 	log.Printf("[MergeCommit] Added %d new files from branch", newFilesCount)
-	
+
 	// 2. Handle authority JSON files - merge entries from both branches
 	log.Printf("[MergeCommit] Step 2: Merging authority JSON files...")
 	authorityFiles := []string{
@@ -744,7 +744,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		}
 
 		log.Printf("[MergeCommit] %s: main has %d entries, branch has %d entries", path, len(mainEntries), len(branchEntries))
-		
+
 		// Merge: start with main, add unique entries from branch
 		seenIDs := make(map[string]bool)
 		var merged []AuthorityEntry
@@ -786,9 +786,9 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		allFiles[f] = true
 	}
 	log.Printf("[MergeCommit] Total unique files across both branches: %d", len(allFiles))
-	
-		// Group articles by directory
-		articlesByDir := make(map[string][]string)
+
+	// Group articles by directory
+	articlesByDir := make(map[string][]string)
 	indexDirs := make(map[string]bool)
 
 	for file := range allFiles {
@@ -798,7 +798,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		if strings.Contains(file, "_incoming") || strings.Contains(file, "_debug") {
 			continue
 		}
-		
+
 		lastSlash := strings.LastIndex(file, "/")
 		if lastSlash == -1 {
 			continue
@@ -806,19 +806,19 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		dir := file[:lastSlash]
 		filename := file[lastSlash+1:]
 
-				if filename == "index.md" {
+		if filename == "index.md" {
 			indexDirs[dir] = true
-				} else if !strings.HasPrefix(filename, "_") {
-					articlesByDir[dir] = append(articlesByDir[dir], filename)
-			}
+		} else if !strings.HasPrefix(filename, "_") {
+			articlesByDir[dir] = append(articlesByDir[dir], filename)
 		}
+	}
 
 	// Generate merged index.md for each directory
 	for dir := range indexDirs {
-			articles := articlesByDir[dir]
-			if len(articles) == 0 {
-				continue
-			}
+		articles := articlesByDir[dir]
+		if len(articles) == 0 {
+			continue
+		}
 
 		// Sort articles
 		for i := 0; i < len(articles)-1; i++ {
@@ -828,34 +828,34 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 				}
 			}
 		}
-		
+
 		// Get category name
-			parts := strings.Split(dir, "/")
-			categoryName := parts[len(parts)-1]
+		parts := strings.Split(dir, "/")
+		categoryName := parts[len(parts)-1]
 
 		// Generate content
-			var sb strings.Builder
-			sb.WriteString("# ")
-			sb.WriteString(categoryName)
-			sb.WriteString(" Articles\n\n")
+		var sb strings.Builder
+		sb.WriteString("# ")
+		sb.WriteString(categoryName)
+		sb.WriteString(" Articles\n\n")
 
 		for _, article := range articles {
-				title := strings.TrimSuffix(article, ".md")
-				title = strings.ReplaceAll(title, "-", " ")
-				words := strings.Fields(title)
-				for i, word := range words {
-					if len(word) > 0 {
-						words[i] = strings.ToUpper(word[:1]) + word[1:]
-					}
+			title := strings.TrimSuffix(article, ".md")
+			title = strings.ReplaceAll(title, "-", " ")
+			words := strings.Fields(title)
+			for i, word := range words {
+				if len(word) > 0 {
+					words[i] = strings.ToUpper(word[:1]) + word[1:]
 				}
-				title = strings.Join(words, " ")
-				sb.WriteString("- [")
-				sb.WriteString(title)
-				sb.WriteString("](")
-				sb.WriteString(article)
-				sb.WriteString(")\n")
 			}
-			sb.WriteString("\n")
+			title = strings.Join(words, " ")
+			sb.WriteString("- [")
+			sb.WriteString(title)
+			sb.WriteString("](")
+			sb.WriteString(article)
+			sb.WriteString(")\n")
+		}
+		sb.WriteString("\n")
 
 		indexPath := dir + "/index.md"
 		treeEntries = append(treeEntries, &github.TreeEntry{
@@ -866,12 +866,12 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		})
 		log.Printf("Generated %s with %d articles", indexPath, len(articles))
 	}
-	
+
 	log.Printf("[MergeCommit] Total tree entries to create: %d", len(treeEntries))
-	
+
 	if len(treeEntries) == 0 {
 		return fmt.Errorf("no files to merge - this may indicate the branch is already up to date or has no new content")
-			}
+	}
 
 	// Create a new tree based on main's tree with our modifications
 	log.Printf("[MergeCommit] Creating new tree based on main's tree (%s)...", baseTreeSHA[:7])
@@ -880,7 +880,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		return fmt.Errorf("failed to create tree: %w", err)
 	}
 	log.Printf("[MergeCommit] Created tree: %s", newTree.GetSHA()[:7])
-	
+
 	// Create a merge commit with two parents
 	commitMessage := "Merge main into " + branch + " (resolved conflicts)"
 	log.Printf("[MergeCommit] Creating merge commit with parents: main(%s), branch(%s)", mainSHA[:7], branchSHA[:7])
@@ -896,7 +896,7 @@ func (c *Client) CreateMergeCommitWithResolution(branch string) error {
 		return fmt.Errorf("failed to create commit: %w", err)
 	}
 	log.Printf("[MergeCommit] Created merge commit: %s", newCommit.GetSHA()[:7])
-	
+
 	// Update the branch ref to point to the new commit
 	log.Printf("[MergeCommit] Updating branch ref to point to new commit...")
 	_, _, err = c.client.Git.UpdateRef(c.ctx, c.owner, c.repo, &github.Reference{
@@ -915,7 +915,7 @@ func (c *Client) ListOpenPRs() ([]*PRInfo, error) {
 	if err := c.ensureValidToken(); err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
-	
+
 	opts := &github.PullRequestListOptions{
 		State: "open",
 	}
@@ -932,15 +932,15 @@ func (c *Client) ListOpenPRs() ([]*PRInfo, error) {
 			Body:   pr.GetBody(),
 			Draft:  pr.GetDraft(),
 		}
-		
+
 		// Get head branch name
 		if pr.Head != nil {
 			info.HeadBranch = pr.Head.GetRef()
 		}
-		
+
 		// Extract issue references from body (e.g., "#123", "Closes #45")
 		info.IssueRefs = extractIssueRefs(pr.GetBody())
-		
+
 		result = append(result, info)
 	}
 	return result, nil
@@ -997,10 +997,10 @@ func (c *Client) MarkPRReady(prNumber int) error {
 	// GitHub API doesn't have a direct "mark ready" endpoint
 	// We need to use the GraphQL API or update the PR
 	// For now, we'll use the REST API to update the draft status
-	
+
 	// The REST API doesn't support changing draft status directly
 	// We need to use GraphQL mutation: markPullRequestReadyForReview
-	
+
 	query := `mutation($id: ID!) {
 		markPullRequestReadyForReview(input: {pullRequestId: $id}) {
 			pullRequest {
@@ -1008,15 +1008,15 @@ func (c *Client) MarkPRReady(prNumber int) error {
 			}
 		}
 	}`
-	
+
 	// First, get the PR's node ID
 	pr, _, err := c.client.PullRequests.Get(c.ctx, c.owner, c.repo, prNumber)
 	if err != nil {
 		return fmt.Errorf("failed to get PR: %w", err)
 	}
-	
+
 	nodeID := pr.GetNodeID()
-	
+
 	// Execute GraphQL mutation
 	var mutation struct {
 		MarkPullRequestReadyForReview struct {
@@ -1025,11 +1025,11 @@ func (c *Client) MarkPRReady(prNumber int) error {
 			}
 		} `graphql:"markPullRequestReadyForReview(input: {pullRequestId: $id})"`
 	}
-	
+
 	variables := map[string]interface{}{
 		"id": nodeID,
 	}
-	
+
 	// Use raw HTTP request for GraphQL since go-github doesn't have native GraphQL support
 	reqBody := struct {
 		Query     string                 `json:"query"`
@@ -1038,47 +1038,47 @@ func (c *Client) MarkPRReady(prNumber int) error {
 		Query:     query,
 		Variables: variables,
 	}
-	
+
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return fmt.Errorf("failed to marshal GraphQL request: %w", err)
 	}
-	
+
 	req, err := http.NewRequestWithContext(c.ctx, "POST", "https://api.github.com/graphql", strings.NewReader(string(jsonBody)))
 	if err != nil {
 		return fmt.Errorf("failed to create GraphQL request: %w", err)
 	}
-	
+
 	// We need to get a token - extract from the client
 	// This is a bit hacky, but go-github doesn't expose the token directly
 	// We'll use the client's transport
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	// Use the client's underlying HTTP client which has auth
 	resp, err := c.client.Client().Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to execute GraphQL request: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("GraphQL request failed with status %d: %s", resp.StatusCode, string(body))
 	}
-	
+
 	// Check for GraphQL errors
 	var graphqlResp struct {
 		Errors []struct {
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
-	
+
 	body, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(body, &graphqlResp); err == nil && len(graphqlResp.Errors) > 0 {
 		return fmt.Errorf("GraphQL error: %s", graphqlResp.Errors[0].Message)
 	}
-	
+
 	_ = mutation // Suppress unused variable warning
-	
+
 	return nil
 }

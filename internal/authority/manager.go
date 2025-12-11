@@ -183,7 +183,7 @@ func sanitizeSlug(name string) string {
 			result.WriteRune(r)
 		case r == '.':
 			result.WriteRune(r)
-		// Skip all other characters (quotes, brackets, etc.)
+			// Skip all other characters (quotes, brackets, etc.)
 		}
 	}
 

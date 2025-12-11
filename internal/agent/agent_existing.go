@@ -83,7 +83,7 @@ func (a *Agent) processExistingPR(ctx context.Context, pr *github.PRInfo) error 
 		// Or check if the article contains citation to it?
 		// For now, let's just pick one random source and see if we can add something from it.
 		// To properly track "used", we should update source frontmatter.
-		
+
 		srcContent, _, err := a.gh.GetFile(branchName, f)
 		if err == nil {
 			if !strings.Contains(srcContent, "used_in_version:") {
@@ -107,7 +107,7 @@ func (a *Agent) processExistingPR(ctx context.Context, pr *github.PRInfo) error 
 
 func (a *Agent) integrateSource(ctx context.Context, topic, branchName, articlePath, articleContent, articleSHA, srcPath string) error {
 	log.Printf("Integrating source: %s", srcPath)
-	
+
 	srcContent, srcSHA, err := a.gh.GetFile(branchName, srcPath)
 	if err != nil {
 		return err
@@ -170,7 +170,7 @@ func (a *Agent) markSourceAsUsed(branchName, srcPath, content, sha, status strin
 	var newLines []string
 	inFM := false
 	inserted := false
-	
+
 	for _, line := range lines {
 		if line == "---" {
 			if !inFM {
@@ -186,7 +186,7 @@ func (a *Agent) markSourceAsUsed(branchName, srcPath, content, sha, status strin
 		}
 		newLines = append(newLines, line)
 	}
-	
+
 	newContent := strings.Join(newLines, "\n")
 	return a.gh.UpdateFile(branchName, srcPath, "Mark source as used: "+status, newContent, sha)
 }
@@ -195,10 +195,10 @@ func (a *Agent) fetchNewSource(ctx context.Context, topic, branchName, articlePa
 	// Simple implementation: Just search for the topic again, maybe with a sub-topic from article?
 	// For now, generic search
 	log.Printf("Fetching new source for: %s", topic)
-	
+
 	// Generate a search query based on article content gaps?
 	// Or just random term
-	query := topic + " details facts" 
+	query := topic + " details facts"
 	results, err := a.search.Search(query)
 	if err != nil {
 		return err
@@ -207,26 +207,26 @@ func (a *Agent) fetchNewSource(ctx context.Context, topic, branchName, articlePa
 	// Find a result not already in sources (we'd need to list sources first, but let's rely on random chance + high count)
 	// Better: check against existing source URLs.
 	// Assume we fetch one and if it's new, save it.
-	
+
 	for _, r := range results {
 		if strings.HasSuffix(r.Href, ".pdf") {
 			continue
 		}
-		
+
 		// Check if URL already exists in sources (filename hash or content?)
 		// We'll skip this check for MVP, but saving duplicate sources is wasteful.
-		
+
 		content, err := a.search.FetchContent(r.Href)
 		if err != nil {
 			continue
 		}
-		
+
 		// Generate Mini Article
 		mini, err := a.llm.GenerateMiniArticle(ctx, topic, r.Title, content)
 		if err != nil {
 			continue
 		}
-		
+
 		// Save Source
 		authMgr := authority.NewManager(a.gh) // New instance (empty cache is fine for this)
 		srcInfo := SourceInfo{
@@ -235,16 +235,16 @@ func (a *Agent) fetchNewSource(ctx context.Context, topic, branchName, articlePa
 			Title:   r.Title,
 			Summary: mini, // Use mini article as summary
 		}
-		
+
 		slug := strings.TrimSuffix(filepath.Base(articlePath), ".md")
 		if err := a.saveSourceSummary(ctx, srcInfo, topic, slug, branchName, authMgr, false); err != nil {
 			slog.Warn("Failed to save new source", "error", err)
 			continue
 		}
-		
+
 		log.Printf("Saved new source: %s", r.Title)
 		return nil // Done for this run (incremental)
 	}
-	
+
 	return fmt.Errorf("no new sources found")
 }

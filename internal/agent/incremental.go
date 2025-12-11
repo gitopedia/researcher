@@ -111,7 +111,7 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	// Create frontmatter with version 1
 	id := ulid.Make()
 	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	
+
 	// Extract entities from the generated mini-article for tagging
 	extracted, err := a.llm.ExtractEntities(ctx, miniArticle)
 	if err != nil {
@@ -119,7 +119,7 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	}
 	// Ensure topic is in entities
 	extracted = append(extracted, llm.ExtractedEntity{Name: topic, Type: llm.Topic})
-	
+
 	resolved, err := authMgr.ResolveEntities(extracted)
 	if err != nil {
 		slog.Warn("Entity resolution failed", "error", err)
@@ -171,9 +171,9 @@ summary: "Initial overview based on %s"
 	}
 
 	log.Printf("Created PR #%d", *pr.Number)
-	
+
 	// Comment on issue
 	a.gh.CommentOnIssue(*issue.Number, fmt.Sprintf("Started research in PR #%d", *pr.Number))
-	
+
 	return nil
 }
