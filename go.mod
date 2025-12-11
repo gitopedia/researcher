@@ -11,7 +11,6 @@ require (
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/sashabaranov/go-openai v1.41.2
 	golang.org/x/oauth2 v0.33.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
