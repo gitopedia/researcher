@@ -18,7 +18,12 @@ func (m *MockGitHub) GetResearchRequests() ([]*gh.Issue, error) {
 	number := 1
 	return []*gh.Issue{{Title: &title, Number: &number}}, nil
 }
+func (m *MockGitHub) ListAllOpenIssues() ([]*gh.Issue, error) {
+	return []*gh.Issue{}, nil
+}
 func (m *MockGitHub) CreateBranch(base, new string) error     { return nil }
+func (m *MockGitHub) ListBranches() ([]*gh.Branch, error)     { return []*gh.Branch{}, nil }
+func (m *MockGitHub) DeleteBranch(branchName string) error    { return nil }
 func (m *MockGitHub) CreateFile(b, p, msg, c string) error    { return nil }
 func (m *MockGitHub) UpdateFile(b, p, msg, c, s string) error { return nil }
 func (m *MockGitHub) CreatePullRequest(t, b, h, base string) (*gh.PullRequest, error) {

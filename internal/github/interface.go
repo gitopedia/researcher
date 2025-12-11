@@ -16,7 +16,10 @@ type PRStatus struct {
 
 type GitHubClient interface {
 	GetResearchRequests() ([]*github.Issue, error)
+	ListAllOpenIssues() ([]*github.Issue, error)
 	CreateBranch(baseBranch, newBranch string) error
+	ListBranches() ([]*github.Branch, error)
+	DeleteBranch(branchName string) error
 	CreateFile(branch, path, message, content string) error
 	UpdateFile(branch, path, message, content, sha string) error
 	CreatePullRequest(title, body, head, base string) (*github.PullRequest, error)

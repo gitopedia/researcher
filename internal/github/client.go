@@ -267,6 +267,34 @@ func (c *Client) GetResearchRequests() ([]*github.Issue, error) {
 	return allIssues, nil
 }
 
+func (c *Client) ListAllOpenIssues() ([]*github.Issue, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	opts := &github.IssueListByRepoOptions{
+		State: "open",
+		ListOptions: github.ListOptions{
+			PerPage: 100,
+		},
+	}
+
+	var allIssues []*github.Issue
+	for {
+		issues, resp, err := c.client.Issues.ListByRepo(c.ctx, c.owner, c.repo, opts)
+		if err != nil {
+			return nil, err
+		}
+		allIssues = append(allIssues, issues...)
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	return allIssues, nil
+}
+
 func (c *Client) CreateBranch(baseBranch, newBranch string) error {
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
@@ -286,6 +314,43 @@ func (c *Client) CreateBranch(baseBranch, newBranch string) error {
 		},
 	}
 	_, _, err = c.client.Git.CreateRef(c.ctx, c.owner, c.repo, newRef)
+	return err
+}
+
+func (c *Client) ListBranches() ([]*github.Branch, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	var allBranches []*github.Branch
+	opts := &github.BranchListOptions{
+		ListOptions: github.ListOptions{
+			PerPage: 100,
+		},
+	}
+
+	for {
+		branches, resp, err := c.client.Repositories.ListBranches(c.ctx, c.owner, c.repo, opts)
+		if err != nil {
+			return nil, err
+		}
+		allBranches = append(allBranches, branches...)
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	return allBranches, nil
+}
+
+func (c *Client) DeleteBranch(branchName string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	ref := fmt.Sprintf("heads/%s", branchName)
+	_, err := c.client.Git.DeleteRef(c.ctx, c.owner, c.repo, ref)
 	return err
 }
 
