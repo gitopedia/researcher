@@ -36,3 +36,4 @@ func main() {
 
 	log.Printf("Successfully merged PR #%d! Compendium is now clean.", prNumber)
 }
+

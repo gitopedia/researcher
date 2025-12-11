@@ -178,3 +178,4 @@ func cleanupBranches(client *github.Client, dryRun bool) error {
 
 	return nil
 }
+

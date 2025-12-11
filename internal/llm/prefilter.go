@@ -225,3 +225,4 @@ func ExtractTopicsFromContent(content string) []string {
 
 	return topics
 }
+
