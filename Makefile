@@ -1,11 +1,13 @@
 .PHONY: all build test lint fmt clean
 
 BINARY_NAME=researcher
+BIN_DIR=bin
 
 all: fmt lint test build
 
 build:
-	go build -o $(BINARY_NAME) main.go
+	mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/$(BINARY_NAME) main.go
 
 test:
 	go test -v ./...
@@ -20,6 +22,7 @@ lint:
 
 clean:
 	go clean
+	rm -f $(BIN_DIR)/$(BINARY_NAME)
 	rm -f $(BINARY_NAME)
 
 

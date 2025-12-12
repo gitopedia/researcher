@@ -310,8 +310,6 @@ RUN_PROFILE=prod go run . --once
 
 ```
 researcher/
-├── cmd/
-│   └── ingest/          # Source ingestion tool
 ├── config/
 │   └── base.env         # Default configuration
 ├── internal/
