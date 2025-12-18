@@ -1,6 +1,6 @@
 Topic: {{.Topic}}
-Source Title: {{.Title}}
+Source Title: {{.SourceTitle}}
 Source Content:
-{{.Content}}
+{{.SourceSummary}}
 
 Write a mini-encyclopedia article about {{.Topic}} using ONLY the information above.

@@ -256,11 +256,17 @@ func (a *Agent) stepDrafting(ctx context.Context, issue *gh.Issue, state *Resear
 
 	// Find the summarized source
 	stepDirSummary := fmt.Sprintf("%s/step-2-summarization", debugBasePath(slug))
-	summary, _, err := a.gh.GetFile(branchName, fmt.Sprintf("%s/summary-1.md", stepDirSummary))
+	summaryPath := fmt.Sprintf("%s/summary-1.md", stepDirSummary)
+	summary, _, err := a.gh.GetFile(branchName, summaryPath)
 	if err != nil {
-		return fmt.Errorf("failed to load summary: %w", err)
+		return fmt.Errorf("failed to load summary from %s: %w", summaryPath, err)
 	}
 
+	if len(summary) == 0 {
+		return fmt.Errorf("summary file is empty: %s", summaryPath)
+	}
+
+	log.Printf("Loaded summary from %s: %d characters", summaryPath, len(summary))
 	miniArticle, err := a.llm.GenerateMiniArticle(ctx, topic, "Source", summary)
 	if err != nil {
 		return err
