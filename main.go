@@ -23,6 +23,7 @@ func main() {
 	stepByStep := flag.Bool("step", false, "Run in step-by-step mode, pausing for manual triggers")
 	stepName := flag.String("step-name", "", "Specific step to run (discovery, summarization, drafting, finalize)")
 	repoPath := flag.String("repo-path", "", "Path to local gitopedia repository (enables local git mode)")
+	noCommit := flag.Bool("no-commit", false, "In local mode, add changes to staging area but don't commit")
 	flag.Parse()
 
 	// Initialize structured, colorized logging using Go's standard library slog,
@@ -91,6 +92,10 @@ func main() {
 	a, err := agent.NewAgent(ctx, *repoPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize agent: %v", err)
+	}
+
+	if *noCommit && *repoPath != "" {
+		a.SetNoCommit(true)
 	}
 
 	// Loop interval configuration

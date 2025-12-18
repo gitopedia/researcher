@@ -18,12 +18,14 @@ type RepoManager interface {
 	// Local-specific operations
 	GetRepoPath() string
 	IsLocal() bool
+	SetNoCommit(bool)
 }
 
 // LocalGitManager implements RepoManager for a local Git repository
 type LocalGitManager struct {
 	github.GitHubClient
 	repoPath string
+	noCommit bool
 }
 
 func NewLocalGitManager(ctx context.Context, ghClient github.GitHubClient, repoPath string) (*LocalGitManager, error) {
@@ -47,6 +49,10 @@ func (m *LocalGitManager) GetRepoPath() string {
 
 func (m *LocalGitManager) IsLocal() bool {
 	return true
+}
+
+func (m *LocalGitManager) SetNoCommit(val bool) {
+	m.noCommit = val
 }
 
 // Override CreateBranch to use local git
@@ -79,6 +85,10 @@ func (m *LocalGitManager) CreateFile(branch, path, message, content string) erro
 
 	if _, err := m.runGit("add", path); err != nil {
 		return err
+	}
+
+	if m.noCommit {
+		return nil
 	}
 
 	_, err := m.runGit("commit", "-m", message)

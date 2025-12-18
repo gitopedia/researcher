@@ -42,6 +42,10 @@ func debugBasePath(slug string) string {
 	return fmt.Sprintf("Compendium/_debug/articles/%s", slug)
 }
 
+func (a *Agent) SetNoCommit(val bool) {
+	a.gh.SetNoCommit(val)
+}
+
 func (a *Agent) saveDebugJSON(branchName, path, message string, v interface{}) {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -93,6 +97,7 @@ type remoteRepoManager struct {
 
 func (r *remoteRepoManager) GetRepoPath() string { return "" }
 func (r *remoteRepoManager) IsLocal() bool      { return false }
+func (r *remoteRepoManager) SetNoCommit(bool)   {}
 
 func NewAgentWithDeps(gh repository.RepoManager, s search.Searcher, l llm.Generator) *Agent {
 	return &Agent{
