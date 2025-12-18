@@ -196,16 +196,24 @@ func (a *Agent) stepSummarization(ctx context.Context, issue *gh.Issue, state *R
 	found := false
 	for _, r := range results {
 		if strings.HasSuffix(r.Href, ".pdf") {
+			log.Printf("Skipping PDF source: %s", r.Href)
 			continue
 		}
 		content, err := a.search.FetchContent(r.Href)
 		if err != nil {
+			log.Printf("Failed to fetch content from %s: %v", r.Href, err)
 			continue
 		}
 		summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
-		if err != nil || !summary.Relevant {
+		if err != nil {
+			log.Printf("Failed to summarize source %s: %v", r.Href, err)
 			continue
 		}
+		if !summary.Relevant {
+			log.Printf("Source rejected: %s - Reason: %s", r.Href, summary.Reason)
+			continue
+		}
+		log.Printf("Found relevant source: %s", r.Href)
 		sourceInfo = SourceInfo{Index: 1, URL: r.Href, Title: r.Title, Summary: summary.Summary}
 		found = true
 		break
