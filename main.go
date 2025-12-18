@@ -20,6 +20,9 @@ func main() {
 	// Parse CLI flags
 	mergeOnly := flag.Bool("merge-only", false, "Only run the PR merge logic, don't process new issues")
 	once := flag.Bool("once", false, "Run once and exit (no loop)")
+	stepByStep := flag.Bool("step", false, "Run in step-by-step mode, pausing for manual triggers")
+	stepName := flag.String("step-name", "", "Specific step to run (discovery, summarization, drafting, finalize)")
+	repoPath := flag.String("repo-path", "", "Path to local gitopedia repository (enables local git mode)")
 	flag.Parse()
 
 	// Initialize structured, colorized logging using Go's standard library slog,
@@ -39,8 +42,13 @@ func main() {
 	log.Printf("Gitopedia Researcher v%s", agent.Version)
 	if *mergeOnly {
 		log.Println("Starting in merge-only mode...")
+	} else if *stepByStep {
+		log.Printf("Starting in step-by-step mode (Step: %s)...", *stepName)
 	} else {
 		log.Println("Starting in full mode...")
+	}
+	if *repoPath != "" {
+		log.Printf("Local Git mode enabled (Repo: %s)", *repoPath)
 	}
 	if !*once {
 		log.Println("Press Ctrl+C to gracefully shutdown (will wait for current task to complete)")
@@ -80,7 +88,7 @@ func main() {
 		}
 	}()
 
-	a, err := agent.NewAgent(ctx)
+	a, err := agent.NewAgent(ctx, *repoPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize agent: %v", err)
 	}
@@ -110,7 +118,7 @@ func main() {
 		if *mergeOnly {
 			err = a.MergeOnly(ctx)
 		} else {
-			err = a.Run(ctx)
+			err = a.Run(ctx, *stepByStep, *stepName)
 		}
 
 		taskMu.Lock()
@@ -144,7 +152,7 @@ func main() {
 		select {
 		case <-ctx.Done():
 			log.Println("Context cancelled during sleep")
-			break
+			return
 		case <-time.After(loopInterval):
 			// Continue to next iteration
 		}

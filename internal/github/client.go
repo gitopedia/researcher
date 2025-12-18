@@ -1147,3 +1147,43 @@ func (c *Client) MarkPRReady(prNumber int) error {
 
 	return nil
 }
+
+func (c *Client) AddLabel(issueNumber int, label string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return err
+	}
+	_, _, err := c.client.Issues.AddLabelsToIssue(c.ctx, c.owner, c.repo, issueNumber, []string{label})
+	return err
+}
+
+func (c *Client) RemoveLabel(issueNumber int, label string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return err
+	}
+	_, err := c.client.Issues.RemoveLabelForIssue(c.ctx, c.owner, c.repo, issueNumber, label)
+	// GitHub returns 404 if label not found, we can ignore that
+	if err != nil && !strings.Contains(err.Error(), "404") {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) HasLabel(issueNumber int, label string) (bool, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return false, err
+	}
+	issue, _, err := c.client.Issues.Get(c.ctx, c.owner, c.repo, issueNumber)
+	if err != nil {
+		return false, err
+	}
+	for _, l := range issue.Labels {
+		if l.GetName() == label {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (c *Client) IsLocal() bool {
+	return false
+}

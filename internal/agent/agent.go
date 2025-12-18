@@ -16,6 +16,7 @@ import (
 	"github.com/gitopedia/researcher/internal/authority"
 	"github.com/gitopedia/researcher/internal/github"
 	"github.com/gitopedia/researcher/internal/llm"
+	"github.com/gitopedia/researcher/internal/repository"
 	"github.com/gitopedia/researcher/internal/search"
 	gh "github.com/google/go-github/v57/github"
 	"github.com/oklog/ulid/v2"
@@ -32,7 +33,7 @@ func init() {
 }
 
 type Agent struct {
-	gh     github.GitHubClient
+	gh     repository.RepoManager
 	search search.Searcher
 	llm    llm.Generator
 }
@@ -58,23 +59,42 @@ func (a *Agent) saveDebugText(branchName, path, message, content string) {
 	}
 }
 
-func NewAgent(ctx context.Context) (*Agent, error) {
+func NewAgent(ctx context.Context, repoPath string) (*Agent, error) {
 	ghClient, err := github.NewClient(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	var repoMgr repository.RepoManager
+	if repoPath != "" {
+		repoMgr, err = repository.NewLocalGitManager(ctx, ghClient, repoPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create local git manager: %w", err)
+		}
+	} else {
+		// Use a simple wrapper or cast if GitHubClient is compatible
+		repoMgr = &remoteRepoManager{ghClient}
+	}
+
 	llmClient, err := llm.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}
 	return &Agent{
-		gh:     ghClient,
+		gh:     repoMgr,
 		search: search.NewClient(),
 		llm:    llmClient,
 	}, nil
 }
 
-func NewAgentWithDeps(gh github.GitHubClient, s search.Searcher, l llm.Generator) *Agent {
+type remoteRepoManager struct {
+	github.GitHubClient
+}
+
+func (r *remoteRepoManager) GetRepoPath() string { return "" }
+func (r *remoteRepoManager) IsLocal() bool      { return false }
+
+func NewAgentWithDeps(gh repository.RepoManager, s search.Searcher, l llm.Generator) *Agent {
 	return &Agent{
 		gh:     gh,
 		search: s,
@@ -87,7 +107,7 @@ func (a *Agent) MergeOnly(ctx context.Context) error {
 	return a.mergeReadyPRs(ctx)
 }
 
-func (a *Agent) Run(ctx context.Context) error {
+func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error {
 	if err := a.mergeReadyPRs(ctx); err != nil {
 		slog.Warn("Error checking/merging PRs", "error", err)
 	}
@@ -144,12 +164,18 @@ func (a *Agent) Run(ctx context.Context) error {
 	if len(managedPRs) < maxConcurrent && len(availableIssues) > 0 {
 		rand.Seed(time.Now().UnixNano())
 		issue := availableIssues[rand.Intn(len(availableIssues))]
+		if stepByStep {
+			return a.processNewTopicStepByStep(ctx, issue, stepName)
+		}
 		return a.processNewTopic(ctx, issue)
 	}
 
 	if len(managedPRs) > 0 {
 		rand.Seed(time.Now().UnixNano())
 		pr := managedPRs[rand.Intn(len(managedPRs))]
+		if stepByStep {
+			return a.processExistingPRStepByStep(ctx, pr, stepName)
+		}
 		return a.processExistingPR(ctx, pr)
 	}
 
@@ -158,6 +184,10 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 func (a *Agent) mergeReadyPRs(ctx context.Context) error {
+	if a.gh.IsLocal() {
+		// Skip merge in local mode
+		return nil
+	}
 	log.Println("Checking for PRs ready to merge...")
 	openPRs, err := a.gh.ListOpenPRs()
 	if err != nil {

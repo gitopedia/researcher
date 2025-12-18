@@ -49,6 +49,14 @@ type GitHubClient interface {
 	ListFilesInBranch(branch, path string) ([]string, error)
 	DeleteFile(branch, path, message, sha string) error
 	MarkPRReady(prNumber int) error
+
+	// Label management
+	AddLabel(issueNumber int, label string) error
+	RemoveLabel(issueNumber int, label string) error
+	HasLabel(issueNumber int, label string) (bool, error)
+
+	// Mode checks
+	IsLocal() bool
 }
 
 // PRInfo contains basic info about a PR

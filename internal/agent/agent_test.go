@@ -61,6 +61,12 @@ func (m *MockGitHub) ListFilesInBranch(branch, path string) ([]string, error) {
 func (m *MockGitHub) DeleteFile(branch, path, message, sha string) error { return nil }
 func (m *MockGitHub) MarkPRReady(prNumber int) error                     { return nil }
 
+func (m *MockGitHub) AddLabel(issueNumber int, label string) error { return nil }
+func (m *MockGitHub) RemoveLabel(issueNumber int, label string) error { return nil }
+func (m *MockGitHub) HasLabel(issueNumber int, label string) (bool, error) { return false, nil }
+func (m *MockGitHub) IsLocal() bool { return false }
+func (m *MockGitHub) GetRepoPath() string { return "" }
+
 type MockSearch struct{}
 
 func (m *MockSearch) Search(q string) ([]search.Result, error) {
@@ -172,7 +178,7 @@ func (m *MockLLM) IntegrateContent(ctx context.Context, topic, existingArticle, 
 
 func TestAgentRun(t *testing.T) {
 	agent := NewAgentWithDeps(&MockGitHub{}, &MockSearch{}, &MockLLM{})
-	if err := agent.Run(context.Background()); err != nil {
+	if err := agent.Run(context.Background(), false, ""); err != nil {
 		t.Errorf("Agent.Run failed: %v", err)
 	}
 }
