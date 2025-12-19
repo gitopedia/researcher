@@ -83,12 +83,13 @@ func (m *LocalGitManager) CreateFile(branch, path, message, content string) erro
 		return err
 	}
 
-	if _, err := m.runGit("add", path); err != nil {
-		return err
-	}
-
+	// In no-commit mode, just write files without staging or committing
 	if m.noCommit {
 		return nil
+	}
+
+	if _, err := m.runGit("add", path); err != nil {
+		return err
 	}
 
 	_, err := m.runGit("commit", "-m", message)
