@@ -216,16 +216,41 @@ func (c *Client) FetchContent(targetURL string) (string, error) {
 		return "", err
 	}
 
+	// Remove sections that typically contain noise (references, external links, etc.)
+	// This works for Wikipedia and many other encyclopedia-style sites
+	doc.Find("#References, #Notes, #Citations, #External_links, #See_also, #Further_reading").Each(func(i int, s *goquery.Selection) {
+		// Remove the heading and all content until the next h2
+		s.Parent().NextUntil("h2").Remove()
+		s.Parent().Remove()
+	})
+
+	// Also remove by class names commonly used for references
+	doc.Find(".reflist, .references, .citation, .navbox, .sidebar, .infobox, .toc, #toc").Remove()
+
 	// Extract readable text (paragraphs and headers)
 	var textBuilder strings.Builder
-	// Expanded selector to capture more structure
-	doc.Find("h1, h2, h3, p, li").Each(func(i int, s *goquery.Selection) {
+	// Expanded selector to capture more structure, but exclude nav/footer elements
+	doc.Find("article, .mw-parser-output, main, .content, #content, #bodyContent").First().Find("h1, h2, h3, h4, p, li").Each(func(i int, s *goquery.Selection) {
+		// Skip items inside reference lists or navigation
+		if s.ParentsFiltered(".reflist, .references, .navbox, .sidebar, nav, footer, .toc").Length() > 0 {
+			return
+		}
 		// Normalize whitespace
 		text := strings.Join(strings.Fields(s.Text()), " ")
 		if len(text) > 20 { // Filter out very short snippets/nav items
 			textBuilder.WriteString(text + "\n\n")
 		}
 	})
+
+	// Fallback: if the above selectors found nothing, use the whole body
+	if textBuilder.Len() == 0 {
+		doc.Find("h1, h2, h3, p, li").Each(func(i int, s *goquery.Selection) {
+			text := strings.Join(strings.Fields(s.Text()), " ")
+			if len(text) > 20 {
+				textBuilder.WriteString(text + "\n\n")
+			}
+		})
+	}
 
 	text := textBuilder.String()
 	// Limit to a large but bounded size to avoid pathological pages.

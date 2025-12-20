@@ -54,11 +54,11 @@ type Client struct {
 }
 
 type ollamaChatRequest struct {
-	Model    string              `json:"model"`
-	Messages []ollamaChatMessage `json:"messages"`
-	Stream   bool                `json:"stream"`
-	Think    interface{}         `json:"think,omitempty"` // boolean or string ("low", "medium", "high")
-	Options  map[string]float64  `json:"options,omitempty"`
+	Model    string                 `json:"model"`
+	Messages []ollamaChatMessage    `json:"messages"`
+	Stream   bool                   `json:"stream"`
+	Think    interface{}            `json:"think,omitempty"` // boolean or string ("low", "medium", "high")
+	Options  map[string]interface{} `json:"options,omitempty"`
 }
 
 type ollamaChatMessage struct {
@@ -136,10 +136,10 @@ func NewClient() (*Client, error) {
 		modelGenerateArticle = modelArticle
 		modelExtractEntities = modelArticle // Use large model for reliable JSON output
 		modelSuggestTopics = modelFast
-		modelSummarizePlain = modelFast // Use fast model for source summarization
-		modelSummarizeJSON = modelFast  // Use fast model for JSON conversion
+		modelSummarizePlain = modelArticle // Use large model for comprehensive summarization
+		modelSummarizeJSON = modelFast     // Use fast model for JSON conversion
 
-		log.Printf("Multi-model configuration: Fast=%s, Article/Entity=%s", modelFast, modelArticle)
+		log.Printf("Multi-model configuration: Fast=%s, Article/Entity/Summarize=%s", modelFast, modelArticle)
 	}
 
 	config := openai.DefaultConfig(apiKey)
@@ -281,7 +281,8 @@ func NewClient() (*Client, error) {
 }
 
 // chatWithThinking calls Ollama's native API with thinking enabled
-func (c *Client) chatWithThinking(ctx context.Context, model string, messages []ollamaChatMessage, temperature float64) (*ollamaChatResponse, error) {
+// numPredict controls max output tokens (0 = model default)
+func (c *Client) chatWithThinking(ctx context.Context, model string, messages []ollamaChatMessage, temperature float64, numPredict ...int) (*ollamaChatResponse, error) {
 	// Determine think parameter value
 	var thinkParam interface{}
 	switch c.thinkMode {
@@ -295,12 +296,17 @@ func (c *Client) chatWithThinking(ctx context.Context, model string, messages []
 		thinkParam = true
 	}
 
+	options := map[string]interface{}{"temperature": temperature}
+	if len(numPredict) > 0 && numPredict[0] > 0 {
+		options["num_predict"] = numPredict[0]
+	}
+
 	req := ollamaChatRequest{
 		Model:    model,
 		Messages: messages,
 		Stream:   false,
 		Think:    thinkParam,
-		Options:  map[string]float64{"temperature": temperature},
+		Options:  options,
 	}
 
 	reqBody, err := json.Marshal(req)
@@ -838,6 +844,9 @@ func extractJSONArray(s string) (string, bool) {
 }
 
 func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error) {
+	// Log input content length for debugging
+	log.Printf("SummarizeSource: Received %d chars of input content for %s", len(content), urlStr)
+
 	// Step 1: Summarize content to plain text
 	var plain string
 
@@ -863,7 +872,8 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 			{Role: "system", Content: systemBuf.String()},
 			{Role: "user", Content: userBuf.String()},
 		}
-		resp, err := c.chatWithThinking(ctx, c.modelSummarizePlain, messages, 0.3)
+		// Request 16000 tokens for comprehensive extraction (supports 4000-8000 words)
+		resp, err := c.chatWithThinking(ctx, c.modelSummarizePlain, messages, 0.3, 16000)
 		if err != nil {
 			return SourceSummary{}, err
 		}
