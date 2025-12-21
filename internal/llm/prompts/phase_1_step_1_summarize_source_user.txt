@@ -1,15 +1,10 @@
-You are extracting informative content from a web page. The page was found while researching "{{.Topic}}", but your extraction should capture ALL useful encyclopedia-worthy information, not just content about that specific topic.
+Extract all factual content about "{{.Topic}}" from this web page.
 
-**When to skip extraction (output "NOT_RELEVANT" only):**
-- The page is mostly ads, spam, or promotional content
-- The page has minimal actual content (just links, navigation, or stubs)
-- The content is very low quality or incoherent
-- The page is a paywall, login page, or error page
+Output "NOT_RELEVANT" only if the page has no useful content.
 
-If the page has useful content, extract it comprehensively (1200-2000 words).
+Otherwise, extract comprehensively using heading + bullet format.
 
 Page URL: {{.URL}}
 
 Page Content:
 {{.Content}}
-

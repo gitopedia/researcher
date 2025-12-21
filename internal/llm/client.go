@@ -283,17 +283,30 @@ func NewClient() (*Client, error) {
 // chatWithThinking calls Ollama's native API with thinking enabled
 // numPredict controls max output tokens (0 = model default)
 func (c *Client) chatWithThinking(ctx context.Context, model string, messages []ollamaChatMessage, temperature float64, numPredict ...int) (*ollamaChatResponse, error) {
+	return c.chatOllama(ctx, model, messages, temperature, true, numPredict...)
+}
+
+// chatNoThinking calls Ollama's native API with thinking DISABLED
+// Use this for tasks where longer output is needed (thinking consumes output tokens)
+func (c *Client) chatNoThinking(ctx context.Context, model string, messages []ollamaChatMessage, temperature float64, numPredict ...int) (*ollamaChatResponse, error) {
+	return c.chatOllama(ctx, model, messages, temperature, false, numPredict...)
+}
+
+// chatOllama is the core Ollama API call
+func (c *Client) chatOllama(ctx context.Context, model string, messages []ollamaChatMessage, temperature float64, useThinking bool, numPredict ...int) (*ollamaChatResponse, error) {
 	// Determine think parameter value
-	var thinkParam interface{}
-	switch c.thinkMode {
-	case "false", "":
-		thinkParam = false
-	case "true":
-		thinkParam = true
-	case "low", "medium", "high":
-		thinkParam = c.thinkMode
-	default:
-		thinkParam = true
+	var thinkParam interface{} = false
+	if useThinking {
+		switch c.thinkMode {
+		case "false", "":
+			thinkParam = false
+		case "true":
+			thinkParam = true
+		case "low", "medium", "high":
+			thinkParam = c.thinkMode
+		default:
+			thinkParam = true
+		}
 	}
 
 	options := map[string]interface{}{"temperature": temperature}
@@ -865,20 +878,22 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 		return SourceSummary{}, fmt.Errorf("failed to execute summarize_source user template: %w", err)
 	}
 
-	// Use thinking mode for summarization if enabled (better comprehension of large texts)
-	if c.ThinkingEnabled() {
-		log.Printf("Stage 1: Starting LLM plain-text summarization (model: %s, thinking: enabled) for %s", c.modelSummarizePlain, urlStr)
+	// IMPORTANT: Do NOT use thinking mode for summarization - it consumes output tokens
+	// and causes excessive compression. Experiments show ~3x longer output without thinking.
+	{
+		log.Printf("Stage 1: Starting LLM plain-text summarization (model: %s, thinking DISABLED for longer output) for %s", c.modelSummarizePlain, urlStr)
 		messages := []ollamaChatMessage{
 			{Role: "system", Content: systemBuf.String()},
 			{Role: "user", Content: userBuf.String()},
 		}
-		// Request 16000 tokens for comprehensive extraction (supports 4000-8000 words)
-		resp, err := c.chatWithThinking(ctx, c.modelSummarizePlain, messages, 0.3, 16000)
+		// Request 16000 tokens for comprehensive extraction, with thinking DISABLED
+		resp, err := c.chatNoThinking(ctx, c.modelSummarizePlain, messages, 0.3, 16000)
 		if err != nil {
 			return SourceSummary{}, err
 		}
 		plain = strings.TrimSpace(resp.Message.Content)
-	} else {
+	}
+	if false { // Keep old code path for reference
 		log.Printf("Stage 1: Starting LLM plain-text summarization (model: %s) for %s", c.modelSummarizePlain, urlStr)
 		resp, err := c.client.CreateChatCompletion(
 			ctx,
