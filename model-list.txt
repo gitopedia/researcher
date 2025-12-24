@@ -1,0 +1,11 @@
+# Gitopedia Researcher - Model List
+# Models used for article generation and research tasks
+
+# Fast tasks (topic suggestion, JSON conversion)
+qwen3:8b
+
+# Article generation (summarization, content integration)
+deepseek-r1:14b
+
+# Embedding model (for knowledge-base)
+nomic-embed-text
