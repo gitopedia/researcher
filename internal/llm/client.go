@@ -860,27 +860,35 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	// Log input content length for debugging
 	log.Printf("SummarizeSource: Received %d chars of input content for %s", len(content), urlStr)
 
-	// Step 1: Summarize content to plain text
+	// Step 1: Summarize content to plain text using chunked approach for large documents
 	var plain string
+	const chunkSize = 15000 // ~15k chars per chunk for manageable LLM processing
 
-	var systemBuf bytes.Buffer
-	if err := c.summarizeSourceSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return SourceSummary{}, fmt.Errorf("failed to execute summarize_source system template: %w", err)
-	}
+	if len(content) > chunkSize {
+		// Use chunked summarization for large documents
+		log.Printf("Stage 1: Large document (%d chars), using chunked summarization", len(content))
+		chunkedResult, err := c.summarizeSourceChunked(ctx, topic, urlStr, content, chunkSize)
+		if err != nil {
+			return SourceSummary{}, err
+		}
+		plain = chunkedResult
+	} else {
+		// Single-pass summarization for smaller documents
+		var systemBuf bytes.Buffer
+		if err := c.summarizeSourceSystemTemplate.Execute(&systemBuf, nil); err != nil {
+			return SourceSummary{}, fmt.Errorf("failed to execute summarize_source system template: %w", err)
+		}
 
-	data := map[string]interface{}{
-		"Topic":   topic,
-		"URL":     urlStr,
-		"Content": content,
-	}
-	var userBuf bytes.Buffer
-	if err := c.summarizeSourceUserTemplate.Execute(&userBuf, data); err != nil {
-		return SourceSummary{}, fmt.Errorf("failed to execute summarize_source user template: %w", err)
-	}
+		data := map[string]interface{}{
+			"Topic":   topic,
+			"URL":     urlStr,
+			"Content": content,
+		}
+		var userBuf bytes.Buffer
+		if err := c.summarizeSourceUserTemplate.Execute(&userBuf, data); err != nil {
+			return SourceSummary{}, fmt.Errorf("failed to execute summarize_source user template: %w", err)
+		}
 
-	// IMPORTANT: Do NOT use thinking mode for summarization - it consumes output tokens
-	// and causes excessive compression. Experiments show ~3x longer output without thinking.
-	{
 		log.Printf("Stage 1: Starting LLM plain-text summarization (model: %s, thinking DISABLED for longer output) for %s", c.modelSummarizePlain, urlStr)
 		messages := []ollamaChatMessage{
 			{Role: "system", Content: systemBuf.String()},
@@ -892,24 +900,6 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 			return SourceSummary{}, err
 		}
 		plain = strings.TrimSpace(resp.Message.Content)
-	}
-	if false { // Keep old code path for reference
-		log.Printf("Stage 1: Starting LLM plain-text summarization (model: %s) for %s", c.modelSummarizePlain, urlStr)
-		resp, err := c.client.CreateChatCompletion(
-			ctx,
-			openai.ChatCompletionRequest{
-				Model: c.modelSummarizePlain,
-				Messages: []openai.ChatCompletionMessage{
-					{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
-					{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
-				},
-				Temperature: 0.3,
-			},
-		)
-		if err != nil {
-			return SourceSummary{}, err
-		}
-		plain = strings.TrimSpace(resp.Choices[0].Message.Content)
 	}
 
 	log.Printf("Stage 1: Completed LLM plain-text summarization (model: %s), output length: %d chars", c.modelSummarizePlain, len(plain))
@@ -987,6 +977,62 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	}
 
 	return summary, nil
+}
+
+// summarizeSourceChunked splits large content into chunks and summarizes each
+func (c *Client) summarizeSourceChunked(ctx context.Context, topic, urlStr, content string, chunkSize int) (string, error) {
+	chunks := splitIntoChunks(content, chunkSize)
+	log.Printf("Stage 1: Split into %d chunks for summarization", len(chunks))
+
+	var allSummaries strings.Builder
+	
+	for i, chunk := range chunks {
+		log.Printf("Stage 1: Processing chunk %d/%d (%d chars)", i+1, len(chunks), len(chunk))
+
+		var systemBuf bytes.Buffer
+		if err := c.summarizeSourceSystemTemplate.Execute(&systemBuf, nil); err != nil {
+			return "", fmt.Errorf("failed to execute summarize_source system template: %w", err)
+		}
+
+		data := map[string]interface{}{
+			"Topic":   topic,
+			"URL":     urlStr,
+			"Content": chunk,
+		}
+		var userBuf bytes.Buffer
+		if err := c.summarizeSourceUserTemplate.Execute(&userBuf, data); err != nil {
+			return "", fmt.Errorf("failed to execute summarize_source user template: %w", err)
+		}
+
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+
+		resp, err := c.chatNoThinking(ctx, c.modelSummarizePlain, messages, 0.3, 8000)
+		if err != nil {
+			log.Printf("Stage 1: Chunk %d failed: %v (continuing)", i+1, err)
+			continue
+		}
+
+		chunkSummary := strings.TrimSpace(resp.Message.Content)
+		log.Printf("Stage 1: Chunk %d produced %d chars", i+1, len(chunkSummary))
+
+		// Skip if chunk returned "NOT_RELEVANT" or similar
+		if strings.HasPrefix(strings.ToUpper(chunkSummary), "NOT_RELEVANT") {
+			log.Printf("Stage 1: Chunk %d marked as not relevant, skipping", i+1)
+			continue
+		}
+
+		if allSummaries.Len() > 0 {
+			allSummaries.WriteString("\n\n")
+		}
+		allSummaries.WriteString(chunkSummary)
+	}
+
+	result := allSummaries.String()
+	log.Printf("Stage 1: Combined all chunks into %d chars total", len(result))
+	return result, nil
 }
 
 func extractJSONObject(s string) string {

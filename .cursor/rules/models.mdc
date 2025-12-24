@@ -1,0 +1,52 @@
+---
+description: LLM models used by the researcher
+globs: ["model-list.txt", "internal/llm/*.go"]
+---
+
+# Models
+
+## Active Models
+
+| Model | Size | VRAM | Purpose |
+|-------|------|------|---------|
+| `qwen3:8b` | 5.2 GB | 5.6 GB | Fast tasks |
+| `deepseek-r1:14b` | 9.0 GB | ~9 GB | Article generation |
+| `nomic-embed-text` | 274 MB | minimal | Embeddings |
+
+## Pull Models
+
+```bash
+ollama pull qwen3:8b
+ollama pull deepseek-r1:14b
+ollama pull nomic-embed-text
+```
+
+## Check Loaded Models
+
+```powershell
+# List all models
+ollama list
+
+# Check what's currently loaded in memory
+Invoke-RestMethod -Uri "http://localhost:11434/api/ps" | ConvertTo-Json
+
+# Unload a model
+ollama stop qwen3:8b
+```
+
+## Model Selection Criteria
+
+For article generation, models should:
+- Fit fully in GPU VRAM (no CPU offload)
+- Support thinking mode for better reasoning
+- Produce high word counts (comprehensive extraction)
+- Run fast enough for batch processing
+
+## Benchmarking Results (RTX 5070 Ti 16GB)
+
+| Model | Time | Words | Quality |
+|-------|------|-------|---------|
+| deepseek-r1:14b | 29.8s | 366 | ⭐ Best |
+| qwen3:8b | 33.7s | 356 | Good |
+| qwen3:14b | 49.6s | 373 | Good |
+| magistral:24b | 39.2s | 369 | Good |

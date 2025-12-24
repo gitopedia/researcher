@@ -1,0 +1,52 @@
+---
+description: Researcher configuration options
+globs: ["config/*.env", "**/*.env"]
+---
+
+# Configuration
+
+Configuration is loaded from `config/base.env` with optional overrides in `config/.env`.
+
+## Model Configuration
+
+```bash
+# Fast model for quick tasks (topic suggestion, JSON conversion)
+LLM_MODEL_FAST=qwen3:8b
+
+# Article model for generation (summarization, content integration)
+LLM_MODEL_ARTICLE=deepseek-r1:14b
+
+# Enable thinking mode for supported models
+LLM_THINK_MODE=true
+```
+
+## Run Profiles
+
+```bash
+RUN_PROFILE=test   # Fast iteration: 1 topic, fewer sources
+RUN_PROFILE=prod   # Full fidelity: 10 topics, more sources
+```
+
+## Key Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PHASE1_TARGET_SOURCES` | 20 | Sources to gather per topic |
+| `MAX_TOPICS_PER_RUN` | 10 | Topics processed per run |
+| `MAX_RESEARCH_ROUNDS` | 2 | Gap-filling iterations |
+| `SOURCES_PER_SECTION` | 8 | Sources per article section |
+| `LOOP_INTERVAL_SECONDS` | 60 | Delay between runs |
+
+## Disable Phases
+
+```bash
+# Skip specific phases (comma-separated)
+DISABLE_PHASES=phase7           # Skip citations
+DISABLE_PHASES=phase5,phase7    # Skip discovery and citations
+```
+
+## Debug Mode
+
+```bash
+RESEARCH_DEBUG_SOURCES=true  # Save raw pages and LLM outputs
+```

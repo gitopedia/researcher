@@ -1,0 +1,56 @@
+---
+description: Managing research requests via GitHub issues
+globs: ["**/*.go"]
+---
+
+# GitHub Issues for Research
+
+The researcher monitors GitHub issues with the `research-request` label.
+
+## Create a Research Request
+
+```bash
+# Create a single issue
+gh issue create --repo gitopedia/gitopedia \
+  --title "Topic Name" \
+  --body "Research request for an encyclopedia article." \
+  --label "research-request"
+
+# Examples
+gh issue create --repo gitopedia/gitopedia --title "Quantum Computing" --label "research-request" --body "Research request"
+gh issue create --repo gitopedia/gitopedia --title "French Revolution" --label "research-request" --body "Research request"
+```
+
+## List Open Requests
+
+```bash
+gh issue list --repo gitopedia/gitopedia --label "research-request" --state open
+```
+
+## Bulk Create Issues
+
+```bash
+# Create multiple topics
+$topics = @("Artificial Intelligence", "Black Holes", "Renaissance Art")
+foreach ($topic in $topics) {
+    gh issue create --repo gitopedia/gitopedia --title $topic --label "research-request" --body "Research request"
+}
+```
+
+## Issue Lifecycle
+
+1. **Created** with `research-request` label
+2. **Processing** - Researcher picks it up
+3. **PR Created** - Article draft in PR
+4. **Merged** - Article published
+5. **Closed** - Issue auto-closed when PR merges
+
+## Labels Used
+
+| Label | Purpose |
+|-------|---------|
+| `research-request` | Request for new article |
+| `research:status-discovery` | Discovery step complete |
+| `research:status-summarized` | Summarization complete |
+| `research:status-drafted` | Draft ready |
+| `research:manual-review` | Waiting for human review |

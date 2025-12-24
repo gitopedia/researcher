@@ -1,10 +1,26 @@
-Extract all factual content about "{{.Topic}}" from this web page.
+Extract ALL factual content about "{{.Topic}}" from the web page below.
 
-Output "NOT_RELEVANT" only if the page has no useful content.
+Your output MUST be a comprehensive extraction of at least 2000 words for large sources.
 
-Otherwise, extract comprehensively using heading + bullet format.
+If the page has no relevant content about {{.Topic}}, output exactly: NOT_RELEVANT
+
+Otherwise, output the extracted facts in this exact format:
+
+# [Section Name from the source]
+- [Specific fact with names, dates, numbers]
+- [Another fact with concrete details]
+- [Continue for every fact in this section]
+
+# [Next Section Name]
+- [Facts from this section]
+...
+
+Do NOT ask questions. Do NOT request clarification. Just extract the facts.
 
 Page URL: {{.URL}}
 
-Page Content:
+--- PAGE CONTENT START ---
 {{.Content}}
+--- PAGE CONTENT END ---
+
+EXTRACTED FACTS:

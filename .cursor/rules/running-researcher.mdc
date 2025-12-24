@@ -1,0 +1,54 @@
+---
+description: How to run the Gitopedia Researcher
+globs: ["**/*.go", "main.go"]
+---
+
+# Running the Researcher
+
+## Quick Commands
+
+### Single Run (Production)
+```bash
+cd researcher
+go run . --once
+```
+
+### Local Mode (No GitHub Push)
+```bash
+go run . --once --repo-path "../gitopedia" --no-commit
+```
+
+### Step-by-Step Mode
+```bash
+# Auto-advance through steps
+go run . --once --step --repo-path "../gitopedia" --no-commit
+
+# Run specific step
+go run . --once --step --step-name discovery --repo-path "../gitopedia" --no-commit
+```
+
+### Continuous Loop
+```bash
+go run .  # Runs forever, checks every 60s
+```
+
+### Merge-Only Mode
+```bash
+go run . --merge-only  # Only merge ready PRs
+```
+
+## Available Steps
+- `discovery` - Search web for sources
+- `summarization` - Summarize first relevant source  
+- `drafting` - Generate article from summary
+- `finalize` - Create PR (skipped in local mode)
+
+## CLI Flags
+| Flag | Description |
+|------|-------------|
+| `--once` | Run one iteration and exit |
+| `--step` | Step-by-step mode with pauses |
+| `--step-name` | Specific step to run |
+| `--repo-path` | Path to local gitopedia repo |
+| `--no-commit` | Stage changes but don't commit |
+| `--merge-only` | Only merge ready PRs |
