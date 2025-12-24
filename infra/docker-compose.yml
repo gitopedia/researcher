@@ -17,13 +17,15 @@ services:
       # Set to "0" to unload immediately, or a duration like "30s", "1m", "5m" (default is 5m).
       # This helps free GPU/CPU when the application stops.
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30s}
+      # Try Vulkan for newer GPUs
+      - OLLAMA_VULKAN=1
     # GPU support (requires nvidia-container-toolkit)
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: all
               capabilities: [gpu]
 
   # Qdrant - Vector similarity search engine

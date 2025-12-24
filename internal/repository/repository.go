@@ -72,11 +72,9 @@ func (m *LocalGitManager) CreateBranch(baseBranch, newBranch string) error {
 // Override CreateFile to use local git
 func (m *LocalGitManager) CreateFile(branch, path, message, content string) error {
 	fullPath := filepath.Join(m.repoPath, path)
-	dir := strings.LastIndex(fullPath, "/")
-	if dir != -1 {
-		if err := os.MkdirAll(fullPath[:dir], 0755); err != nil {
-			return err
-		}
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
 	}
 
 	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
