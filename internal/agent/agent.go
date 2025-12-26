@@ -173,6 +173,13 @@ func isIssueUnassigned(issue *gh.Issue) bool {
 	return len(issue.Assignees) == 0
 }
 
+// ArticleCandidate represents an unchecked article from a topic issue
+type ArticleCandidate struct {
+	ArticleName   string
+	TopicIssue    *gh.Issue
+	TopicIssueNum int
+}
+
 func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error {
 	if err := a.mergeReadyPRs(ctx); err != nil {
 		slog.Warn("Error checking/merging PRs", "error", err)
@@ -187,17 +194,17 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		log.Printf("Bot identity: %s", botUsername)
 	}
 
-	log.Println("Checking for research category issues...")
-	issues, err := a.gh.GetResearchRequests()
+	log.Println("Checking for research topic issues...")
+	topicIssues, err := a.gh.GetTopicIssues()
 	if err != nil {
-		return fmt.Errorf("failed to get issues: %w", err)
+		return fmt.Errorf("failed to get topic issues: %w", err)
 	}
 
-	log.Printf("Found %d research category issues", len(issues))
+	log.Printf("Found %d research topic issues", len(topicIssues))
 
 	// Cleanup: unassign from any old issues we're still assigned to
 	if botUsername != "" {
-		a.cleanupStaleAssignments(issues, botUsername)
+		a.cleanupStaleAssignments(topicIssues, botUsername)
 	}
 
 	openPRs, err := a.gh.ListOpenPRs()
@@ -225,11 +232,28 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		}
 	}
 
-	// Filter to issues without PRs AND without assignees (available for claiming)
-	var availableIssues []*gh.Issue
-	for _, issue := range issues {
-		if !issuesWithPRs[*issue.Number] && isIssueUnassigned(issue) {
-			availableIssues = append(availableIssues, issue)
+	// Collect all unchecked articles from topic issues
+	var availableArticles []ArticleCandidate
+	for _, issue := range topicIssues {
+		if issuesWithPRs[*issue.Number] {
+			continue // Skip issues that already have PRs
+		}
+		if !isIssueUnassigned(issue) {
+			continue // Skip issues that are already assigned
+		}
+
+		// Parse articles from issue body
+		body := issue.GetBody()
+		articles := github.ParseArticlesFromBody(body)
+
+		for _, article := range articles {
+			if !article.Completed {
+				availableArticles = append(availableArticles, ArticleCandidate{
+					ArticleName:   article.Name,
+					TopicIssue:    issue,
+					TopicIssueNum: *issue.Number,
+				})
+			}
 		}
 	}
 
@@ -240,19 +264,19 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		}
 	}
 
-	log.Printf("Status: Managed PRs: %d (Limit: %d), Available (unassigned) Issues: %d", len(managedPRs), maxConcurrent, len(availableIssues))
+	log.Printf("Status: Managed PRs: %d (Limit: %d), Available Articles: %d", len(managedPRs), maxConcurrent, len(availableArticles))
 
-	if len(managedPRs) < maxConcurrent && len(availableIssues) > 0 {
+	if len(managedPRs) < maxConcurrent && len(availableArticles) > 0 {
 		rand.Seed(time.Now().UnixNano())
 
-		// Shuffle available issues to avoid all instances trying the same one
-		rand.Shuffle(len(availableIssues), func(i, j int) {
-			availableIssues[i], availableIssues[j] = availableIssues[j], availableIssues[i]
+		// Shuffle available articles to avoid all instances trying the same one
+		rand.Shuffle(len(availableArticles), func(i, j int) {
+			availableArticles[i], availableArticles[j] = availableArticles[j], availableArticles[i]
 		})
 
-		// Try to claim an issue
-		for _, issue := range availableIssues {
-			issueNum := *issue.Number
+		// Try to claim an article's parent topic issue
+		for _, candidate := range availableArticles {
+			issueNum := candidate.TopicIssueNum
 
 			// If we have a bot username, try to claim with locking
 			if botUsername != "" {
@@ -262,20 +286,57 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 					continue
 				}
 				if !claimed {
-					// Another instance got it, try next issue
+					// Another instance got it, try next article
 					continue
 				}
 			}
 
-			// Successfully claimed (or no locking), process the issue
-			if stepByStep {
-				return a.processNewTopicStepByStep(ctx, issue, stepName)
+			// Successfully claimed (or no locking), process the article
+			log.Printf("Selected article '%s' from topic issue #%d: %s",
+				candidate.ArticleName, candidate.TopicIssueNum, candidate.TopicIssue.GetTitle())
+
+			// Create a synthetic issue with the article name as title for processNewTopic
+			syntheticIssue := &gh.Issue{
+				Number: gh.Int(candidate.TopicIssueNum),
+				Title:  gh.String(candidate.ArticleName),
 			}
-			return a.processNewTopic(ctx, issue)
+
+			var processErr error
+			if stepByStep {
+				processErr = a.processNewTopicStepByStep(ctx, syntheticIssue, stepName)
+			} else {
+				processErr = a.processNewTopic(ctx, syntheticIssue)
+			}
+
+			// After successful processing, check off the article in the topic issue
+			if processErr == nil {
+				log.Printf("Research complete, checking off article '%s' in issue #%d", candidate.ArticleName, candidate.TopicIssueNum)
+				// Re-fetch the issue to get the latest body (in case it was modified)
+				latestIssue, err := a.gh.GetIssue(candidate.TopicIssueNum)
+				if err != nil {
+					slog.Warn("Failed to re-fetch issue for checkbox update", "issue", candidate.TopicIssueNum, "error", err)
+				} else {
+					newBody := github.CheckArticleInBody(latestIssue.GetBody(), candidate.ArticleName)
+					if err := a.gh.UpdateIssueBody(candidate.TopicIssueNum, newBody); err != nil {
+						slog.Warn("Failed to update issue body with checked article", "issue", candidate.TopicIssueNum, "error", err)
+					} else {
+						log.Printf("Successfully checked off article '%s'", candidate.ArticleName)
+					}
+				}
+
+				// Unassign from the issue after completion
+				if botUsername != "" {
+					if err := a.gh.RemoveAssignees(candidate.TopicIssueNum, []string{botUsername}); err != nil {
+						slog.Warn("Failed to unassign after completion", "issue", candidate.TopicIssueNum, "error", err)
+					}
+				}
+			}
+
+			return processErr
 		}
 
 		// All claim attempts failed, no work available
-		log.Println("All available issues were claimed by other instances")
+		log.Println("All available articles were claimed by other instances")
 	}
 
 	if len(managedPRs) > 0 {
@@ -287,7 +348,7 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		return a.processExistingPR(ctx, pr)
 	}
 
-	log.Println("No work to do (no available issues for new topics, no managed PRs to update)")
+	log.Println("No work to do (no available articles in topic issues, no managed PRs to update)")
 	return nil
 }
 

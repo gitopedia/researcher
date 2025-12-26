@@ -18,11 +18,6 @@ import (
 )
 
 const (
-	LabelStatusDiscovery  = "research:status-discovery"
-	LabelStatusSummarized = "research:status-summarized"
-	LabelStatusDrafted    = "research:status-drafted"
-	LabelManualReview     = "research:manual-review"
-
 	StepDiscovery     = "discovery"
 	StepSummarization = "summarization"
 	StepDrafting      = "drafting"
@@ -66,7 +61,6 @@ func (a *Agent) saveState(state *ResearchState) error {
 
 // processNewTopicStepByStep handles the creation of a new research topic in stages.
 func (a *Agent) processNewTopicStepByStep(ctx context.Context, issue *gh.Issue, manualStep string) error {
-	issueNum := *issue.Number
 	title := *issue.Title
 	topic := cleanTopic(title)
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
@@ -95,15 +89,6 @@ func (a *Agent) processNewTopicStepByStep(ctx context.Context, issue *gh.Issue, 
 			stepToRun = StepFinalize
 		default:
 			log.Printf("All steps completed for %s", topic)
-			return nil
-		}
-	}
-
-	// Check if manual review is active and we are not forcing a manual step
-	if manualStep == "" {
-		hasReview, err := a.gh.HasLabel(issueNum, LabelManualReview)
-		if err == nil && hasReview {
-			log.Printf("Issue #%d is waiting for manual review. Skipping.", issueNum)
 			return nil
 		}
 	}
@@ -160,15 +145,11 @@ func (a *Agent) stepDiscovery(ctx context.Context, issue *gh.Issue, state *Resea
 	stepDir := fmt.Sprintf("%s/step-1-discovery", debugBasePath(slug))
 	a.saveDebugJSON(state.Branch, fmt.Sprintf("%s/results.json", stepDir), "Save discovery results", results)
 
-	comment := fmt.Sprintf("## Research Discovery: %s\n\nI found %d potential sources. I have saved them to the debug folder for your review:\n`%s` in branch `%s`.\n\nRemove the `%s` label to proceed with the first relevant source.", topic, len(results), stepDir, state.Branch, LabelManualReview)
+	comment := fmt.Sprintf("## Research Discovery: %s\n\nI found %d potential sources. I have saved them to the debug folder for your review:\n`%s` in branch `%s`.", topic, len(results), stepDir, state.Branch)
 	if !a.gh.IsLocal() {
 		if err := a.gh.CommentOnIssue(*issue.Number, comment); err != nil {
 			return err
 		}
-		if err := a.gh.AddLabel(*issue.Number, LabelStatusDiscovery); err != nil {
-			return err
-		}
-		return a.gh.AddLabel(*issue.Number, LabelManualReview)
 	}
 	log.Println(comment)
 	return nil
@@ -234,15 +215,11 @@ func (a *Agent) stepSummarization(ctx context.Context, issue *gh.Issue, state *R
 	stepDir := fmt.Sprintf("%s/step-2-summarization", debugBasePath(slug))
 	a.saveDebugText(branchName, fmt.Sprintf("%s/summary-1.md", stepDir), "Save source summary", sourceInfo.Summary)
 
-	comment := fmt.Sprintf("## Research Summarization\n\nI have summarized the source: [%s](%s).\n\nThe full summary is available in the debug folder:\n`%s` in branch `%s`.\n\nRemove `%s` to proceed to article generation.", sourceInfo.Title, sourceInfo.URL, stepDir, branchName, LabelManualReview)
+	comment := fmt.Sprintf("## Research Summarization\n\nI have summarized the source: [%s](%s).\n\nThe full summary is available in the debug folder:\n`%s` in branch `%s`.", sourceInfo.Title, sourceInfo.URL, stepDir, branchName)
 	if !a.gh.IsLocal() {
 		if err := a.gh.CommentOnIssue(*issue.Number, comment); err != nil {
 			return err
 		}
-		if err := a.gh.AddLabel(*issue.Number, LabelStatusSummarized); err != nil {
-			return err
-		}
-		return a.gh.AddLabel(*issue.Number, LabelManualReview)
 	}
 	log.Println(comment)
 	return nil
@@ -287,11 +264,9 @@ func (a *Agent) stepDrafting(ctx context.Context, issue *gh.Issue, state *Resear
 	stepDir := fmt.Sprintf("%s/step-3-drafting", debugBasePath(slug))
 	a.saveDebugText(branchName, fmt.Sprintf("%s/article-draft.md", stepDir), "Save drafted article", fullContent)
 
-	comment := fmt.Sprintf("## Research Drafting\n\nI have drafted the article. You can see it in branch `%s`. \n\nRemove `%s` to create the Pull Request.", branchName, LabelManualReview)
+	comment := fmt.Sprintf("## Research Drafting\n\nI have drafted the article. You can see it in branch `%s`.", branchName)
 	if !a.gh.IsLocal() {
 		_ = a.gh.CommentOnIssue(*issue.Number, comment)
-		_ = a.gh.AddLabel(*issue.Number, LabelStatusDrafted)
-		_ = a.gh.AddLabel(*issue.Number, LabelManualReview)
 	}
 	log.Println(comment)
 	return nil
@@ -313,12 +288,6 @@ func (a *Agent) stepFinalize(ctx context.Context, issue *gh.Issue, state *Resear
 	if err != nil {
 		return err
 	}
-
-	_ = a.gh.AddLabel(*issue.Number, "research:status-pr-created")
-	_ = a.gh.RemoveLabel(*issue.Number, LabelStatusDiscovery)
-	_ = a.gh.RemoveLabel(*issue.Number, LabelStatusSummarized)
-	_ = a.gh.RemoveLabel(*issue.Number, LabelStatusDrafted)
-	_ = a.gh.RemoveLabel(*issue.Number, LabelManualReview)
 
 	return a.gh.CommentOnIssue(*issue.Number, fmt.Sprintf("Successfully created PR #%d", pr.Number))
 }

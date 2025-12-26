@@ -79,9 +79,17 @@ func (m *MockGitHub) GetIssue(issueNumber int) (*gh.Issue, error) {
 }
 func (m *MockGitHub) AddAssignees(issueNumber int, assignees []string) error    { return nil }
 func (m *MockGitHub) RemoveAssignees(issueNumber int, assignees []string) error { return nil }
-func (m *MockGitHub) IsLocal() bool                                             { return false }
-func (m *MockGitHub) GetRepoPath() string                                       { return "" }
-func (m *MockGitHub) SetNoCommit(bool)                                          {}
+func (m *MockGitHub) GetTopicIssues() ([]*gh.Issue, error) {
+	// Return a topic issue with unchecked articles
+	title := "Quantum Mechanics"
+	number := 1
+	body := "# Quantum Mechanics\n\n## Articles\n- [ ] Test Article\n- [ ] Another Article"
+	return []*gh.Issue{{Title: &title, Number: &number, Body: &body}}, nil
+}
+func (m *MockGitHub) UpdateIssueBody(issueNumber int, body string) error { return nil }
+func (m *MockGitHub) IsLocal() bool                                      { return false }
+func (m *MockGitHub) GetRepoPath() string                                { return "" }
+func (m *MockGitHub) SetNoCommit(bool)                                   {}
 
 type MockSearch struct{}
 

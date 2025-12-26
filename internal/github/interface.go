@@ -61,6 +61,10 @@ type GitHubClient interface {
 	AddAssignees(issueNumber int, assignees []string) error
 	RemoveAssignees(issueNumber int, assignees []string) error
 
+	// Topic issue management (hierarchical research structure)
+	GetTopicIssues() ([]*github.Issue, error)
+	UpdateIssueBody(issueNumber int, body string) error
+
 	// Mode checks
 	IsLocal() bool
 }

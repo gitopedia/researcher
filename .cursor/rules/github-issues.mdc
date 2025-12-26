@@ -5,52 +5,161 @@ globs: ["**/*.go"]
 
 # GitHub Issues for Research
 
-The researcher monitors GitHub issues with the `research-request` label.
+The researcher uses a 5-level hierarchical issue structure to organize research:
 
-## Create a Research Request
+1. **Encyclopedia Root** - Single root issue linking to all domains
+2. **Domain** - Top-level domains (e.g., Science, Arts, History)
+3. **Category** - Areas within domains (e.g., Science > Physics)
+4. **Topic** - Specific subjects with article lists (e.g., Science > Physics > Quantum Mechanics)
+5. **Article** - Individual encyclopedia entries (checkboxes in topic issues)
+
+All levels are bidirectionally linked for easy navigation.
+
+## Issue Types
+
+Issues are classified using GitHub **Issue Types** (not labels):
+
+| Level | Issue Type | Color |
+|-------|------------|-------|
+| Root | Encyclopedia Index | Gray |
+| Domain | Research Domain | Orange |
+| Category | Research Category | Blue |
+| Topic | Research Topic | Purple |
+
+The researcher monitors issues with **Research Topic** type and picks unchecked articles.
+
+### Setting Issue Types via CLI
 
 ```bash
-# Create a single issue
+# Get issue node ID
+gh api graphql -f query='query { repository(owner: "gitopedia", name: "gitopedia") { issue(number: 123) { id } } }'
+
+# Apply issue type (use type ID from organization settings)
+gh api graphql -f query='mutation { updateIssue(input: {id: "ISSUE_NODE_ID", issueTypeId: "TYPE_ID"}) { issue { issueType { name } } } }'
+```
+
+### Filtering Issues by Type (GraphQL)
+
+Since issue types require GraphQL (not REST API labels), use queries like:
+
+```bash
+# Get all Research Topic issues
+gh api graphql -f query='query {
+  repository(owner: "gitopedia", name: "gitopedia") {
+    issues(first: 100, states: OPEN, filterBy: {issueType: "Research Topic"}) {
+      nodes { number title body }
+    }
+  }
+}'
+```
+
+## Hierarchy Example
+
+```
+Encyclopedia Root (#126) [Encyclopedia Index]
+└── Science (#127) [Research Domain]
+    ├── Science > Physics (#124) [Research Category]
+    │   ├── Science > Physics > Quantum Mechanics (#121) [Research Topic]
+    │   │   └── Articles: [ ] Quantum Mechanics, [ ] Wave Function, ...
+    │   └── Science > Physics > Thermodynamics (#122) [Research Topic]
+    │       └── Articles: [ ] Entropy, [ ] Heat Transfer, ...
+    └── Science > Geography (#125) [Research Category]
+        └── Science > Geography > Plate Tectonics (#123) [Research Topic]
+            └── Articles: [ ] Plate Tectonics, [ ] Continental Drift, ...
+```
+
+## Create Encyclopedia Root Issue
+
+There should be only one root issue with Encyclopedia Index type:
+
+```bash
 gh issue create --repo gitopedia/gitopedia \
-  --title "Topic Name" \
-  --body "Research request for an encyclopedia article." \
-  --label "research-request"
+  --title "Encyclopedia Root" \
+  --body "# Encyclopedia Root
 
-# Examples
-gh issue create --repo gitopedia/gitopedia --title "Quantum Computing" --label "research-request" --body "Research request"
-gh issue create --repo gitopedia/gitopedia --title "French Revolution" --label "research-request" --body "Research request"
+Master index of all research domains in Gitopedia.
+
+## Domains
+
+- [Science](https://github.com/gitopedia/gitopedia/issues/XXX)
+- [Arts](https://github.com/gitopedia/gitopedia/issues/XXX)"
 ```
 
-## List Open Requests
+Then set the issue type via GraphQL.
+
+## Create a Domain Issue
 
 ```bash
-gh issue list --repo gitopedia/gitopedia --label "research-request" --state open
+gh issue create --repo gitopedia/gitopedia \
+  --title "Science" \
+  --body "# Science
+
+Top-level domain for scientific research.
+
+**Parent:** [Encyclopedia Root](https://github.com/gitopedia/gitopedia/issues/126)
+
+## Categories
+
+- [Science > Physics](https://github.com/gitopedia/gitopedia/issues/XXX)
+- [Science > Geography](https://github.com/gitopedia/gitopedia/issues/XXX)"
 ```
 
-## Bulk Create Issues
+Then set the issue type to "Research Domain" via GraphQL.
+
+## Create a Category Issue
 
 ```bash
-# Create multiple topics
-$topics = @("Artificial Intelligence", "Black Holes", "Renaissance Art")
-foreach ($topic in $topics) {
-    gh issue create --repo gitopedia/gitopedia --title $topic --label "research-request" --body "Research request"
-}
+gh issue create --repo gitopedia/gitopedia \
+  --title "Science > Physics" \
+  --body "# Science > Physics
+
+Physics research topics under the Science domain.
+
+**Domain:** [Science](https://github.com/gitopedia/gitopedia/issues/127)
+
+## Topics
+
+- [Science > Physics > Quantum Mechanics](https://github.com/gitopedia/gitopedia/issues/XXX)"
 ```
+
+Then set the issue type to "Research Category" via GraphQL.
+
+## Create a Topic Issue
+
+Topic titles should include the full path: `Domain > Category > Topic`
+
+```bash
+gh issue create --repo gitopedia/gitopedia \
+  --title "Science > Physics > Quantum Mechanics" \
+  --body "# Quantum Mechanics
+
+Articles about quantum mechanics to research.
+
+**Category:** [Science > Physics](https://github.com/gitopedia/gitopedia/issues/124)
+
+## Articles
+
+- [ ] Quantum Mechanics
+- [ ] Schrödinger's Cat
+- [ ] Wave Function"
+```
+
+Then set the issue type to "Research Topic" via GraphQL.
 
 ## Issue Lifecycle
 
-1. **Created** with `research-request` label
-2. **Processing** - Researcher picks it up
-3. **PR Created** - Article draft in PR
-4. **Merged** - Article published
-5. **Closed** - Issue auto-closed when PR merges
+1. **Encyclopedia Root** - Single root issue created once
+2. **Domain Created** - Links to root, root updated to link back
+3. **Category Created** - Links to domain, domain updated to link back
+4. **Topic Created** - Links to category, category updated to link back
+5. **Article Selected** - Researcher picks an unchecked article
+6. **Research & PR** - Article created and PR opened
+7. **Article Checked** - Researcher marks `- [x] Article` when complete
 
-## Labels Used
+## How the Researcher Picks Articles
 
-| Label | Purpose |
-|-------|---------|
-| `research-request` | Request for new article |
-| `research:status-discovery` | Discovery step complete |
-| `research:status-summarized` | Summarization complete |
-| `research:status-drafted` | Draft ready |
-| `research:manual-review` | Waiting for human review |
+1. Uses GraphQL to fetch all issues with "Research Topic" issue type
+2. Parses task list checkboxes from each issue body
+3. Filters to unchecked articles (`- [ ] Article`)
+4. Randomly selects one article to research
+5. After completing research, updates issue body to mark the article as done (`- [x] Article`)

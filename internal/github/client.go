@@ -1235,3 +1235,212 @@ func (c *Client) RemoveAssignees(issueNumber int, assignees []string) error {
 func (c *Client) IsLocal() bool {
 	return false
 }
+
+// GetTopicIssues returns all open issues with the "Research Topic" issue type using GraphQL
+func (c *Client) GetTopicIssues() ([]*github.Issue, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	// GraphQL query to get issues by issue type
+	query := `query($owner: String!, $repo: String!, $cursor: String) {
+		repository(owner: $owner, name: $repo) {
+			issues(first: 100, after: $cursor, states: OPEN, filterBy: {issueType: "Research Topic"}) {
+				pageInfo {
+					hasNextPage
+					endCursor
+				}
+				nodes {
+					number
+					title
+					body
+					assignees(first: 10) {
+						nodes {
+							login
+						}
+					}
+				}
+			}
+		}
+	}`
+
+	type assigneeNode struct {
+		Login string `json:"login"`
+	}
+	type issueNode struct {
+		Number    int    `json:"number"`
+		Title     string `json:"title"`
+		Body      string `json:"body"`
+		Assignees struct {
+			Nodes []assigneeNode `json:"nodes"`
+		} `json:"assignees"`
+	}
+	type queryResponse struct {
+		Data struct {
+			Repository struct {
+				Issues struct {
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
+					Nodes []issueNode `json:"nodes"`
+				} `json:"issues"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+
+	var allIssues []*github.Issue
+	var cursor *string
+
+	for {
+		variables := map[string]interface{}{
+			"owner":  c.owner,
+			"repo":   c.repo,
+			"cursor": cursor,
+		}
+
+		reqBody := struct {
+			Query     string                 `json:"query"`
+			Variables map[string]interface{} `json:"variables"`
+		}{
+			Query:     query,
+			Variables: variables,
+		}
+
+		jsonBody, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal GraphQL request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(c.ctx, "POST", "https://api.github.com/graphql", strings.NewReader(string(jsonBody)))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create GraphQL request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.client.Client().Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute GraphQL request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read GraphQL response: %w", err)
+		}
+
+		var result queryResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse GraphQL response: %w", err)
+		}
+
+		if len(result.Errors) > 0 {
+			return nil, fmt.Errorf("GraphQL error: %s", result.Errors[0].Message)
+		}
+
+		// Convert to github.Issue format
+		for _, node := range result.Data.Repository.Issues.Nodes {
+			num := node.Number
+			title := node.Title
+			body := node.Body
+
+			var assignees []*github.User
+			for _, a := range node.Assignees.Nodes {
+				login := a.Login
+				assignees = append(assignees, &github.User{Login: &login})
+			}
+
+			allIssues = append(allIssues, &github.Issue{
+				Number:    &num,
+				Title:     &title,
+				Body:      &body,
+				Assignees: assignees,
+			})
+		}
+
+		if !result.Data.Repository.Issues.PageInfo.HasNextPage {
+			break
+		}
+		cursor = &result.Data.Repository.Issues.PageInfo.EndCursor
+	}
+
+	return allIssues, nil
+}
+
+// UpdateIssueBody updates the body content of an issue
+func (c *Client) UpdateIssueBody(issueNumber int, body string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	req := &github.IssueRequest{
+		Body: &body,
+	}
+	_, _, err := c.client.Issues.Edit(c.ctx, c.owner, c.repo, issueNumber, req)
+	if err != nil {
+		return fmt.Errorf("failed to update issue #%d body: %w", issueNumber, err)
+	}
+	return nil
+}
+
+// ResearchArticle represents an article from a topic issue's task list
+type ResearchArticle struct {
+	Name      string
+	Completed bool
+}
+
+// ParseArticlesFromBody extracts article entries from a topic issue body's task list
+// It looks for markdown checkboxes: "- [ ] Article Name" (unchecked) or "- [x] Article Name" (checked)
+func ParseArticlesFromBody(body string) []ResearchArticle {
+	var articles []ResearchArticle
+	lines := strings.Split(body, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Match unchecked: "- [ ] Article Name"
+		if strings.HasPrefix(line, "- [ ] ") {
+			articleName := strings.TrimPrefix(line, "- [ ] ")
+			articleName = strings.TrimSpace(articleName)
+			if articleName != "" {
+				articles = append(articles, ResearchArticle{Name: articleName, Completed: false})
+			}
+			continue
+		}
+
+		// Match checked: "- [x] Article Name" or "- [X] Article Name"
+		if strings.HasPrefix(line, "- [x] ") || strings.HasPrefix(line, "- [X] ") {
+			articleName := line[6:] // Remove "- [x] " prefix
+			articleName = strings.TrimSpace(articleName)
+			if articleName != "" {
+				articles = append(articles, ResearchArticle{Name: articleName, Completed: true})
+			}
+		}
+	}
+
+	return articles
+}
+
+// CheckArticleInBody returns the issue body with the specified article marked as completed
+// It replaces "- [ ] Article Name" with "- [x] Article Name"
+func CheckArticleInBody(body, articleName string) string {
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+		// Match the unchecked article
+		if strings.HasPrefix(trimmedLine, "- [ ] ") {
+			currentArticle := strings.TrimPrefix(trimmedLine, "- [ ] ")
+			currentArticle = strings.TrimSpace(currentArticle)
+			if currentArticle == articleName {
+				// Preserve original indentation
+				indent := line[:len(line)-len(trimmedLine)]
+				lines[i] = indent + "- [x] " + articleName
+				break
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}

@@ -24,20 +24,13 @@ type SourceInfo struct {
 }
 
 const (
-	LabelStatusExpansionDiscovery  = "research:status-expansion-discovery"
-	LabelStatusExpansionIntegrated = "research:status-expansion-integrated"
-
 	StepExpansionDiscovery   = "expansion-discovery"
 	StepExpansionIntegration = "expansion-integration"
 )
 
 // processExistingPRStepByStep builds on an existing draft PR in stages
 func (a *Agent) processExistingPRStepByStep(ctx context.Context, pr *github.PRInfo, manualStep string) error {
-	prNum := pr.Number
-	topic := pr.Title
-	if strings.HasPrefix(topic, "Research: ") {
-		topic = strings.TrimPrefix(topic, "Research: ")
-	}
+	topic := strings.TrimPrefix(pr.Title, "Research: ")
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
 
 	state, err := a.loadState(slug)
@@ -64,16 +57,7 @@ func (a *Agent) processExistingPRStepByStep(ctx context.Context, pr *github.PRIn
 		}
 	}
 
-	// Check if manual review is active and we are not forcing a manual step
-	if manualStep == "" {
-		hasReview, err := a.gh.HasLabel(prNum, LabelManualReview)
-		if err == nil && hasReview {
-			log.Printf("PR #%d is waiting for manual review. Skipping.", prNum)
-			return nil
-		}
-	}
-
-	log.Printf("Running expansion step '%s' for PR #%d (%s)", stepToRun, prNum, topic)
+	log.Printf("Running expansion step '%s' for PR #%d (%s)", stepToRun, pr.Number, topic)
 
 	var runErr error
 	switch stepToRun {
@@ -114,13 +98,11 @@ func (a *Agent) stepExpansionDiscovery(ctx context.Context, pr *github.PRInfo, s
 	stepDir := fmt.Sprintf("%s/step-expansion-discovery", debugBasePath(slug))
 	a.saveDebugJSON(branchName, fmt.Sprintf("%s/results.json", stepDir), "Save expansion discovery results", results)
 
-	comment := fmt.Sprintf("## Expansion Discovery: %s\n\nI found %d potential sources to expand this article. I have saved them to the debug folder for your review:\n`%s` in branch `%s`.\n\nRemove `%s` to proceed with integration.", topic, len(results), stepDir, branchName, LabelManualReview)
+	comment := fmt.Sprintf("## Expansion Discovery: %s\n\nI found %d potential sources to expand this article. I have saved them to the debug folder for your review:\n`%s` in branch `%s`.", topic, len(results), stepDir, branchName)
 	if !a.gh.IsLocal() {
 		if err := a.gh.CommentOnPR(pr.Number, comment); err != nil {
 			return err
 		}
-		_ = a.gh.AddLabel(pr.Number, LabelStatusExpansionDiscovery)
-		return a.gh.AddLabel(pr.Number, LabelManualReview)
 	}
 	log.Println(comment)
 	return nil
@@ -200,7 +182,6 @@ func (a *Agent) stepExpansionIntegration(ctx context.Context, pr *github.PRInfo,
 		_ = a.saveSourceSummary(ctx, srcInfo, topic, slug, branchName, authMgr, false)
 
 		if !a.gh.IsLocal() {
-			_ = a.gh.RemoveLabel(pr.Number, LabelStatusExpansionDiscovery)
 			comment := fmt.Sprintf("## Expansion Integrated\n\nIntegrated content from [%s](%s).\n\nThe expansion summary used is available at:\n`%s` in branch `%s`.", r.Title, r.Href, stepDir, branchName)
 			_ = a.gh.CommentOnPR(pr.Number, comment)
 		}
