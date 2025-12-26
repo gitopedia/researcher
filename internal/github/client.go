@@ -1184,6 +1184,54 @@ func (c *Client) HasLabel(issueNumber int, label string) (bool, error) {
 	return false, nil
 }
 
+// GetAuthenticatedUsername returns the username of the authenticated user/bot
+func (c *Client) GetAuthenticatedUsername() (string, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return "", err
+	}
+	user, _, err := c.client.Users.Get(c.ctx, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to get authenticated user: %w", err)
+	}
+	return user.GetLogin(), nil
+}
+
+// GetIssue fetches a single issue by number
+func (c *Client) GetIssue(issueNumber int) (*github.Issue, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return nil, err
+	}
+	issue, _, err := c.client.Issues.Get(c.ctx, c.owner, c.repo, issueNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get issue #%d: %w", issueNumber, err)
+	}
+	return issue, nil
+}
+
+// AddAssignees adds assignees to an issue
+func (c *Client) AddAssignees(issueNumber int, assignees []string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return err
+	}
+	_, _, err := c.client.Issues.AddAssignees(c.ctx, c.owner, c.repo, issueNumber, assignees)
+	if err != nil {
+		return fmt.Errorf("failed to add assignees to issue #%d: %w", issueNumber, err)
+	}
+	return nil
+}
+
+// RemoveAssignees removes assignees from an issue
+func (c *Client) RemoveAssignees(issueNumber int, assignees []string) error {
+	if err := c.ensureValidToken(); err != nil {
+		return err
+	}
+	_, _, err := c.client.Issues.RemoveAssignees(c.ctx, c.owner, c.repo, issueNumber, assignees)
+	if err != nil {
+		return fmt.Errorf("failed to remove assignees from issue #%d: %w", issueNumber, err)
+	}
+	return nil
+}
+
 func (c *Client) IsLocal() bool {
 	return false
 }

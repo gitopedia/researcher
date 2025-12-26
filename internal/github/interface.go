@@ -55,6 +55,12 @@ type GitHubClient interface {
 	RemoveLabel(issueNumber int, label string) error
 	HasLabel(issueNumber int, label string) (bool, error)
 
+	// Issue assignment management (for distributed locking)
+	GetAuthenticatedUsername() (string, error)
+	GetIssue(issueNumber int) (*github.Issue, error)
+	AddAssignees(issueNumber int, assignees []string) error
+	RemoveAssignees(issueNumber int, assignees []string) error
+
 	// Mode checks
 	IsLocal() bool
 }

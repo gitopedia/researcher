@@ -112,9 +112,79 @@ func (a *Agent) MergeOnly(ctx context.Context) error {
 	return a.mergeReadyPRs(ctx)
 }
 
+// cleanupStaleAssignments removes this bot from any issues it's still assigned to
+// from previous interrupted runs
+func (a *Agent) cleanupStaleAssignments(issues []*gh.Issue, botUsername string) {
+	for _, issue := range issues {
+		for _, assignee := range issue.Assignees {
+			if assignee.GetLogin() == botUsername {
+				log.Printf("Cleaning up stale assignment on issue #%d: %s", *issue.Number, *issue.Title)
+				if err := a.gh.RemoveAssignees(*issue.Number, []string{botUsername}); err != nil {
+					slog.Warn("Failed to remove stale assignment", "issue", *issue.Number, "error", err)
+				}
+				break
+			}
+		}
+	}
+}
+
+// claimIssue attempts to claim an issue for processing using assignment-based locking.
+// Returns true if this instance successfully claimed the issue, false if another instance claimed it.
+func (a *Agent) claimIssue(issueNumber int, botUsername string) (bool, error) {
+	// Assign ourselves to the issue
+	if err := a.gh.AddAssignees(issueNumber, []string{botUsername}); err != nil {
+		return false, fmt.Errorf("failed to assign issue #%d: %w", issueNumber, err)
+	}
+
+	// Wait a moment to allow race conditions to manifest
+	claimWait := 2 * time.Second
+	if v := os.Getenv("CLAIM_WAIT_SECONDS"); v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+			claimWait = time.Duration(i) * time.Second
+		}
+	}
+	log.Printf("Waiting %v to verify sole ownership of issue #%d...", claimWait, issueNumber)
+	time.Sleep(claimWait)
+
+	// Re-fetch the issue to check assignees
+	issue, err := a.gh.GetIssue(issueNumber)
+	if err != nil {
+		// If we can't verify, unassign and fail
+		_ = a.gh.RemoveAssignees(issueNumber, []string{botUsername})
+		return false, fmt.Errorf("failed to verify assignment on issue #%d: %w", issueNumber, err)
+	}
+
+	// Check if we're the sole assignee
+	if len(issue.Assignees) == 1 && issue.Assignees[0].GetLogin() == botUsername {
+		log.Printf("Successfully claimed issue #%d", issueNumber)
+		return true, nil
+	}
+
+	// Someone else also assigned themselves - back off
+	log.Printf("Issue #%d has multiple assignees or different assignee, backing off", issueNumber)
+	if err := a.gh.RemoveAssignees(issueNumber, []string{botUsername}); err != nil {
+		slog.Warn("Failed to unassign after claim conflict", "issue", issueNumber, "error", err)
+	}
+	return false, nil
+}
+
+// isIssueUnassigned checks if an issue has no assignees
+func isIssueUnassigned(issue *gh.Issue) bool {
+	return len(issue.Assignees) == 0
+}
+
 func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error {
 	if err := a.mergeReadyPRs(ctx); err != nil {
 		slog.Warn("Error checking/merging PRs", "error", err)
+	}
+
+	// Get bot username for assignment operations
+	botUsername, err := a.gh.GetAuthenticatedUsername()
+	if err != nil {
+		slog.Warn("Failed to get authenticated username, skipping assignment locking", "error", err)
+		botUsername = "" // Continue without locking
+	} else {
+		log.Printf("Bot identity: %s", botUsername)
 	}
 
 	log.Println("Checking for research category issues...")
@@ -124,6 +194,11 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 	}
 
 	log.Printf("Found %d research category issues", len(issues))
+
+	// Cleanup: unassign from any old issues we're still assigned to
+	if botUsername != "" {
+		a.cleanupStaleAssignments(issues, botUsername)
+	}
 
 	openPRs, err := a.gh.ListOpenPRs()
 	if err != nil {
@@ -150,9 +225,10 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		}
 	}
 
+	// Filter to issues without PRs AND without assignees (available for claiming)
 	var availableIssues []*gh.Issue
 	for _, issue := range issues {
-		if !issuesWithPRs[*issue.Number] {
+		if !issuesWithPRs[*issue.Number] && isIssueUnassigned(issue) {
 			availableIssues = append(availableIssues, issue)
 		}
 	}
@@ -164,15 +240,42 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		}
 	}
 
-	log.Printf("Status: Managed PRs: %d (Limit: %d), Available Issues: %d", len(managedPRs), maxConcurrent, len(availableIssues))
+	log.Printf("Status: Managed PRs: %d (Limit: %d), Available (unassigned) Issues: %d", len(managedPRs), maxConcurrent, len(availableIssues))
 
 	if len(managedPRs) < maxConcurrent && len(availableIssues) > 0 {
 		rand.Seed(time.Now().UnixNano())
-		issue := availableIssues[rand.Intn(len(availableIssues))]
-		if stepByStep {
-			return a.processNewTopicStepByStep(ctx, issue, stepName)
+
+		// Shuffle available issues to avoid all instances trying the same one
+		rand.Shuffle(len(availableIssues), func(i, j int) {
+			availableIssues[i], availableIssues[j] = availableIssues[j], availableIssues[i]
+		})
+
+		// Try to claim an issue
+		for _, issue := range availableIssues {
+			issueNum := *issue.Number
+
+			// If we have a bot username, try to claim with locking
+			if botUsername != "" {
+				claimed, err := a.claimIssue(issueNum, botUsername)
+				if err != nil {
+					slog.Warn("Error claiming issue", "issue", issueNum, "error", err)
+					continue
+				}
+				if !claimed {
+					// Another instance got it, try next issue
+					continue
+				}
+			}
+
+			// Successfully claimed (or no locking), process the issue
+			if stepByStep {
+				return a.processNewTopicStepByStep(ctx, issue, stepName)
+			}
+			return a.processNewTopic(ctx, issue)
 		}
-		return a.processNewTopic(ctx, issue)
+
+		// All claim attempts failed, no work available
+		log.Println("All available issues were claimed by other instances")
 	}
 
 	if len(managedPRs) > 0 {

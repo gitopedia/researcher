@@ -61,11 +61,27 @@ func (m *MockGitHub) ListFilesInBranch(branch, path string) ([]string, error) {
 func (m *MockGitHub) DeleteFile(branch, path, message, sha string) error { return nil }
 func (m *MockGitHub) MarkPRReady(prNumber int) error                     { return nil }
 
-func (m *MockGitHub) AddLabel(issueNumber int, label string) error { return nil }
+func (m *MockGitHub) AddLabel(issueNumber int, label string) error    { return nil }
 func (m *MockGitHub) RemoveLabel(issueNumber int, label string) error { return nil }
-func (m *MockGitHub) HasLabel(issueNumber int, label string) (bool, error) { return false, nil }
-func (m *MockGitHub) IsLocal() bool { return false }
-func (m *MockGitHub) GetRepoPath() string { return "" }
+func (m *MockGitHub) HasLabel(issueNumber int, label string) (bool, error) {
+	return false, nil
+}
+func (m *MockGitHub) GetAuthenticatedUsername() (string, error) { return "test-bot", nil }
+func (m *MockGitHub) GetIssue(issueNumber int) (*gh.Issue, error) {
+	title := "Test Issue"
+	botLogin := "test-bot"
+	// Simulate successful claim - return issue with bot as sole assignee
+	return &gh.Issue{
+		Title:     &title,
+		Number:    &issueNumber,
+		Assignees: []*gh.User{{Login: &botLogin}},
+	}, nil
+}
+func (m *MockGitHub) AddAssignees(issueNumber int, assignees []string) error    { return nil }
+func (m *MockGitHub) RemoveAssignees(issueNumber int, assignees []string) error { return nil }
+func (m *MockGitHub) IsLocal() bool                                             { return false }
+func (m *MockGitHub) GetRepoPath() string                                       { return "" }
+func (m *MockGitHub) SetNoCommit(bool)                                          {}
 
 type MockSearch struct{}
 
