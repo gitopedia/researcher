@@ -69,15 +69,9 @@ func NewAgent(ctx context.Context, repoPath string) (*Agent, error) {
 		return nil, err
 	}
 
-	var repoMgr repository.RepoManager
-	if repoPath != "" {
-		repoMgr, err = repository.NewLocalGitManager(ctx, ghClient, repoPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create local git manager: %w", err)
-		}
-	} else {
-		// Use a simple wrapper or cast if GitHubClient is compatible
-		repoMgr = &remoteRepoManager{ghClient}
+	repoMgr, err := repository.NewLocalGitManager(ctx, ghClient, repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create local git manager: %w", err)
 	}
 
 	llmClient, err := llm.NewClient()
@@ -91,14 +85,6 @@ func NewAgent(ctx context.Context, repoPath string) (*Agent, error) {
 	}, nil
 }
 
-type remoteRepoManager struct {
-	github.GitHubClient
-}
-
-func (r *remoteRepoManager) GetRepoPath() string { return "" }
-func (r *remoteRepoManager) IsLocal() bool      { return false }
-func (r *remoteRepoManager) SetNoCommit(bool)   {}
-
 func NewAgentWithDeps(gh repository.RepoManager, s search.Searcher, l llm.Generator) *Agent {
 	return &Agent{
 		gh:     gh,
@@ -110,22 +96,6 @@ func NewAgentWithDeps(gh repository.RepoManager, s search.Searcher, l llm.Genera
 func (a *Agent) MergeOnly(ctx context.Context) error {
 	log.Println("Running merge-only mode...")
 	return a.mergeReadyPRs(ctx)
-}
-
-// cleanupStaleAssignments removes this bot from any issues it's still assigned to
-// from previous interrupted runs
-func (a *Agent) cleanupStaleAssignments(issues []*gh.Issue, botUsername string) {
-	for _, issue := range issues {
-		for _, assignee := range issue.Assignees {
-			if assignee.GetLogin() == botUsername {
-				log.Printf("Cleaning up stale assignment on issue #%d: %s", *issue.Number, *issue.Title)
-				if err := a.gh.RemoveAssignees(*issue.Number, []string{botUsername}); err != nil {
-					slog.Warn("Failed to remove stale assignment", "issue", *issue.Number, "error", err)
-				}
-				break
-			}
-		}
-	}
 }
 
 // claimIssue attempts to claim an issue for processing using assignment-based locking.
@@ -181,10 +151,6 @@ type ArticleCandidate struct {
 }
 
 func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error {
-	if err := a.mergeReadyPRs(ctx); err != nil {
-		slog.Warn("Error checking/merging PRs", "error", err)
-	}
-
 	// Get bot username for assignment operations
 	botUsername, err := a.gh.GetAuthenticatedUsername()
 	if err != nil {
@@ -194,6 +160,19 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		log.Printf("Bot identity: %s", botUsername)
 	}
 
+	// STEP 1: Cleanup - start with a clean slate
+	log.Println("Performing cleanup before starting work...")
+	if err := a.performCleanup(botUsername); err != nil {
+		slog.Warn("Cleanup encountered issues", "error", err)
+		// Continue anyway - cleanup is best-effort
+	}
+
+	// STEP 2: Check and merge any ready PRs
+	if err := a.mergeReadyPRs(ctx); err != nil {
+		slog.Warn("Error checking/merging PRs", "error", err)
+	}
+
+	// STEP 3: Fetch topic issues and find available work
 	log.Println("Checking for research topic issues...")
 	topicIssues, err := a.gh.GetTopicIssues()
 	if err != nil {
@@ -201,11 +180,6 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 	}
 
 	log.Printf("Found %d research topic issues", len(topicIssues))
-
-	// Cleanup: unassign from any old issues we're still assigned to
-	if botUsername != "" {
-		a.cleanupStaleAssignments(topicIssues, botUsername)
-	}
 
 	openPRs, err := a.gh.ListOpenPRs()
 	if err != nil {
@@ -232,7 +206,7 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		}
 	}
 
-	// Collect all unchecked articles from topic issues
+	// Collect all unchecked articles from UNASSIGNED topic issues only
 	var availableArticles []ArticleCandidate
 	for _, issue := range topicIssues {
 		if issuesWithPRs[*issue.Number] {
@@ -266,77 +240,79 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 
 	log.Printf("Status: Managed PRs: %d (Limit: %d), Available Articles: %d", len(managedPRs), maxConcurrent, len(availableArticles))
 
+	// STEP 4: Try to claim and process a random article
 	if len(managedPRs) < maxConcurrent && len(availableArticles) > 0 {
 		rand.Seed(time.Now().UnixNano())
 
-		// Shuffle available articles to avoid all instances trying the same one
+		// Shuffle available articles to pick a random one
 		rand.Shuffle(len(availableArticles), func(i, j int) {
 			availableArticles[i], availableArticles[j] = availableArticles[j], availableArticles[i]
 		})
 
-		// Try to claim an article's parent topic issue
-		for _, candidate := range availableArticles {
-			issueNum := candidate.TopicIssueNum
+		// Pick the first (now randomized) article and try to claim it
+		candidate := availableArticles[0]
+		issueNum := candidate.TopicIssueNum
 
-			// If we have a bot username, try to claim with locking
-			if botUsername != "" {
-				claimed, err := a.claimIssue(issueNum, botUsername)
-				if err != nil {
-					slog.Warn("Error claiming issue", "issue", issueNum, "error", err)
-					continue
-				}
-				if !claimed {
-					// Another instance got it, try next article
-					continue
-				}
+		// If we have a bot username, try to claim with locking
+		if botUsername != "" {
+			claimed, err := a.claimIssue(issueNum, botUsername)
+			if err != nil {
+				slog.Warn("Error claiming issue", "issue", issueNum, "error", err)
+				// Cleanup and signal caller to retry
+				log.Println("Claim failed, performing cleanup for retry...")
+				_ = a.performCleanup(botUsername)
+				return fmt.Errorf("failed to claim issue #%d: %w", issueNum, err)
 			}
-
-			// Successfully claimed (or no locking), process the article
-			log.Printf("Selected article '%s' from topic issue #%d: %s",
-				candidate.ArticleName, candidate.TopicIssueNum, candidate.TopicIssue.GetTitle())
-
-			// Create a synthetic issue with the article name as title for processNewTopic
-			syntheticIssue := &gh.Issue{
-				Number: gh.Int(candidate.TopicIssueNum),
-				Title:  gh.String(candidate.ArticleName),
+			if !claimed {
+				// Another instance got it - cleanup and signal caller to retry
+				log.Println("Issue was claimed by another instance, performing cleanup for retry...")
+				_ = a.performCleanup(botUsername)
+				return fmt.Errorf("issue #%d was claimed by another instance", issueNum)
 			}
-
-			var processErr error
-			if stepByStep {
-				processErr = a.processNewTopicStepByStep(ctx, syntheticIssue, stepName)
-			} else {
-				processErr = a.processNewTopic(ctx, syntheticIssue)
-			}
-
-			// After successful processing, check off the article in the topic issue
-			if processErr == nil {
-				log.Printf("Research complete, checking off article '%s' in issue #%d", candidate.ArticleName, candidate.TopicIssueNum)
-				// Re-fetch the issue to get the latest body (in case it was modified)
-				latestIssue, err := a.gh.GetIssue(candidate.TopicIssueNum)
-				if err != nil {
-					slog.Warn("Failed to re-fetch issue for checkbox update", "issue", candidate.TopicIssueNum, "error", err)
-				} else {
-					newBody := github.CheckArticleInBody(latestIssue.GetBody(), candidate.ArticleName)
-					if err := a.gh.UpdateIssueBody(candidate.TopicIssueNum, newBody); err != nil {
-						slog.Warn("Failed to update issue body with checked article", "issue", candidate.TopicIssueNum, "error", err)
-					} else {
-						log.Printf("Successfully checked off article '%s'", candidate.ArticleName)
-					}
-				}
-
-				// Unassign from the issue after completion
-				if botUsername != "" {
-					if err := a.gh.RemoveAssignees(candidate.TopicIssueNum, []string{botUsername}); err != nil {
-						slog.Warn("Failed to unassign after completion", "issue", candidate.TopicIssueNum, "error", err)
-					}
-				}
-			}
-
-			return processErr
 		}
 
-		// All claim attempts failed, no work available
-		log.Println("All available articles were claimed by other instances")
+		// Successfully claimed, process the article
+		log.Printf("Selected article '%s' from topic issue #%d: %s",
+			candidate.ArticleName, candidate.TopicIssueNum, candidate.TopicIssue.GetTitle())
+
+		// Create a synthetic issue with the article name as title for processNewTopic
+		syntheticIssue := &gh.Issue{
+			Number: gh.Int(candidate.TopicIssueNum),
+			Title:  gh.String(candidate.ArticleName),
+		}
+
+		var processErr error
+		if stepByStep {
+			processErr = a.processNewTopicStepByStep(ctx, syntheticIssue, stepName)
+		} else {
+			processErr = a.processNewTopic(ctx, syntheticIssue)
+		}
+
+		// After successful processing, check off the article in the topic issue
+		if processErr == nil {
+			log.Printf("Research complete, checking off article '%s' in issue #%d", candidate.ArticleName, candidate.TopicIssueNum)
+			// Re-fetch the issue to get the latest body (in case it was modified)
+			latestIssue, err := a.gh.GetIssue(candidate.TopicIssueNum)
+			if err != nil {
+				slog.Warn("Failed to re-fetch issue for checkbox update", "issue", candidate.TopicIssueNum, "error", err)
+			} else {
+				newBody := github.CheckArticleInBody(latestIssue.GetBody(), candidate.ArticleName)
+				if err := a.gh.UpdateIssueBody(candidate.TopicIssueNum, newBody); err != nil {
+					slog.Warn("Failed to update issue body with checked article", "issue", candidate.TopicIssueNum, "error", err)
+				} else {
+					log.Printf("Successfully checked off article '%s'", candidate.ArticleName)
+				}
+			}
+
+			// Unassign from the issue after completion
+			if botUsername != "" {
+				if err := a.gh.RemoveAssignees(candidate.TopicIssueNum, []string{botUsername}); err != nil {
+					slog.Warn("Failed to unassign after completion", "issue", candidate.TopicIssueNum, "error", err)
+				}
+			}
+		}
+
+		return processErr
 	}
 
 	if len(managedPRs) > 0 {
@@ -352,11 +328,52 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 	return nil
 }
 
-func (a *Agent) mergeReadyPRs(ctx context.Context) error {
-	if a.gh.IsLocal() {
-		// Skip merge in local mode
-		return nil
+// performCleanup resets the local repository to main and unassigns all issues from this bot.
+// This ensures each run starts with a clean slate.
+func (a *Agent) performCleanup(botUsername string) error {
+	var errs []string
+
+	// 1. Reset local branch to main
+	currentBranch, err := a.gh.GetCurrentBranch()
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("failed to get current branch: %v", err))
+	} else if currentBranch != "main" {
+		log.Printf("Resetting from branch '%s' to main...", currentBranch)
+		if err := a.gh.ResetToMain(); err != nil {
+			errs = append(errs, fmt.Sprintf("failed to reset to main: %v", err))
+		} else {
+			log.Println("Successfully reset to main branch")
+		}
 	}
+
+	// 2. Unassign this bot from any issues it's currently assigned to
+	if botUsername != "" {
+		log.Println("Unassigning bot from any previously assigned issues...")
+		issues, err := a.gh.GetTopicIssues()
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("failed to get issues for cleanup: %v", err))
+		} else {
+			for _, issue := range issues {
+				for _, assignee := range issue.Assignees {
+					if assignee.GetLogin() == botUsername {
+						log.Printf("Unassigning from issue #%d: %s", *issue.Number, *issue.Title)
+						if err := a.gh.RemoveAssignees(*issue.Number, []string{botUsername}); err != nil {
+							errs = append(errs, fmt.Sprintf("failed to unassign from issue #%d: %v", *issue.Number, err))
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("cleanup errors: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 	log.Println("Checking for PRs ready to merge...")
 	openPRs, err := a.gh.ListOpenPRs()
 	if err != nil {

@@ -146,10 +146,8 @@ func (a *Agent) stepDiscovery(ctx context.Context, issue *gh.Issue, state *Resea
 	a.saveDebugJSON(state.Branch, fmt.Sprintf("%s/results.json", stepDir), "Save discovery results", results)
 
 	comment := fmt.Sprintf("## Research Discovery: %s\n\nI found %d potential sources. I have saved them to the debug folder for your review:\n`%s` in branch `%s`.", topic, len(results), stepDir, state.Branch)
-	if !a.gh.IsLocal() {
-		if err := a.gh.CommentOnIssue(*issue.Number, comment); err != nil {
-			return err
-		}
+	if err := a.gh.CommentOnIssue(*issue.Number, comment); err != nil {
+		return err
 	}
 	log.Println(comment)
 	return nil
@@ -216,10 +214,8 @@ func (a *Agent) stepSummarization(ctx context.Context, issue *gh.Issue, state *R
 	a.saveDebugText(branchName, fmt.Sprintf("%s/summary-1.md", stepDir), "Save source summary", sourceInfo.Summary)
 
 	comment := fmt.Sprintf("## Research Summarization\n\nI have summarized the source: [%s](%s).\n\nThe full summary is available in the debug folder:\n`%s` in branch `%s`.", sourceInfo.Title, sourceInfo.URL, stepDir, branchName)
-	if !a.gh.IsLocal() {
-		if err := a.gh.CommentOnIssue(*issue.Number, comment); err != nil {
-			return err
-		}
+	if err := a.gh.CommentOnIssue(*issue.Number, comment); err != nil {
+		return err
 	}
 	log.Println(comment)
 	return nil
@@ -265,9 +261,7 @@ func (a *Agent) stepDrafting(ctx context.Context, issue *gh.Issue, state *Resear
 	a.saveDebugText(branchName, fmt.Sprintf("%s/article-draft.md", stepDir), "Save drafted article", fullContent)
 
 	comment := fmt.Sprintf("## Research Drafting\n\nI have drafted the article. You can see it in branch `%s`.", branchName)
-	if !a.gh.IsLocal() {
-		_ = a.gh.CommentOnIssue(*issue.Number, comment)
-	}
+	_ = a.gh.CommentOnIssue(*issue.Number, comment)
 	log.Println(comment)
 	return nil
 }
@@ -277,19 +271,9 @@ func (a *Agent) stepFinalize(ctx context.Context, issue *gh.Issue, state *Resear
 	branchName := state.Branch
 	log.Printf("[Step: Finalize] Creating PR for '%s'...", topic)
 
-	if a.gh.IsLocal() {
-		log.Printf("In local mode, cannot create GitHub PR. Please push branch '%s' manually.", branchName)
-		return nil
-	}
-
-	prTitle := fmt.Sprintf("Research: %s", topic)
-	prBody := fmt.Sprintf("Initiated research on **%s**.\n\nCloses #%d", topic, *issue.Number)
-	pr, err := a.gh.CreatePullRequest(prTitle, prBody, branchName, "main")
-	if err != nil {
-		return err
-	}
-
-	return a.gh.CommentOnIssue(*issue.Number, fmt.Sprintf("Successfully created PR #%d", pr.Number))
+	// TODO: Implement push and PR creation
+	log.Printf("Research complete. Push branch '%s' and create PR manually.", branchName)
+	return nil
 }
 
 func cleanTopic(title string) string {
@@ -431,21 +415,7 @@ summary: "Initial overview based on %s"
 		return fmt.Errorf("failed to create article file: %w", err)
 	}
 
-	// 6. Create PR
-	if a.gh.IsLocal() {
-		log.Printf("In local mode, cannot create GitHub PR. Please push branch '%s' manually.", branchName)
-		return nil
-	}
-
-	prTitle := fmt.Sprintf("Research: %s", topic)
-	prBody := fmt.Sprintf("Initiated research on **%s**.\n\nSource used: [%s](%s)\n\nCloses #%d", topic, sourceInfo.Title, sourceInfo.URL, *issue.Number)
-	pr, err := a.gh.CreatePullRequest(prTitle, prBody, branchName, "main")
-	if err != nil {
-		return fmt.Errorf("failed to create PR: %w", err)
-	}
-
-	log.Printf("Created PR #%d", *pr.Number)
-	a.gh.CommentOnIssue(*issue.Number, fmt.Sprintf("Started research in PR #%d", *pr.Number))
-
+	// TODO: Implement push and PR creation
+	log.Printf("Research complete. Push branch '%s' and create PR manually.", branchName)
 	return nil
 }

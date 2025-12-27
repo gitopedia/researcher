@@ -22,8 +22,8 @@ func main() {
 	once := flag.Bool("once", false, "Run once and exit (no loop)")
 	stepByStep := flag.Bool("step", false, "Run in step-by-step mode, pausing for manual triggers")
 	stepName := flag.String("step-name", "", "Specific step to run (discovery, summarization, drafting, finalize)")
-	repoPath := flag.String("repo-path", "", "Path to local gitopedia repository (enables local git mode)")
-	noCommit := flag.Bool("no-commit", false, "In local mode, add changes to staging area but don't commit")
+	repoPath := flag.String("repo-path", "../gitopedia", "Path to local gitopedia repository")
+	noCommit := flag.Bool("no-commit", false, "Add changes to staging area but don't commit")
 	flag.Parse()
 
 	// Initialize structured, colorized logging using Go's standard library slog,
@@ -41,15 +41,13 @@ func main() {
 	}
 
 	log.Printf("Gitopedia Researcher v%s", agent.Version)
+	log.Printf("Repository: %s", *repoPath)
 	if *mergeOnly {
 		log.Println("Starting in merge-only mode...")
 	} else if *stepByStep {
 		log.Printf("Starting in step-by-step mode (Step: %s)...", *stepName)
 	} else {
 		log.Println("Starting in full mode...")
-	}
-	if *repoPath != "" {
-		log.Printf("Local Git mode enabled (Repo: %s)", *repoPath)
 	}
 	if !*once {
 		log.Println("Press Ctrl+C to gracefully shutdown (will wait for current task to complete)")
@@ -94,7 +92,7 @@ func main() {
 		log.Fatalf("Failed to initialize agent: %v", err)
 	}
 
-	if *noCommit && *repoPath != "" {
+	if *noCommit {
 		a.SetNoCommit(true)
 	}
 

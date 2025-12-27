@@ -99,10 +99,8 @@ func (a *Agent) stepExpansionDiscovery(ctx context.Context, pr *github.PRInfo, s
 	a.saveDebugJSON(branchName, fmt.Sprintf("%s/results.json", stepDir), "Save expansion discovery results", results)
 
 	comment := fmt.Sprintf("## Expansion Discovery: %s\n\nI found %d potential sources to expand this article. I have saved them to the debug folder for your review:\n`%s` in branch `%s`.", topic, len(results), stepDir, branchName)
-	if !a.gh.IsLocal() {
-		if err := a.gh.CommentOnPR(pr.Number, comment); err != nil {
-			return err
-		}
+	if err := a.gh.CommentOnPR(pr.Number, comment); err != nil {
+		return err
 	}
 	log.Println(comment)
 	return nil
@@ -181,10 +179,8 @@ func (a *Agent) stepExpansionIntegration(ctx context.Context, pr *github.PRInfo,
 		srcInfo := SourceInfo{Index: rand.Intn(1000) + 100, URL: r.Href, Title: r.Title, Summary: mini}
 		_ = a.saveSourceSummary(ctx, srcInfo, topic, slug, branchName, authMgr, false)
 
-		if !a.gh.IsLocal() {
-			comment := fmt.Sprintf("## Expansion Integrated\n\nIntegrated content from [%s](%s).\n\nThe expansion summary used is available at:\n`%s` in branch `%s`.", r.Title, r.Href, stepDir, branchName)
-			_ = a.gh.CommentOnPR(pr.Number, comment)
-		}
+		comment := fmt.Sprintf("## Expansion Integrated\n\nIntegrated content from [%s](%s).\n\nThe expansion summary used is available at:\n`%s` in branch `%s`.", r.Title, r.Href, stepDir, branchName)
+		_ = a.gh.CommentOnPR(pr.Number, comment)
 		return nil
 	}
 

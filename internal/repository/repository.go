@@ -19,6 +19,10 @@ type RepoManager interface {
 	GetRepoPath() string
 	IsLocal() bool
 	SetNoCommit(bool)
+
+	// Cleanup operations (for clean slate on each run)
+	GetCurrentBranch() (string, error)
+	ResetToMain() error
 }
 
 // LocalGitManager implements RepoManager for a local Git repository
@@ -122,3 +126,36 @@ func (m *LocalGitManager) runGit(args ...string) (string, error) {
 	return string(output), nil
 }
 
+// GetCurrentBranch returns the name of the currently checked out branch
+func (m *LocalGitManager) GetCurrentBranch() (string, error) {
+	output, err := m.runGit("rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// ResetToMain discards any local changes, checks out main, and pulls latest
+func (m *LocalGitManager) ResetToMain() error {
+	// Discard any uncommitted changes
+	if _, err := m.runGit("reset", "--hard"); err != nil {
+		return fmt.Errorf("failed to reset: %w", err)
+	}
+
+	// Clean untracked files
+	if _, err := m.runGit("clean", "-fd"); err != nil {
+		return fmt.Errorf("failed to clean: %w", err)
+	}
+
+	// Checkout main branch
+	if _, err := m.runGit("checkout", "main"); err != nil {
+		return fmt.Errorf("failed to checkout main: %w", err)
+	}
+
+	// Pull latest from remote
+	if _, err := m.runGit("pull", "origin", "main"); err != nil {
+		return fmt.Errorf("failed to pull main: %w", err)
+	}
+
+	return nil
+}
