@@ -502,6 +502,9 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 	var improvementResults []*ImprovementResult
 	var errors []string
 
+	// Track failed sources to avoid retrying them in this run
+	failedSources := make(map[string]bool)
+
 	// Process articles in iterations
 	for i := 0; i < iterations; i++ {
 		log.Printf("=== Topic #%d iteration %d/%d ===", issueNum, i+1, iterations)
@@ -527,7 +530,7 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		if !article.Completed {
 			// Create new article
 			log.Printf("Processing NEW article: '%s'", article.Name)
-			if err := a.processNewArticle(ctx, issue, article.Name, branchName); err != nil {
+			if err := a.processNewArticle(ctx, issue, article.Name, branchName, failedSources); err != nil {
 				slog.Warn("Failed to create article", "article", article.Name, "error", err)
 				errors = append(errors, fmt.Sprintf("Failed to create '%s': %v", article.Name, err))
 				continue
@@ -542,7 +545,7 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		} else {
 			// Improve existing article
 			log.Printf("Processing EXISTING article for improvement: '%s'", article.Name)
-			result, err := a.improveArticle(ctx, issue, article.Name, branchName)
+			result, err := a.improveArticle(ctx, issue, article.Name, branchName, failedSources)
 			if err != nil {
 				slog.Warn("Failed to improve article", "article", article.Name, "error", err)
 				errors = append(errors, fmt.Sprintf("Failed to improve '%s': %v", article.Name, err))
@@ -676,7 +679,7 @@ func (a *Agent) checkOffArticle(issueNum int, articleName string) error {
 
 // processNewArticle creates a new article for the given article name using a shared branch
 // This is similar to processNewTopic but uses a pre-created branch and explicit article name
-func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleName, branchName string) error {
+func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleName, branchName string, failedSources map[string]bool) error {
 	topic := cleanTopic(articleName)
 	issueNum := *issue.Number
 
@@ -703,6 +706,12 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 
 	for _, r := range results {
 		if strings.HasSuffix(r.Href, ".pdf") {
+			continue
+		}
+
+		// Skip sources that have already failed in this run
+		if failedSources[r.Href] {
+			log.Printf("Skipping previously failed source: %s", r.Href)
 			continue
 		}
 
@@ -753,6 +762,9 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 	log.Printf("Generating mini-article from source...")
 	miniArticle, err := a.llm.GenerateMiniArticle(ctx, topic, sourceInfo.Title, sourceInfo.Summary)
 	if err != nil {
+		// Mark this source as failed so we don't retry it
+		failedSources[sourceInfo.URL] = true
+		log.Printf("Marking source as failed: %s", sourceInfo.URL)
 		return fmt.Errorf("failed to generate mini article: %w", err)
 	}
 
@@ -817,7 +829,7 @@ summary: "Initial overview based on %s"
 // improveArticle improves an existing article using one of two modes:
 // Mode A: Find a new source, create temp article, compare sections, add new section if valuable
 // Mode B: Select an existing section, search for more details, improve that section
-func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName, branchName string) (*ImprovementResult, error) {
+func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName, branchName string, failedSources map[string]bool) (*ImprovementResult, error) {
 	topic := cleanTopic(articleName)
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
 
@@ -862,9 +874,9 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 	actionLog.WriteString(fmt.Sprintf("- **Mode:** %s\n", result.Mode))
 
 	if useAddNewSection {
-		err = a.improveModeAddSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result)
+		err = a.improveModeAddSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources)
 	} else {
-		err = a.improveModeImproveSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result)
+		err = a.improveModeImproveSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources)
 	}
 
 	// Save action log to debug folder
@@ -881,7 +893,7 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 }
 
 // improveModeAddSection implements Mode A: Find new source, create temp article, add new section
-func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult) error {
+func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool) error {
 	log.Printf("[Mode A] Searching for new source for topic '%s'", topic)
 	actionLog.WriteString("\n### Search for New Source\n\n")
 
@@ -900,6 +912,13 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 
 	for _, r := range results {
 		if strings.HasSuffix(r.Href, ".pdf") {
+			continue
+		}
+
+		// Skip sources that have already failed in this run
+		if failedSources[r.Href] {
+			log.Printf("[Mode A] Skipping previously failed source: %s", r.Href)
+			actionLog.WriteString(fmt.Sprintf("- Skipped previously failed: %s\n", r.Href))
 			continue
 		}
 
@@ -953,6 +972,9 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	log.Printf("[Mode A] Generating mini-article from new source")
 	newArticle, err := a.llm.GenerateMiniArticle(ctx, topic, sourceInfo.Title, sourceInfo.Summary)
 	if err != nil {
+		// Mark this source as failed so we don't retry it
+		failedSources[sourceInfo.URL] = true
+		log.Printf("[Mode A] Marking source as failed: %s", sourceInfo.URL)
 		actionLog.WriteString(fmt.Sprintf("- **Error:** Failed to generate mini-article: %v\n", err))
 		return fmt.Errorf("failed to generate mini-article: %w", err)
 	}
@@ -1016,7 +1038,7 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 }
 
 // improveModeImproveSection implements Mode B: Select existing section, search for details, improve it
-func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult) error {
+func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool) error {
 	log.Printf("[Mode B] Improving existing section for topic '%s'", topic)
 
 	if len(existingSections) == 0 {
@@ -1078,6 +1100,13 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 
 	for _, r := range results {
 		if strings.HasSuffix(r.Href, ".pdf") {
+			continue
+		}
+
+		// Skip sources that have already failed in this run
+		if failedSources[r.Href] {
+			log.Printf("[Mode B] Skipping previously failed source: %s", r.Href)
+			actionLog.WriteString(fmt.Sprintf("- Skipped previously failed: %s\n", r.Href))
 			continue
 		}
 
