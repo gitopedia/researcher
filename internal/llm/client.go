@@ -51,6 +51,17 @@ type Client struct {
 	checkRedundancyUserTemplate       *template.Template
 	integrateContentSystemTemplate    *template.Template
 	integrateContentUserTemplate      *template.Template
+	// Article improvement templates
+	isEncyclopediaSourceSystemTemplate *template.Template
+	isEncyclopediaSourceUserTemplate   *template.Template
+	extractSectionsSystemTemplate      *template.Template
+	extractSectionsUserTemplate        *template.Template
+	compareSectionsSystemTemplate      *template.Template
+	compareSectionsUserTemplate        *template.Template
+	mergeSectionSystemTemplate         *template.Template
+	mergeSectionUserTemplate           *template.Template
+	scoreImprovementSystemTemplate     *template.Template
+	scoreImprovementUserTemplate       *template.Template
 }
 
 type ollamaChatRequest struct {
@@ -247,6 +258,57 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load integrate_content_user template: %w", err)
 	}
 
+	// Article improvement templates
+	isEncyclopediaSourceSystem, err := loadTemplate("prompts/is_encyclopedia_source_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load is_encyclopedia_source_system template: %w", err)
+	}
+
+	isEncyclopediaSourceUser, err := loadTemplate("prompts/is_encyclopedia_source_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load is_encyclopedia_source_user template: %w", err)
+	}
+
+	extractSectionsSystem, err := loadTemplate("prompts/extract_sections_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load extract_sections_system template: %w", err)
+	}
+
+	extractSectionsUser, err := loadTemplate("prompts/extract_sections_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load extract_sections_user template: %w", err)
+	}
+
+	compareSectionsSystem, err := loadTemplate("prompts/compare_sections_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load compare_sections_system template: %w", err)
+	}
+
+	compareSectionsUser, err := loadTemplate("prompts/compare_sections_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load compare_sections_user template: %w", err)
+	}
+
+	mergeSectionSystem, err := loadTemplate("prompts/merge_section_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load merge_section_system template: %w", err)
+	}
+
+	mergeSectionUser, err := loadTemplate("prompts/merge_section_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load merge_section_user template: %w", err)
+	}
+
+	scoreImprovementSystem, err := loadTemplate("prompts/score_improvement_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load score_improvement_system template: %w", err)
+	}
+
+	scoreImprovementUser, err := loadTemplate("prompts/score_improvement_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load score_improvement_user template: %w", err)
+	}
+
 	return &Client{
 		client:                            openai.NewClientWithConfig(config),
 		httpClient:                        httpClient,
@@ -273,10 +335,20 @@ func NewClient() (*Client, error) {
 		generateMiniArticleUserTemplate:   generateMiniArticleUser,
 		checkRelevanceSystemTemplate:      checkRelevanceSystem,
 		checkRelevanceUserTemplate:        checkRelevanceUser,
-		checkRedundancySystemTemplate:     checkRedundancySystem,
-		checkRedundancyUserTemplate:       checkRedundancyUser,
-		integrateContentSystemTemplate:    integrateContentSystem,
-		integrateContentUserTemplate:      integrateContentUser,
+		checkRedundancySystemTemplate:      checkRedundancySystem,
+		checkRedundancyUserTemplate:        checkRedundancyUser,
+		integrateContentSystemTemplate:     integrateContentSystem,
+		integrateContentUserTemplate:       integrateContentUser,
+		isEncyclopediaSourceSystemTemplate: isEncyclopediaSourceSystem,
+		isEncyclopediaSourceUserTemplate:   isEncyclopediaSourceUser,
+		extractSectionsSystemTemplate:      extractSectionsSystem,
+		extractSectionsUserTemplate:        extractSectionsUser,
+		compareSectionsSystemTemplate:      compareSectionsSystem,
+		compareSectionsUserTemplate:        compareSectionsUser,
+		mergeSectionSystemTemplate:         mergeSectionSystem,
+		mergeSectionUserTemplate:           mergeSectionUser,
+		scoreImprovementSystemTemplate:     scoreImprovementSystem,
+		scoreImprovementUserTemplate:       scoreImprovementUser,
 	}, nil
 }
 
@@ -1060,6 +1132,33 @@ func (c *Client) CategorizeArticle(ctx context.Context, title string, tags []str
 	}, nil
 }
 
+// isRefusalResponse checks if an LLM response is a refusal/failure message instead of actual content
+func isRefusalResponse(content string) bool {
+	lowerContent := strings.ToLower(content)
+	refusalPatterns := []string{
+		"unfortunately, i cannot provide",
+		"i cannot provide",
+		"i'm unable to provide",
+		"i am unable to provide",
+		"not_relevant",
+		"i cannot generate",
+		"i'm unable to generate",
+		"i am unable to generate",
+		"cannot create an article",
+		"unable to create an article",
+		"no relevant information",
+		"insufficient information",
+		"i cannot write",
+		"i'm unable to write",
+	}
+	for _, pattern := range refusalPatterns {
+		if strings.Contains(lowerContent, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Client) GenerateMiniArticle(ctx context.Context, topic, sourceTitle, sourceSummary string) (string, error) {
 	startTime := time.Now()
 
@@ -1080,6 +1179,8 @@ func (c *Client) GenerateMiniArticle(ctx context.Context, topic, sourceTitle, so
 		return "", fmt.Errorf("failed to execute generate_mini_article user template: %w", err)
 	}
 
+	var result string
+
 	// Use thinking mode if enabled
 	if c.ThinkingEnabled() {
 		messages := []ollamaChatMessage{
@@ -1090,26 +1191,37 @@ func (c *Client) GenerateMiniArticle(ctx context.Context, topic, sourceTitle, so
 		if err != nil {
 			return "", err
 		}
-		log.Printf("GenerateMiniArticle: Completed in %v (%d chars)", time.Since(startTime), len(resp.Message.Content))
-		return resp.Message.Content, nil
-	}
-
-	resp, err := c.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: c.modelGenerateArticle,
-			Messages: []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
-				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+		result = resp.Message.Content
+	} else {
+		resp, err := c.client.CreateChatCompletion(
+			ctx,
+			openai.ChatCompletionRequest{
+				Model: c.modelGenerateArticle,
+				Messages: []openai.ChatCompletionMessage{
+					{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+					{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+				},
+				Temperature: 0.7,
 			},
-			Temperature: 0.7,
-		},
-	)
-	if err != nil {
-		return "", err
+		)
+		if err != nil {
+			return "", err
+		}
+		result = resp.Choices[0].Message.Content
 	}
 
-	result := resp.Choices[0].Message.Content
+	// Validate the response - check for refusal messages
+	if isRefusalResponse(result) {
+		log.Printf("GenerateMiniArticle: LLM returned refusal response for topic '%s', rejecting", topic)
+		return "", fmt.Errorf("LLM refused to generate article: response indicates insufficient or irrelevant source content")
+	}
+
+	// Check for minimum content length (frontmatter + at least some content)
+	if len(result) < 200 {
+		log.Printf("GenerateMiniArticle: Response too short (%d chars) for topic '%s', rejecting", len(result), topic)
+		return "", fmt.Errorf("LLM generated insufficient content: only %d characters", len(result))
+	}
+
 	log.Printf("GenerateMiniArticle: Completed in %v (%d chars)", time.Since(startTime), len(result))
 	return result, nil
 }
@@ -1308,4 +1420,254 @@ func (c *Client) IntegrateContent(ctx context.Context, topic, existingArticle, n
 	result := resp.Choices[0].Message.Content
 	log.Printf("IntegrateContent: Completed in %v (%d chars)", time.Since(startTime), len(result))
 	return result, nil
+}
+
+// IsEncyclopediaSource checks if a URL is from an encyclopedia-style website
+func (c *Client) IsEncyclopediaSource(ctx context.Context, domain, url, title string) (*EncyclopediaCheckResult, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.isEncyclopediaSourceSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute is_encyclopedia_source system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Domain": domain,
+		"URL":    url,
+		"Title":  title,
+	}
+	var userBuf bytes.Buffer
+	if err := c.isEncyclopediaSourceUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute is_encyclopedia_source user template: %w", err)
+	}
+
+	// Use fast model for classification
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelSuggestTopics,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.0,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result EncyclopediaCheckResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse is_encyclopedia JSON: %w", err)
+	}
+	log.Printf("IsEncyclopediaSource: %s -> %v (%s) in %v", domain, result.IsEncyclopedia, result.Reason, time.Since(startTime))
+	return &result, nil
+}
+
+// ExtractSections extracts section headings from an article
+func (c *Client) ExtractSections(ctx context.Context, article string) ([]ArticleSection, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.extractSectionsSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute extract_sections system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Article": article,
+	}
+	var userBuf bytes.Buffer
+	if err := c.extractSectionsUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute extract_sections user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelSuggestTopics,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.0,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr, found := extractJSONArray(resp.Choices[0].Message.Content)
+	if !found {
+		return nil, fmt.Errorf("failed to find JSON array in extract_sections response")
+	}
+
+	var sections []ArticleSection
+	if err := json.Unmarshal([]byte(jsonStr), &sections); err != nil {
+		return nil, fmt.Errorf("failed to parse extract_sections JSON: %w", err)
+	}
+	log.Printf("ExtractSections: Found %d sections in %v", len(sections), time.Since(startTime))
+	return sections, nil
+}
+
+// CompareSections compares two articles and suggests if a new section should be added
+func (c *Client) CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*SectionComparisonResult, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.compareSectionsSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute compare_sections system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":            topic,
+		"ExistingArticle":  existingArticle,
+		"ExistingSections": existingSections,
+		"NewArticle":       newArticle,
+		"NewSections":      newSections,
+	}
+	var userBuf bytes.Buffer
+	if err := c.compareSectionsUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute compare_sections user template: %w", err)
+	}
+
+	// Use article model for thorough comparison
+	if c.ThinkingEnabled() {
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.3)
+		if err != nil {
+			return nil, err
+		}
+		jsonStr := extractJSONObject(resp.Message.Content)
+		var result SectionComparisonResult
+		if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+			return nil, fmt.Errorf("failed to parse compare_sections JSON: %w", err)
+		}
+		log.Printf("CompareSections: hasNewSection=%v in %v", result.HasNewSection, time.Since(startTime))
+		return &result, nil
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result SectionComparisonResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse compare_sections JSON: %w", err)
+	}
+	log.Printf("CompareSections: hasNewSection=%v in %v", result.HasNewSection, time.Since(startTime))
+	return &result, nil
+}
+
+// MergeSection combines two versions of a section
+func (c *Client) MergeSection(ctx context.Context, topic, sectionTitle, currentSection, newContent string) (string, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.mergeSectionSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute merge_section system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":          topic,
+		"SectionTitle":   sectionTitle,
+		"CurrentSection": currentSection,
+		"NewContent":     newContent,
+	}
+	var userBuf bytes.Buffer
+	if err := c.mergeSectionUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute merge_section user template: %w", err)
+	}
+
+	if c.ThinkingEnabled() {
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.3)
+		if err != nil {
+			return "", err
+		}
+		log.Printf("MergeSection: Completed in %v (%d chars)", time.Since(startTime), len(resp.Message.Content))
+		return resp.Message.Content, nil
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	result := resp.Choices[0].Message.Content
+	log.Printf("MergeSection: Completed in %v (%d chars)", time.Since(startTime), len(result))
+	return result, nil
+}
+
+// ScoreImprovement evaluates if a revised section is a meaningful improvement
+func (c *Client) ScoreImprovement(ctx context.Context, topic, sectionTitle, originalSection, revisedSection string) (*ImprovementScore, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.scoreImprovementSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute score_improvement system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":           topic,
+		"SectionTitle":    sectionTitle,
+		"OriginalSection": originalSection,
+		"RevisedSection":  revisedSection,
+	}
+	var userBuf bytes.Buffer
+	if err := c.scoreImprovementUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute score_improvement user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelSuggestTopics, // Use fast model for scoring
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.1,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result ImprovementScore
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse score_improvement JSON: %w", err)
+	}
+	log.Printf("ScoreImprovement: score=%d, recommendation=%s in %v", result.Score, result.Recommendation, time.Since(startTime))
+	return &result, nil
 }

@@ -1,0 +1,7 @@
+Extract the section structure from this article:
+
+{{.Article}}
+
+Respond with ONLY a JSON array.
+
+

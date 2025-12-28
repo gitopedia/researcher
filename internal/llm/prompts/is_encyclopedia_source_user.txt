@@ -1,0 +1,9 @@
+Is this website domain an encyclopedia or encyclopedia-like source?
+
+Domain: {{.Domain}}
+URL: {{.URL}}
+Page Title: {{.Title}}
+
+Respond with ONLY a JSON object.
+
+

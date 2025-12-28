@@ -1,0 +1,17 @@
+Compare these two articles about "{{.Topic}}" and identify if there's a valuable section from the new article that should be added to the existing article.
+
+## Existing Article Sections:
+{{.ExistingSections}}
+
+## Existing Article Content:
+{{.ExistingArticle}}
+
+## New Article Sections:
+{{.NewSections}}
+
+## New Article Content:
+{{.NewArticle}}
+
+Respond with ONLY a JSON object.
+
+

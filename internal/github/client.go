@@ -1236,16 +1236,16 @@ func (c *Client) IsLocal() bool {
 	return false
 }
 
-// GetTopicIssues returns all open issues with the "Research Topic" issue type using GraphQL
+// GetTopicIssues returns all open issues with the "research topic" label using GraphQL
 func (c *Client) GetTopicIssues() ([]*github.Issue, error) {
 	if err := c.ensureValidToken(); err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
 
-	// GraphQL query to get issues by issue type
+	// GraphQL query to get issues by label
 	query := `query($owner: String!, $repo: String!, $cursor: String) {
 		repository(owner: $owner, name: $repo) {
-			issues(first: 100, after: $cursor, states: OPEN, filterBy: {issueType: "Research Topic"}) {
+			issues(first: 100, after: $cursor, states: OPEN, filterBy: {labels: ["research topic"]}) {
 				pageInfo {
 					hasNextPage
 					endCursor

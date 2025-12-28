@@ -56,6 +56,38 @@ type RedundancyResult struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
+// EncyclopediaCheckResult indicates whether a source is encyclopedia-like
+type EncyclopediaCheckResult struct {
+	IsEncyclopedia bool   `json:"is_encyclopedia"`
+	Reason         string `json:"reason,omitempty"`
+}
+
+// ArticleSection represents a section extracted from an article
+type ArticleSection struct {
+	Level      int    `json:"level"`       // Heading level (2 for ##, 3 for ###, etc.)
+	Title      string `json:"title"`       // Section heading text
+	HasContent bool   `json:"has_content"` // Whether section has meaningful content
+	Content    string `json:"content,omitempty"` // The actual section content (optional)
+}
+
+// SectionComparisonResult indicates if a new section should be added
+type SectionComparisonResult struct {
+	HasNewSection  bool   `json:"has_new_section"`
+	SectionTitle   string `json:"section_title,omitempty"`
+	SectionContent string `json:"section_content,omitempty"`
+	InsertAfter    string `json:"insert_after,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+}
+
+// ImprovementScore evaluates if a section revision is worthwhile
+type ImprovementScore struct {
+	IsImproved     bool     `json:"is_improved"`
+	Score          int      `json:"score"` // 1-10
+	Improvements   []string `json:"improvements,omitempty"`
+	Concerns       []string `json:"concerns,omitempty"`
+	Recommendation string   `json:"recommendation"` // "accept" or "reject"
+}
+
 type Generator interface {
 	GenerateArticle(ctx context.Context, topic, contextData string) (*ArticleResult, error)
 	AddReferences(ctx context.Context, article string, sources string) (string, error)
@@ -69,6 +101,13 @@ type Generator interface {
 	CheckRelevance(ctx context.Context, topic, content string) (*RelevanceResult, error)
 	CheckRedundancy(ctx context.Context, topic, existingArticle, newContent string) (*RedundancyResult, error)
 	IntegrateContent(ctx context.Context, topic, existingArticle, newContent string) (string, error)
+
+	// Article improvement methods
+	IsEncyclopediaSource(ctx context.Context, domain, url, title string) (*EncyclopediaCheckResult, error)
+	ExtractSections(ctx context.Context, article string) ([]ArticleSection, error)
+	CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*SectionComparisonResult, error)
+	MergeSection(ctx context.Context, topic, sectionTitle, currentSection, newContent string) (string, error)
+	ScoreImprovement(ctx context.Context, topic, sectionTitle, originalSection, revisedSection string) (*ImprovementScore, error)
 }
 
 // Ensure Client implements Generator

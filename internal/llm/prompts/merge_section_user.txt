@@ -1,0 +1,11 @@
+Merge these two versions of the "{{.SectionTitle}}" section about "{{.Topic}}":
+
+## Current Version:
+{{.CurrentSection}}
+
+## New Information to Integrate:
+{{.NewContent}}
+
+Output ONLY the merged section content.
+
+

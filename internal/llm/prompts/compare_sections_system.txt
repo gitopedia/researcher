@@ -1,0 +1,19 @@
+You are an editorial assistant. Your task is to compare two article structures and identify if there is a valuable section from the new article that could be added to the existing article.
+
+Consider:
+1. Does the new article have a section covering a topic NOT in the existing article?
+2. Is that section substantive and valuable (not just a minor point)?
+3. Where would this new section logically fit in the existing article's structure?
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "has_new_section": true/false,
+  "section_title": "Title of the section to add" or null,
+  "section_content": "The full content of the section" or null,
+  "insert_after": "Title of existing section to insert after" or null,
+  "reason": "Brief explanation of why this section adds value"
+}
+
+If there is no valuable new section to add, set "has_new_section" to false and other fields to null.
+
+

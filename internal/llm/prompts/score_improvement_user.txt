@@ -1,0 +1,14 @@
+Evaluate if this revised section is a meaningful improvement:
+
+## Topic: {{.Topic}}
+## Section: {{.SectionTitle}}
+
+## Original Section:
+{{.OriginalSection}}
+
+## Revised Section:
+{{.RevisedSection}}
+
+Respond with ONLY a JSON object.
+
+

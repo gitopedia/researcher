@@ -90,6 +90,8 @@ func (m *MockGitHub) UpdateIssueBody(issueNumber int, body string) error { retur
 func (m *MockGitHub) IsLocal() bool                                      { return false }
 func (m *MockGitHub) GetRepoPath() string                                { return "" }
 func (m *MockGitHub) SetNoCommit(bool)                                   {}
+func (m *MockGitHub) GetCurrentBranch() (string, error)                  { return "main", nil }
+func (m *MockGitHub) ResetToMain() error                                 { return nil }
 
 type MockSearch struct{}
 

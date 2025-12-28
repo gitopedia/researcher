@@ -24,6 +24,9 @@ import (
 
 var Version = "dev"
 
+// LabelPendingReview is added to topic issues when a PR has been created for them
+const LabelPendingReview = "pending review"
+
 func init() {
 	if Version == "dev" {
 		if data, err := os.ReadFile("VERSION"); err == nil {
@@ -143,13 +146,6 @@ func isIssueUnassigned(issue *gh.Issue) bool {
 	return len(issue.Assignees) == 0
 }
 
-// ArticleCandidate represents an unchecked article from a topic issue
-type ArticleCandidate struct {
-	ArticleName   string
-	TopicIssue    *gh.Issue
-	TopicIssueNum int
-}
-
 func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error {
 	// Get bot username for assignment operations
 	botUsername, err := a.gh.GetAuthenticatedUsername()
@@ -167,9 +163,13 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		// Continue anyway - cleanup is best-effort
 	}
 
-	// STEP 2: Check and merge any ready PRs
-	if err := a.mergeReadyPRs(ctx); err != nil {
-		slog.Warn("Error checking/merging PRs", "error", err)
+	// STEP 2: Check and merge any ready PRs (if enabled)
+	if autoMerge := os.Getenv("AUTO_MERGE_READY_PRS"); autoMerge == "true" || autoMerge == "1" {
+		if err := a.mergeReadyPRs(ctx); err != nil {
+			slog.Warn("Error checking/merging PRs", "error", err)
+		}
+	} else {
+		log.Println("Auto-merge disabled (AUTO_MERGE_READY_PRS=false), skipping PR merge check")
 	}
 
 	// STEP 3: Fetch topic issues and find available work
@@ -206,29 +206,37 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		}
 	}
 
-	// Collect all unchecked articles from UNASSIGNED topic issues only
-	var availableArticles []ArticleCandidate
+	// Collect available topics - skip if any of these conditions are true:
+	// 1. Has an open PR referencing it
+	// 2. Has the "pending review" label (indicates PR was created for it)
+	// 3. Is already assigned to someone
+	var availableTopics []*gh.Issue
 	for _, issue := range topicIssues {
-		if issuesWithPRs[*issue.Number] {
-			continue // Skip issues that already have PRs
+		issueNum := *issue.Number
+
+		// Skip if there's an open PR for this issue
+		if issuesWithPRs[issueNum] {
+			log.Printf("Skipping topic #%d: has open PR", issueNum)
+			continue
 		}
+
+		// Skip if has "pending review" label (PR was created previously)
+		hasLabel, err := a.gh.HasLabel(issueNum, LabelPendingReview)
+		if err != nil {
+			slog.Warn("Failed to check label", "issue", issueNum, "error", err)
+		}
+		if hasLabel {
+			log.Printf("Skipping topic #%d: has '%s' label", issueNum, LabelPendingReview)
+			continue
+		}
+
+		// Skip if already assigned
 		if !isIssueUnassigned(issue) {
-			continue // Skip issues that are already assigned
+			log.Printf("Skipping topic #%d: already assigned", issueNum)
+			continue
 		}
 
-		// Parse articles from issue body
-		body := issue.GetBody()
-		articles := github.ParseArticlesFromBody(body)
-
-		for _, article := range articles {
-			if !article.Completed {
-				availableArticles = append(availableArticles, ArticleCandidate{
-					ArticleName:   article.Name,
-					TopicIssue:    issue,
-					TopicIssueNum: *issue.Number,
-				})
-			}
-		}
+		availableTopics = append(availableTopics, issue)
 	}
 
 	maxConcurrent := 1
@@ -238,20 +246,20 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		}
 	}
 
-	log.Printf("Status: Managed PRs: %d (Limit: %d), Available Articles: %d", len(managedPRs), maxConcurrent, len(availableArticles))
+	log.Printf("Status: Managed PRs: %d (Limit: %d), Available Topics: %d", len(managedPRs), maxConcurrent, len(availableTopics))
 
-	// STEP 4: Try to claim and process a random article
-	if len(managedPRs) < maxConcurrent && len(availableArticles) > 0 {
+	// STEP 4: Try to claim and process a random topic
+	if len(managedPRs) < maxConcurrent && len(availableTopics) > 0 {
 		rand.Seed(time.Now().UnixNano())
 
-		// Shuffle available articles to pick a random one
-		rand.Shuffle(len(availableArticles), func(i, j int) {
-			availableArticles[i], availableArticles[j] = availableArticles[j], availableArticles[i]
+		// Shuffle available topics to pick a random one
+		rand.Shuffle(len(availableTopics), func(i, j int) {
+			availableTopics[i], availableTopics[j] = availableTopics[j], availableTopics[i]
 		})
 
-		// Pick the first (now randomized) article and try to claim it
-		candidate := availableArticles[0]
-		issueNum := candidate.TopicIssueNum
+		// Pick the first (now randomized) topic and try to claim it
+		selectedTopic := availableTopics[0]
+		issueNum := *selectedTopic.Number
 
 		// If we have a bot username, try to claim with locking
 		if botUsername != "" {
@@ -271,47 +279,10 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 			}
 		}
 
-		// Successfully claimed, process the article
-		log.Printf("Selected article '%s' from topic issue #%d: %s",
-			candidate.ArticleName, candidate.TopicIssueNum, candidate.TopicIssue.GetTitle())
+		// Successfully claimed, process the topic with iterations
+		log.Printf("Selected topic issue #%d: %s", issueNum, selectedTopic.GetTitle())
 
-		// Create a synthetic issue with the article name as title for processNewTopic
-		syntheticIssue := &gh.Issue{
-			Number: gh.Int(candidate.TopicIssueNum),
-			Title:  gh.String(candidate.ArticleName),
-		}
-
-		var processErr error
-		if stepByStep {
-			processErr = a.processNewTopicStepByStep(ctx, syntheticIssue, stepName)
-		} else {
-			processErr = a.processNewTopic(ctx, syntheticIssue)
-		}
-
-		// After successful processing, check off the article in the topic issue
-		if processErr == nil {
-			log.Printf("Research complete, checking off article '%s' in issue #%d", candidate.ArticleName, candidate.TopicIssueNum)
-			// Re-fetch the issue to get the latest body (in case it was modified)
-			latestIssue, err := a.gh.GetIssue(candidate.TopicIssueNum)
-			if err != nil {
-				slog.Warn("Failed to re-fetch issue for checkbox update", "issue", candidate.TopicIssueNum, "error", err)
-			} else {
-				newBody := github.CheckArticleInBody(latestIssue.GetBody(), candidate.ArticleName)
-				if err := a.gh.UpdateIssueBody(candidate.TopicIssueNum, newBody); err != nil {
-					slog.Warn("Failed to update issue body with checked article", "issue", candidate.TopicIssueNum, "error", err)
-				} else {
-					log.Printf("Successfully checked off article '%s'", candidate.ArticleName)
-				}
-			}
-
-			// Unassign from the issue after completion
-			if botUsername != "" {
-				if err := a.gh.RemoveAssignees(candidate.TopicIssueNum, []string{botUsername}); err != nil {
-					slog.Warn("Failed to unassign after completion", "issue", candidate.TopicIssueNum, "error", err)
-				}
-			}
-		}
-
+		processErr := a.processTopicWithIterations(ctx, selectedTopic, botUsername)
 		return processErr
 	}
 
@@ -324,7 +295,7 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 		return a.processExistingPR(ctx, pr)
 	}
 
-	log.Println("No work to do (no available articles in topic issues, no managed PRs to update)")
+	log.Println("No work to do (no available topics, no managed PRs to update)")
 	return nil
 }
 
