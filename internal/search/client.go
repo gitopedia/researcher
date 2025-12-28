@@ -52,14 +52,25 @@ func NewClient() *Client {
 	}
 }
 
-// Search performs a DuckDuckGo search via HTML scraping
+// Search performs a DuckDuckGo search via HTML scraping (first page only)
 func (c *Client) Search(query string) ([]Result, error) {
-	log.Printf("Searching for: %s", query)
+	return c.SearchPage(query, 0)
+}
+
+// SearchPage performs a DuckDuckGo search with pagination support
+// page 0 = first page, page 1 = second page (offset 30), etc.
+func (c *Client) SearchPage(query string, page int) ([]Result, error) {
+	log.Printf("Searching for: %s (page %d)", query, page)
 
 	// Sleep slightly to be polite
 	time.Sleep(2 * time.Second)
 
+	// DuckDuckGo uses &s= parameter for offset (each page has ~30 results)
+	offset := page * 30
 	u := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+	if offset > 0 {
+		u = fmt.Sprintf("%s&s=%d", u, offset)
+	}
 
 	// Retry logic for rate limiting
 	maxRetries := 3

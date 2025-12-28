@@ -43,15 +43,354 @@ type StepState struct {
 
 // ImprovementResult tracks the outcome of an article improvement attempt
 type ImprovementResult struct {
-	ArticleName    string
-	Mode           string // "Add New Section" or "Improve Existing Section"
-	Success        bool
-	SectionName    string // Section added or improved
-	SourceTitle    string
-	SourceURL      string
-	Score          int    // For Mode B improvements
-	ErrorMessage   string
-	SkippedSources []string // Encyclopedia sources that were skipped
+	ArticleName     string
+	Mode            string // "Add New Section" or "Improve Existing Section"
+	Success         bool
+	SectionName     string   // Section added or improved
+	SectionsAdded   []string // For batch Mode A improvements
+	SourceTitle     string
+	SourceURL       string
+	Score           int // For Mode B improvements
+	ErrorMessage    string
+	SkippedSources  []string // Encyclopedia sources that were skipped
+}
+
+// ArticleMetadata tracks sources for an article
+type ArticleMetadata struct {
+	ArticleSlug    string          `json:"article_slug"`
+	Searches       []SearchRecord  `json:"searches"`
+	SourcesUsed    []SourceRecord  `json:"sources_used"`
+	SourcesSkipped []SkippedSource `json:"sources_skipped"`
+}
+
+// SearchRecord tracks a search query and its results
+type SearchRecord struct {
+	Query        string    `json:"query"`
+	Timestamp    time.Time `json:"timestamp"`
+	ResultsFound int       `json:"results_found"`
+	Page         int       `json:"page"`
+}
+
+// SourceRecord tracks a source that was used
+type SourceRecord struct {
+	URL    string `json:"url"`
+	Domain string `json:"domain"`
+	Title  string `json:"title"`
+}
+
+// SkippedSource tracks a source that was skipped
+type SkippedSource struct {
+	URL        string `json:"url"`
+	Domain     string `json:"domain"`
+	Reason     string `json:"reason"`
+	DetectedBy string `json:"detected_by"` // "global_list" or "llm"
+}
+
+// loadArticleMetadata loads metadata for an article from the .meta folder
+func (a *Agent) loadArticleMetadata(branchName, slug string) (*ArticleMetadata, error) {
+	metaPath := fmt.Sprintf("Compendium/_incoming/.meta/%s.json", slug)
+	content, _, err := a.gh.GetFile(branchName, metaPath)
+	if err != nil {
+		// Try main branch
+		content, _, err = a.gh.GetFile("main", metaPath)
+		if err != nil {
+			// Return empty metadata if file doesn't exist
+			return &ArticleMetadata{
+				ArticleSlug:    slug,
+				Searches:       []SearchRecord{},
+				SourcesUsed:    []SourceRecord{},
+				SourcesSkipped: []SkippedSource{},
+			}, nil
+		}
+	}
+
+	var meta ArticleMetadata
+	if err := json.Unmarshal([]byte(content), &meta); err != nil {
+		return nil, fmt.Errorf("failed to parse article metadata: %w", err)
+	}
+	return &meta, nil
+}
+
+// saveArticleMetadata saves metadata for an article to the .meta folder
+func (a *Agent) saveArticleMetadata(branchName string, meta *ArticleMetadata) error {
+	metaPath := fmt.Sprintf("Compendium/_incoming/.meta/%s.json", meta.ArticleSlug)
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal article metadata: %w", err)
+	}
+
+	// Try to get existing file SHA for update
+	_, sha, _ := a.gh.GetFile(branchName, metaPath)
+	if sha != "" {
+		return a.gh.UpdateFile(branchName, metaPath, fmt.Sprintf("Update metadata for %s", meta.ArticleSlug), string(data), sha)
+	}
+	return a.gh.CreateFile(branchName, metaPath, fmt.Sprintf("Add metadata for %s", meta.ArticleSlug), string(data))
+}
+
+// isSourceAlreadyUsed checks if a URL has already been used for this article
+func (meta *ArticleMetadata) isSourceAlreadyUsed(url string) bool {
+	for _, s := range meta.SourcesUsed {
+		if s.URL == url {
+			return true
+		}
+	}
+	return false
+}
+
+// addSourceUsed adds a source to the used list
+func (meta *ArticleMetadata) addSourceUsed(url, domain, title string) {
+	meta.SourcesUsed = append(meta.SourcesUsed, SourceRecord{
+		URL:    url,
+		Domain: domain,
+		Title:  title,
+	})
+}
+
+// addSourceSkipped adds a source to the skipped list
+func (meta *ArticleMetadata) addSourceSkipped(url, domain, reason, detectedBy string) {
+	// Check if already in list
+	for _, s := range meta.SourcesSkipped {
+		if s.URL == url {
+			return
+		}
+	}
+	meta.SourcesSkipped = append(meta.SourcesSkipped, SkippedSource{
+		URL:        url,
+		Domain:     domain,
+		Reason:     reason,
+		DetectedBy: detectedBy,
+	})
+}
+
+// addSearch adds a search record
+func (meta *ArticleMetadata) addSearch(query string, resultsFound, page int) {
+	meta.Searches = append(meta.Searches, SearchRecord{
+		Query:        query,
+		Timestamp:    time.Now().UTC(),
+		ResultsFound: resultsFound,
+		Page:         page,
+	})
+}
+
+// SourceSearchResult holds the result of a source search
+type SourceSearchResult struct {
+	Source   SourceInfo
+	Metadata *ArticleMetadata
+}
+
+// findUsableSource searches for a usable source with global ignore list filtering,
+// metadata-based source tracking, and pagination support.
+// It returns the first usable source and the updated metadata.
+func (a *Agent) findUsableSource(ctx context.Context, query, slug, branchName string, failedSources map[string]bool) (*SourceSearchResult, error) {
+	// Load or create article metadata
+	meta, err := a.loadArticleMetadata(branchName, slug)
+	if err != nil {
+		log.Printf("Warning: Failed to load article metadata: %v", err)
+		meta = &ArticleMetadata{
+			ArticleSlug:    slug,
+			Searches:       []SearchRecord{},
+			SourcesUsed:    []SourceRecord{},
+			SourcesSkipped: []SkippedSource{},
+		}
+	}
+
+	maxPages := 5 // Maximum pages to search
+
+	for page := 0; page < maxPages; page++ {
+		log.Printf("Searching for: %s (page %d)", query, page)
+		results, err := a.search.SearchPage(query, page)
+		if err != nil {
+			if page == 0 {
+				return nil, fmt.Errorf("search failed: %w", err)
+			}
+			break // No more pages
+		}
+
+		if len(results) == 0 {
+			log.Printf("No more results on page %d", page)
+			break
+		}
+
+		// Record the search
+		meta.addSearch(query, len(results), page)
+
+		usableSourceFound := false
+		for _, r := range results {
+			if strings.HasSuffix(r.Href, ".pdf") {
+				log.Printf("Skipping PDF source: %s", r.Href)
+				continue
+			}
+
+			// Skip sources that have already failed in this run
+			if failedSources != nil && failedSources[r.Href] {
+				log.Printf("Skipping previously failed source: %s", r.Href)
+				continue
+			}
+
+			domain := extractDomain(r.Href)
+
+			// 1. Check global ignore list first (no LLM call needed)
+			if a.isDomainIgnored(domain) {
+				log.Printf("Skipping globally ignored domain: %s", domain)
+				meta.addSourceSkipped(r.Href, domain, "encyclopedia", "global_list")
+				continue
+			}
+
+			// 2. Check if source is already used for this article
+			if meta.isSourceAlreadyUsed(r.Href) {
+				log.Printf("Skipping already-used source: %s", r.Href)
+				continue
+			}
+
+			// 3. Ask LLM if source is an encyclopedia
+			encCheck, err := a.llm.IsEncyclopediaSource(ctx, domain, r.Href, r.Title)
+			if err != nil {
+				log.Printf("Failed to check encyclopedia status for %s: %v", domain, err)
+			} else if encCheck.IsEncyclopedia {
+				log.Printf("Skipping encyclopedia source: %s (%s)", domain, encCheck.Reason)
+				meta.addSourceSkipped(r.Href, domain, "encyclopedia", "llm")
+				continue
+			}
+
+			// 4. Fetch and summarize content
+			log.Printf("Checking source: %s", r.Href)
+			content, err := a.search.FetchContent(r.Href)
+			if err != nil {
+				log.Printf("Failed to fetch content from %s: %v", r.Href, err)
+				continue
+			}
+
+			// We found a usable source!
+			meta.addSourceUsed(r.Href, domain, r.Title)
+			usableSourceFound = true
+
+			return &SourceSearchResult{
+				Source: SourceInfo{
+					Index:   1,
+					URL:     r.Href,
+					Title:   r.Title,
+					Summary: content, // Raw content, caller will summarize
+				},
+				Metadata: meta,
+			}, nil
+		}
+
+		// If we found sources but none were usable, try next page
+		if !usableSourceFound {
+			log.Printf("All sources on page %d were filtered, trying next page...", page)
+			continue
+		}
+	}
+
+	// No usable source found after all pages
+	return nil, fmt.Errorf("could not find a usable non-encyclopedia source after searching %d pages", maxPages)
+}
+
+// findUsableSourceWithSummary is like findUsableSource but also summarizes the content
+func (a *Agent) findUsableSourceWithSummary(ctx context.Context, topic, query, slug, branchName string, failedSources map[string]bool) (*SourceSearchResult, error) {
+	meta, err := a.loadArticleMetadata(branchName, slug)
+	if err != nil {
+		log.Printf("Warning: Failed to load article metadata: %v", err)
+		meta = &ArticleMetadata{
+			ArticleSlug:    slug,
+			Searches:       []SearchRecord{},
+			SourcesUsed:    []SourceRecord{},
+			SourcesSkipped: []SkippedSource{},
+		}
+	}
+
+	maxPages := 5
+
+	for page := 0; page < maxPages; page++ {
+		log.Printf("Searching for: %s (page %d)", query, page)
+		results, err := a.search.SearchPage(query, page)
+		if err != nil {
+			if page == 0 {
+				return nil, fmt.Errorf("search failed: %w", err)
+			}
+			break
+		}
+
+		if len(results) == 0 {
+			log.Printf("No more results on page %d", page)
+			break
+		}
+
+		meta.addSearch(query, len(results), page)
+
+		for _, r := range results {
+			if strings.HasSuffix(r.Href, ".pdf") {
+				continue
+			}
+
+			if failedSources != nil && failedSources[r.Href] {
+				log.Printf("Skipping previously failed source: %s", r.Href)
+				continue
+			}
+
+			domain := extractDomain(r.Href)
+
+			// 1. Check global ignore list
+			if a.isDomainIgnored(domain) {
+				log.Printf("Skipping globally ignored domain: %s", domain)
+				meta.addSourceSkipped(r.Href, domain, "encyclopedia", "global_list")
+				continue
+			}
+
+			// 2. Check if already used
+			if meta.isSourceAlreadyUsed(r.Href) {
+				log.Printf("Skipping already-used source: %s", r.Href)
+				continue
+			}
+
+			// 3. LLM encyclopedia check
+			encCheck, err := a.llm.IsEncyclopediaSource(ctx, domain, r.Href, r.Title)
+			if err != nil {
+				log.Printf("Failed to check encyclopedia status for %s: %v", domain, err)
+			} else if encCheck.IsEncyclopedia {
+				log.Printf("Skipping encyclopedia source: %s (%s)", domain, encCheck.Reason)
+				meta.addSourceSkipped(r.Href, domain, "encyclopedia", "llm")
+				continue
+			}
+
+			// 4. Fetch content
+			log.Printf("Checking source: %s", r.Href)
+			content, err := a.search.FetchContent(r.Href)
+			if err != nil {
+				log.Printf("Failed to fetch content from %s: %v", r.Href, err)
+				continue
+			}
+
+			// 5. Summarize and check relevance
+			summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
+			if err != nil {
+				log.Printf("Failed to summarize source %s: %v", r.Href, err)
+				continue
+			}
+
+			if !summary.Relevant {
+				log.Printf("Source rejected: %s - Reason: %s", r.Href, summary.Reason)
+				continue
+			}
+
+			meta.addSourceUsed(r.Href, domain, r.Title)
+			log.Printf("Found relevant source: %s", r.Title)
+
+			return &SourceSearchResult{
+				Source: SourceInfo{
+					Index:   1,
+					URL:     r.Href,
+					Title:   r.Title,
+					Summary: summary.Summary,
+				},
+				Metadata: meta,
+			}, nil
+		}
+
+		log.Printf("All sources on page %d were filtered or irrelevant, trying next page...", page)
+	}
+
+	return nil, fmt.Errorf("could not find a relevant non-encyclopedia source after searching %d pages", maxPages)
 }
 
 func (a *Agent) loadState(slug string) (*ResearchState, error) {
@@ -188,6 +527,9 @@ func (a *Agent) stepSummarization(ctx context.Context, issue *gh.Issue, state *R
 		return err
 	}
 
+	// Load article metadata for tracking
+	meta, _ := a.loadArticleMetadata(branchName, slug)
+
 	var sourceInfo SourceInfo
 	found := false
 	for _, r := range results {
@@ -196,22 +538,37 @@ func (a *Agent) stepSummarization(ctx context.Context, issue *gh.Issue, state *R
 			continue
 		}
 
-		// Check if source is an encyclopedia
 		domain := extractDomain(r.Href)
+
+		// Check global ignore list first (no LLM call needed)
+		if a.isDomainIgnored(domain) {
+			log.Printf("Skipping globally ignored domain: %s", domain)
+			meta.addSourceSkipped(r.Href, domain, "encyclopedia", "global_list")
+			continue
+		}
+
+		// Check if already used
+		if meta.isSourceAlreadyUsed(r.Href) {
+			log.Printf("Skipping already-used source: %s", r.Href)
+			continue
+		}
+
+		// Check if source is an encyclopedia via LLM
 		encCheck, err := a.llm.IsEncyclopediaSource(ctx, domain, r.Href, r.Title)
 		if err != nil {
 			log.Printf("Failed to check encyclopedia status for %s: %v", domain, err)
 		} else if encCheck.IsEncyclopedia {
 			log.Printf("Skipping encyclopedia source: %s (%s)", domain, encCheck.Reason)
+			meta.addSourceSkipped(r.Href, domain, "encyclopedia", "llm")
 			continue
 		}
 
-		content, err := a.search.FetchContent(r.Href)
+		fetchedContent, err := a.search.FetchContent(r.Href)
 		if err != nil {
 			log.Printf("Failed to fetch content from %s: %v", r.Href, err)
 			continue
 		}
-		summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
+		summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, fetchedContent)
 		if err != nil {
 			log.Printf("Failed to summarize source %s: %v", r.Href, err)
 			continue
@@ -222,8 +579,14 @@ func (a *Agent) stepSummarization(ctx context.Context, issue *gh.Issue, state *R
 		}
 		log.Printf("Found relevant source: %s", r.Href)
 		sourceInfo = SourceInfo{Index: 1, URL: r.Href, Title: r.Title, Summary: summary.Summary}
+		meta.addSourceUsed(r.Href, domain, r.Title)
 		found = true
 		break
+	}
+
+	// Save updated metadata
+	if saveErr := a.saveArticleMetadata(branchName, meta); saveErr != nil {
+		slog.Warn("Failed to save article metadata", "error", saveErr)
 	}
 
 	if !found {
@@ -328,64 +691,26 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 		return fmt.Errorf("failed to create branch: %w", err)
 	}
 
-	// 2. Search for 1 Source
-	query := topic + " encyclopedia overview"
-	log.Printf("Searching for: %s", query)
-	results, err := a.search.Search(query)
-	if err != nil {
-		return fmt.Errorf("search failed: %w", err)
-	}
-
-	var sourceInfo SourceInfo
-	found := false
-
 	// Load authorities for entity resolution
 	authMgr := authority.NewManager(a.gh)
 	if err := authMgr.Load("main"); err != nil {
 		slog.Warn("Failed to load authorities", "error", err)
 	}
 
-	for _, r := range results {
-		if strings.HasSuffix(r.Href, ".pdf") {
-			continue
-		}
-
-		// Check if source is an encyclopedia
-		domain := extractDomain(r.Href)
-		encCheck, err := a.llm.IsEncyclopediaSource(ctx, domain, r.Href, r.Title)
-		if err != nil {
-			log.Printf("Failed to check encyclopedia status for %s: %v", domain, err)
-		} else if encCheck.IsEncyclopedia {
-			log.Printf("Skipping encyclopedia source: %s (%s)", domain, encCheck.Reason)
-			continue
-		}
-
-		log.Printf("Checking source: %s", r.Href)
-		content, err := a.search.FetchContent(r.Href)
-		if err != nil {
-			continue
-		}
-
-		summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
-		if err != nil {
-			continue
-		}
-
-		if summary.Relevant {
-			sourceInfo = SourceInfo{
-				Index:   1,
-				URL:     r.Href,
-				Title:   r.Title,
-				Summary: summary.Summary,
-			}
-			found = true
-			log.Printf("Found relevant source: %s", r.Title)
-			break
-		}
+	// 2. Search for source with global ignore list, metadata tracking, and pagination
+	query := topic + " encyclopedia overview"
+	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, nil)
+	if err != nil {
+		return err
 	}
 
-	if !found {
-		return fmt.Errorf("could not find a relevant non-encyclopedia source for %s", topic)
+	sourceInfo := searchResult.Source
+
+	// Save article metadata
+	if searchResult.Metadata != nil {
+		if saveErr := a.saveArticleMetadata(branchName, searchResult.Metadata); saveErr != nil {
+			slog.Warn("Failed to save article metadata", "error", saveErr)
+		}
 	}
 
 	// 3. Save Source
@@ -482,7 +807,7 @@ func getEnvBool(key string, defaultVal bool) bool {
 // processTopicWithIterations handles a claimed topic issue by iterating through articles
 // It processes N articles (creating new or improving existing), then creates a PR
 func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue, botUsername string) error {
-	iterations := getEnvInt("TOPIC_PROCESSING_ITERATIONS", 10)
+	iterations := getEnvInt("TOPIC_PROCESSING_ITERATIONS", 100)
 	issueNum := *issue.Number
 	topicTitle := issue.GetTitle()
 
@@ -687,70 +1012,26 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
 
-	// Search for sources
-	query := topic + " encyclopedia overview"
-	log.Printf("Searching for: %s", query)
-	results, err := a.search.Search(query)
-	if err != nil {
-		return fmt.Errorf("search failed: %w", err)
-	}
-
-	var sourceInfo SourceInfo
-	found := false
-
 	// Load authorities for entity resolution
 	authMgr := authority.NewManager(a.gh)
 	if err := authMgr.Load("main"); err != nil {
 		slog.Warn("Failed to load authorities", "error", err)
 	}
 
-	for _, r := range results {
-		if strings.HasSuffix(r.Href, ".pdf") {
-			continue
-		}
-
-		// Skip sources that have already failed in this run
-		if failedSources[r.Href] {
-			log.Printf("Skipping previously failed source: %s", r.Href)
-			continue
-		}
-
-		// Check if source is an encyclopedia
-		domain := extractDomain(r.Href)
-		encCheck, err := a.llm.IsEncyclopediaSource(ctx, domain, r.Href, r.Title)
-		if err != nil {
-			log.Printf("Failed to check encyclopedia status for %s: %v", domain, err)
-		} else if encCheck.IsEncyclopedia {
-			log.Printf("Skipping encyclopedia source: %s (%s)", domain, encCheck.Reason)
-			continue
-		}
-
-		log.Printf("Checking source: %s", r.Href)
-		content, err := a.search.FetchContent(r.Href)
-		if err != nil {
-			continue
-		}
-
-		summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
-		if err != nil {
-			continue
-		}
-
-		if summary.Relevant {
-			sourceInfo = SourceInfo{
-				Index:   1,
-				URL:     r.Href,
-				Title:   r.Title,
-				Summary: summary.Summary,
-			}
-			found = true
-			log.Printf("Found relevant source: %s", r.Title)
-			break
-		}
+	// Search for sources with global ignore list, metadata tracking, and pagination
+	query := topic + " encyclopedia overview"
+	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, failedSources)
+	if err != nil {
+		return err
 	}
 
-	if !found {
-		return fmt.Errorf("could not find a relevant non-encyclopedia source for %s", topic)
+	sourceInfo := searchResult.Source
+
+	// Save article metadata
+	if searchResult.Metadata != nil {
+		if saveErr := a.saveArticleMetadata(branchName, searchResult.Metadata); saveErr != nil {
+			slog.Warn("Failed to save article metadata", "error", saveErr)
+		}
 	}
 
 	// Save Source
@@ -763,7 +1044,9 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 	miniArticle, err := a.llm.GenerateMiniArticle(ctx, topic, sourceInfo.Title, sourceInfo.Summary)
 	if err != nil {
 		// Mark this source as failed so we don't retry it
-		failedSources[sourceInfo.URL] = true
+		if failedSources != nil {
+			failedSources[sourceInfo.URL] = true
+		}
 		log.Printf("Marking source as failed: %s", sourceInfo.URL)
 		return fmt.Errorf("failed to generate mini article: %w", err)
 	}
@@ -897,76 +1180,32 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	log.Printf("[Mode A] Searching for new source for topic '%s'", topic)
 	actionLog.WriteString("\n### Search for New Source\n\n")
 
-	// Search for a new source (excluding encyclopedias)
+	// Search for a new source using helper with global ignore list, metadata, and pagination
 	query := topic + " details facts"
-	results, err := a.search.Search(query)
+	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, failedSources)
 	if err != nil {
-		actionLog.WriteString(fmt.Sprintf("- **Error:** Search failed: %v\n", err))
-		return fmt.Errorf("search failed: %w", err)
+		actionLog.WriteString(fmt.Sprintf("- **Error:** %v\n", err))
+		return err
 	}
 
-	actionLog.WriteString(fmt.Sprintf("- Found %d search results\n", len(results)))
+	sourceInfo := searchResult.Source
+	sourceInfo.Index = rand.Intn(1000) + 100
 
-	var sourceInfo SourceInfo
-	found := false
-
-	for _, r := range results {
-		if strings.HasSuffix(r.Href, ".pdf") {
-			continue
+	// Save updated metadata
+	if searchResult.Metadata != nil {
+		// Track skipped sources in result
+		for _, skipped := range searchResult.Metadata.SourcesSkipped {
+			result.SkippedSources = append(result.SkippedSources, skipped.Domain)
 		}
-
-		// Skip sources that have already failed in this run
-		if failedSources[r.Href] {
-			log.Printf("[Mode A] Skipping previously failed source: %s", r.Href)
-			actionLog.WriteString(fmt.Sprintf("- Skipped previously failed: %s\n", r.Href))
-			continue
-		}
-
-		// Check if source is an encyclopedia
-		domain := extractDomain(r.Href)
-		encCheck, err := a.llm.IsEncyclopediaSource(ctx, domain, r.Href, r.Title)
-		if err != nil {
-			log.Printf("[Mode A] Failed to check encyclopedia status for %s: %v", domain, err)
-		} else if encCheck.IsEncyclopedia {
-			log.Printf("[Mode A] Skipping encyclopedia source: %s (%s)", domain, encCheck.Reason)
-			actionLog.WriteString(fmt.Sprintf("- Skipped encyclopedia: %s (%s)\n", domain, encCheck.Reason))
-			result.SkippedSources = append(result.SkippedSources, domain)
-			continue
-		}
-
-		log.Printf("[Mode A] Fetching content from: %s", r.Href)
-		content, err := a.search.FetchContent(r.Href)
-		if err != nil {
-			log.Printf("[Mode A] Failed to fetch: %v", err)
-			continue
-		}
-
-		summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
-		if err != nil {
-			log.Printf("[Mode A] Failed to summarize: %v", err)
-			continue
-		}
-
-		if summary.Relevant {
-			sourceInfo = SourceInfo{
-				Index:   rand.Intn(1000) + 100,
-				URL:     r.Href,
-				Title:   r.Title,
-				Summary: summary.Summary,
-			}
-			found = true
-			result.SourceTitle = r.Title
-			result.SourceURL = r.Href
-			log.Printf("[Mode A] Found relevant source: %s", r.Title)
-			actionLog.WriteString(fmt.Sprintf("- **Selected source:** [%s](%s)\n", r.Title, r.Href))
-			break
+		if saveErr := a.saveArticleMetadata(branchName, searchResult.Metadata); saveErr != nil {
+			slog.Warn("Failed to save article metadata", "error", saveErr)
 		}
 	}
 
-	if !found {
-		actionLog.WriteString("- **Result:** No suitable non-encyclopedia sources found\n")
-		return fmt.Errorf("no suitable non-encyclopedia sources found for %s", topic)
-	}
+	result.SourceTitle = sourceInfo.Title
+	result.SourceURL = sourceInfo.URL
+	log.Printf("[Mode A] Found relevant source: %s", sourceInfo.Title)
+	actionLog.WriteString(fmt.Sprintf("- **Selected source:** [%s](%s)\n", sourceInfo.Title, sourceInfo.URL))
 
 	// Generate a mini-article from the new source
 	log.Printf("[Mode A] Generating mini-article from new source")
@@ -997,32 +1236,57 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	existingSectionsStr := formatSectionsForLLM(existingSections)
 	newSectionsStr := formatSectionsForLLM(newSections)
 
-	// Compare sections
+	// Compare sections - this now returns ALL valuable sections to add
 	comparison, err := a.llm.CompareSections(ctx, topic, articleContent, existingSectionsStr, newArticle, newSectionsStr)
 	if err != nil {
 		actionLog.WriteString(fmt.Sprintf("- **Error:** Section comparison failed: %v\n", err))
 		return fmt.Errorf("section comparison failed: %w", err)
 	}
 
-	if !comparison.HasNewSection {
-		actionLog.WriteString(fmt.Sprintf("- **Result:** No valuable new section to add\n"))
-		actionLog.WriteString(fmt.Sprintf("- **Reason:** %s\n", comparison.Reason))
-		log.Printf("[Mode A] No new section to add: %s", comparison.Reason)
-		return nil
+	if !comparison.HasNewSection || len(comparison.SectionsToAdd) == 0 {
+		// Check legacy single section field for backward compatibility
+		if comparison.SectionTitle != "" && comparison.SectionContent != "" {
+			comparison.SectionsToAdd = []llm.SectionToAdd{{
+				Title:       comparison.SectionTitle,
+				Content:     comparison.SectionContent,
+				InsertAfter: comparison.InsertAfter,
+				Reason:      comparison.Reason,
+			}}
+		} else {
+			actionLog.WriteString(fmt.Sprintf("- **Result:** No valuable new sections to add\n"))
+			actionLog.WriteString(fmt.Sprintf("- **Reason:** %s\n", comparison.Reason))
+			log.Printf("[Mode A] No new sections to add: %s", comparison.Reason)
+			return nil
+		}
 	}
 
-	actionLog.WriteString(fmt.Sprintf("- **New section found:** %s\n", comparison.SectionTitle))
-	actionLog.WriteString(fmt.Sprintf("- **Insert after:** %s\n", comparison.InsertAfter))
-	actionLog.WriteString(fmt.Sprintf("- **Reason:** %s\n", comparison.Reason))
+	actionLog.WriteString(fmt.Sprintf("- **Found %d valuable sections to add**\n", len(comparison.SectionsToAdd)))
 
-	// Insert the new section into the article
-	updatedContent := insertSection(articleContent, comparison.InsertAfter, comparison.SectionTitle, comparison.SectionContent)
+	// Load current article for modifications
+	updatedContent := articleContent
+	var addedSections []string
+
+	// Add ALL valuable sections one by one
+	for i, section := range comparison.SectionsToAdd {
+		actionLog.WriteString(fmt.Sprintf("\n#### Section %d: %s\n", i+1, section.Title))
+		actionLog.WriteString(fmt.Sprintf("- Insert after: %s\n", section.InsertAfter))
+		actionLog.WriteString(fmt.Sprintf("- Reason: %s\n", section.Reason))
+
+		// Insert the section
+		updatedContent = insertSection(updatedContent, section.InsertAfter, section.Title, section.Content)
+		addedSections = append(addedSections, section.Title)
+		log.Printf("[Mode A] Queued section '%s' for addition", section.Title)
+	}
 
 	// Update iteration count
 	updatedContent = incrementIterationCount(updatedContent)
 
-	// Save updated article
-	if err := a.gh.UpdateFile(branchName, articlePath, fmt.Sprintf("Add section '%s' to %s", comparison.SectionTitle, topic), updatedContent, articleSHA); err != nil {
+	// Save updated article with all new sections
+	commitMsg := fmt.Sprintf("Add %d section(s) to %s", len(addedSections), topic)
+	if len(addedSections) == 1 {
+		commitMsg = fmt.Sprintf("Add section '%s' to %s", addedSections[0], topic)
+	}
+	if err := a.gh.UpdateFile(branchName, articlePath, commitMsg, updatedContent, articleSHA); err != nil {
 		actionLog.WriteString(fmt.Sprintf("- **Error:** Failed to save article: %v\n", err))
 		return fmt.Errorf("failed to save article: %w", err)
 	}
@@ -1031,9 +1295,10 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	authMgr := authority.NewManager(a.gh)
 	_ = a.saveSourceSummary(ctx, sourceInfo, topic, slug, branchName, authMgr, false)
 
-	result.SectionName = comparison.SectionTitle
-	actionLog.WriteString(fmt.Sprintf("\n### Result\n\n- **Success:** Added section '%s' to article\n", comparison.SectionTitle))
-	log.Printf("[Mode A] Successfully added section '%s' to article '%s'", comparison.SectionTitle, topic)
+	result.SectionsAdded = addedSections
+	result.SectionName = strings.Join(addedSections, ", ")
+	actionLog.WriteString(fmt.Sprintf("\n### Result\n\n- **Success:** Added %d section(s) to article: %s\n", len(addedSections), result.SectionName))
+	log.Printf("[Mode A] Successfully added %d section(s) to article '%s': %v", len(addedSections), topic, addedSections)
 	return nil
 }
 
@@ -1080,78 +1345,36 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 		actionLog.WriteString("- **Warning:** Could not extract section content\n")
 	}
 
-	// Search for more details about this specific section
+	// Search for more details about this specific section using helper with global ignore list, metadata, and pagination
 	query := fmt.Sprintf("%s %s", topic, selectedSection.Title)
 	log.Printf("[Mode B] Searching for: %s", query)
 	actionLog.WriteString(fmt.Sprintf("- **Search query:** %s\n", query))
 
-	results, err := a.search.Search(query)
-	if err != nil {
-		actionLog.WriteString(fmt.Sprintf("- **Error:** Search failed: %v\n", err))
-		return fmt.Errorf("search failed: %w", err)
-	}
-
-	actionLog.WriteString(fmt.Sprintf("- Found %d search results\n", len(results)))
-
-	var sourceInfo SourceInfo
-	found := false
-
 	result.SectionName = selectedSection.Title
 
-	for _, r := range results {
-		if strings.HasSuffix(r.Href, ".pdf") {
-			continue
-		}
+	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, failedSources)
+	if err != nil {
+		actionLog.WriteString(fmt.Sprintf("- **Error:** %v\n", err))
+		return err
+	}
 
-		// Skip sources that have already failed in this run
-		if failedSources[r.Href] {
-			log.Printf("[Mode B] Skipping previously failed source: %s", r.Href)
-			actionLog.WriteString(fmt.Sprintf("- Skipped previously failed: %s\n", r.Href))
-			continue
-		}
+	sourceInfo := searchResult.Source
+	sourceInfo.Index = rand.Intn(1000) + 100
 
-		// Check if source is an encyclopedia
-		domain := extractDomain(r.Href)
-		encCheck, err := a.llm.IsEncyclopediaSource(ctx, domain, r.Href, r.Title)
-		if err != nil {
-			log.Printf("[Mode B] Failed to check encyclopedia status for %s: %v", domain, err)
-		} else if encCheck.IsEncyclopedia {
-			log.Printf("[Mode B] Skipping encyclopedia source: %s", domain)
-			actionLog.WriteString(fmt.Sprintf("- Skipped encyclopedia: %s\n", domain))
-			result.SkippedSources = append(result.SkippedSources, domain)
-			continue
+	// Save updated metadata
+	if searchResult.Metadata != nil {
+		// Track skipped sources in result
+		for _, skipped := range searchResult.Metadata.SourcesSkipped {
+			result.SkippedSources = append(result.SkippedSources, skipped.Domain)
 		}
-
-		log.Printf("[Mode B] Fetching content from: %s", r.Href)
-		content, err := a.search.FetchContent(r.Href)
-		if err != nil {
-			continue
-		}
-
-		summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
-		if err != nil {
-			continue
-		}
-
-		if summary.Relevant {
-			sourceInfo = SourceInfo{
-				Index:   rand.Intn(1000) + 100,
-				URL:     r.Href,
-				Title:   r.Title,
-				Summary: summary.Summary,
-			}
-			found = true
-			result.SourceTitle = r.Title
-			result.SourceURL = r.Href
-			actionLog.WriteString(fmt.Sprintf("- **Selected source:** [%s](%s)\n", r.Title, r.Href))
-			break
+		if saveErr := a.saveArticleMetadata(branchName, searchResult.Metadata); saveErr != nil {
+			slog.Warn("Failed to save article metadata", "error", saveErr)
 		}
 	}
 
-	if !found {
-		actionLog.WriteString("- **Result:** No suitable non-encyclopedia sources found\n")
-		return fmt.Errorf("no suitable sources found for section improvement")
-	}
+	result.SourceTitle = sourceInfo.Title
+	result.SourceURL = sourceInfo.URL
+	actionLog.WriteString(fmt.Sprintf("- **Selected source:** [%s](%s)\n", sourceInfo.Title, sourceInfo.URL))
 
 	// Merge the current section with new information
 	log.Printf("[Mode B] Merging section content")

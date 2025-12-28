@@ -36,9 +36,10 @@ func init() {
 }
 
 type Agent struct {
-	gh     repository.RepoManager
-	search search.Searcher
-	llm    llm.Generator
+	gh             repository.RepoManager
+	search         search.Searcher
+	llm            llm.Generator
+	ignoredDomains map[string]bool // Global list of encyclopedia domains to skip
 }
 
 func debugBasePath(slug string) string {
@@ -66,6 +67,34 @@ func (a *Agent) saveDebugText(branchName, path, message, content string) {
 	}
 }
 
+// loadIgnoredDomains loads the global encyclopedia domain ignore list from main branch
+func (a *Agent) loadIgnoredDomains() {
+	a.ignoredDomains = make(map[string]bool)
+
+	content, _, err := a.gh.GetFile("main", "Compendium/_config/ignored-domains.txt")
+	if err != nil {
+		slog.Warn("Failed to load ignored domains list", "error", err)
+		return
+	}
+
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		a.ignoredDomains[line] = true
+	}
+
+	log.Printf("Loaded %d ignored domains from global list", len(a.ignoredDomains))
+}
+
+// isDomainIgnored checks if a domain is in the global ignore list
+func (a *Agent) isDomainIgnored(domain string) bool {
+	return a.ignoredDomains[domain]
+}
+
 func NewAgent(ctx context.Context, repoPath string) (*Agent, error) {
 	ghClient, err := github.NewClient(ctx)
 	if err != nil {
@@ -81,18 +110,25 @@ func NewAgent(ctx context.Context, repoPath string) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}
-	return &Agent{
-		gh:     repoMgr,
-		search: search.NewClient(),
-		llm:    llmClient,
-	}, nil
+	agent := &Agent{
+		gh:             repoMgr,
+		search:         search.NewClient(),
+		llm:            llmClient,
+		ignoredDomains: make(map[string]bool),
+	}
+
+	// Load global ignored domains list
+	agent.loadIgnoredDomains()
+
+	return agent, nil
 }
 
 func NewAgentWithDeps(gh repository.RepoManager, s search.Searcher, l llm.Generator) *Agent {
 	return &Agent{
-		gh:     gh,
-		search: s,
-		llm:    l,
+		gh:             gh,
+		search:         s,
+		llm:            l,
+		ignoredDomains: make(map[string]bool),
 	}
 }
 

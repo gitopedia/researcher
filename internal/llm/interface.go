@@ -70,9 +70,19 @@ type ArticleSection struct {
 	Content    string `json:"content,omitempty"` // The actual section content (optional)
 }
 
-// SectionComparisonResult indicates if a new section should be added
+// SectionToAdd represents a single section that should be added to an article
+type SectionToAdd struct {
+	Title       string `json:"title"`
+	Content     string `json:"content"`
+	InsertAfter string `json:"insert_after"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// SectionComparisonResult indicates if new sections should be added
 type SectionComparisonResult struct {
-	HasNewSection  bool   `json:"has_new_section"`
+	HasNewSection  bool           `json:"has_new_section"`
+	SectionsToAdd  []SectionToAdd `json:"sections_to_add,omitempty"`
+	// Legacy single section fields for backward compatibility
 	SectionTitle   string `json:"section_title,omitempty"`
 	SectionContent string `json:"section_content,omitempty"`
 	InsertAfter    string `json:"insert_after,omitempty"`
