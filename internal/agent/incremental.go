@@ -162,8 +162,14 @@ func (meta *ArticleMetadata) addSourceSkipped(url, domain, reason, detectedBy st
 	})
 }
 
-// addSearch adds a search record
+// addSearch adds a search record (skips if same query+page already exists)
 func (meta *ArticleMetadata) addSearch(query string, resultsFound, page int) {
+	// Check if this query+page combination already exists
+	for _, s := range meta.Searches {
+		if s.Query == query && s.Page == page {
+			return // Skip duplicate
+		}
+	}
 	meta.Searches = append(meta.Searches, SearchRecord{
 		Query:        query,
 		Timestamp:    time.Now().UTC(),
@@ -491,7 +497,7 @@ func (a *Agent) stepDiscovery(ctx context.Context, issue *gh.Issue, state *Resea
 		log.Printf("Branch %s might already exist, continuing...", state.Branch)
 	}
 
-	query := topic + " encyclopedia overview"
+	query := topic + " explained"
 	results, err := a.search.Search(query)
 	if err != nil {
 		return err
@@ -698,7 +704,7 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	}
 
 	// 2. Search for source with global ignore list, metadata tracking, and pagination
-	query := topic + " encyclopedia overview"
+	query := topic + " explained"
 	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, nil)
 	if err != nil {
 		return err
@@ -848,12 +854,22 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 			continue
 		}
 
-		// Random selection
-		rand.Seed(time.Now().UnixNano())
-		article := articles[rand.Intn(len(articles))]
+		// Separate incomplete and completed articles
+		var incompleteArticles, completedArticles []github.ResearchArticle
+		for _, a := range articles {
+			if a.Completed {
+				completedArticles = append(completedArticles, a)
+			} else {
+				incompleteArticles = append(incompleteArticles, a)
+			}
+		}
 
-		if !article.Completed {
-			// Create new article
+		rand.Seed(time.Now().UnixNano())
+
+		// Prioritize incomplete articles - only improve if all are complete
+		if len(incompleteArticles) > 0 {
+			// Create new article (prioritize incomplete)
+			article := incompleteArticles[rand.Intn(len(incompleteArticles))]
 			log.Printf("Processing NEW article: '%s'", article.Name)
 			if err := a.processNewArticle(ctx, issue, article.Name, branchName, failedSources); err != nil {
 				slog.Warn("Failed to create article", "article", article.Name, "error", err)
@@ -867,8 +883,9 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 			if err := a.checkOffArticle(issueNum, article.Name); err != nil {
 				slog.Warn("Failed to check off article", "article", article.Name, "error", err)
 			}
-		} else {
-			// Improve existing article
+		} else if len(completedArticles) > 0 {
+			// All articles complete, improve existing
+			article := completedArticles[rand.Intn(len(completedArticles))]
 			log.Printf("Processing EXISTING article for improvement: '%s'", article.Name)
 			result, err := a.improveArticle(ctx, issue, article.Name, branchName, failedSources)
 			if err != nil {
@@ -1019,7 +1036,7 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 	}
 
 	// Search for sources with global ignore list, metadata tracking, and pagination
-	query := topic + " encyclopedia overview"
+	query := topic + " explained"
 	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, failedSources)
 	if err != nil {
 		return err
@@ -1281,6 +1298,9 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	// Update iteration count
 	updatedContent = incrementIterationCount(updatedContent)
 
+	// Append reference to References section
+	updatedContent = appendReference(updatedContent, sourceInfo.Title, sourceInfo.URL)
+
 	// Save updated article with all new sections
 	commitMsg := fmt.Sprintf("Add %d section(s) to %s", len(addedSections), topic)
 	if len(addedSections) == 1 {
@@ -1414,6 +1434,9 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 
 	// Update iteration count
 	updatedContent = incrementIterationCount(updatedContent)
+
+	// Append reference to References section
+	updatedContent = appendReference(updatedContent, sourceInfo.Title, sourceInfo.URL)
 
 	// Save updated article
 	if err := a.gh.UpdateFile(branchName, articlePath, fmt.Sprintf("Improve section '%s' in %s", selectedSection.Title, topic), updatedContent, articleSHA); err != nil {
@@ -1673,6 +1696,58 @@ func incrementIterationCount(content string) string {
 		}
 
 		result.WriteString(line + "\n")
+	}
+
+	return strings.TrimRight(result.String(), "\n")
+}
+
+// appendReference adds a new reference to the References section
+func appendReference(content string, sourceTitle, sourceURL string) string {
+	lines := strings.Split(content, "\n")
+	var result strings.Builder
+
+	// Count existing references to determine next number
+	refCount := 0
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "[^") {
+			refCount++
+		}
+	}
+	nextRef := refCount + 1
+
+	// Find References section and append
+	inReferences := false
+	refAdded := false
+
+	for i, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Check if we're entering References section
+		if strings.HasPrefix(trimmedLine, "## References") || strings.HasPrefix(trimmedLine, "# References") {
+			inReferences = true
+		}
+
+		// If in references and we hit a new section or end, append before it
+		if inReferences && !refAdded {
+			if (strings.HasPrefix(trimmedLine, "#") && !strings.Contains(trimmedLine, "References")) || i == len(lines)-1 {
+				// Append reference before this line
+				if i == len(lines)-1 {
+					result.WriteString(line + "\n")
+				}
+				result.WriteString(fmt.Sprintf("[^%d]: [%s](%s)\n", nextRef, sourceTitle, sourceURL))
+				refAdded = true
+				if i == len(lines)-1 {
+					continue
+				}
+			}
+		}
+
+		result.WriteString(line + "\n")
+	}
+
+	// If no references section found or couldn't add, append at end
+	if !refAdded {
+		result.WriteString(fmt.Sprintf("\n[^%d]: [%s](%s)\n", nextRef, sourceTitle, sourceURL))
 	}
 
 	return strings.TrimRight(result.String(), "\n")
