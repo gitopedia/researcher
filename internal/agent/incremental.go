@@ -41,6 +41,19 @@ type StepState struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// ImprovementResult tracks the outcome of an article improvement attempt
+type ImprovementResult struct {
+	ArticleName    string
+	Mode           string // "Add New Section" or "Improve Existing Section"
+	Success        bool
+	SectionName    string // Section added or improved
+	SourceTitle    string
+	SourceURL      string
+	Score          int    // For Mode B improvements
+	ErrorMessage   string
+	SkippedSources []string // Encyclopedia sources that were skipped
+}
+
 func (a *Agent) loadState(slug string) (*ResearchState, error) {
 	statePath := fmt.Sprintf("%s/state.json", debugBasePath(slug))
 	content, _, err := a.gh.GetFile("", statePath)
@@ -482,15 +495,11 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		return fmt.Errorf("failed to create branch: %w", err)
 	}
 
-	// Post starting comment to issue
-	startComment := fmt.Sprintf("## 🤖 Research Bot Started\n\n- **Branch:** `%s`\n- **Planned iterations:** %d\n- **Started:** %s", branchName, iterations, time.Now().UTC().Format(time.RFC3339))
-	if err := a.gh.CommentOnIssue(issueNum, startComment); err != nil {
-		slog.Warn("Failed to post start comment", "issue", issueNum, "error", err)
-	}
+	startTime := time.Now()
 
 	// Track actions for summary
 	var articlesCreated []string
-	var articlesImproved []string
+	var improvementResults []*ImprovementResult
 	var errors []string
 
 	// Process articles in iterations
@@ -533,23 +542,27 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		} else {
 			// Improve existing article
 			log.Printf("Processing EXISTING article for improvement: '%s'", article.Name)
-			if err := a.improveArticle(ctx, issue, article.Name, branchName); err != nil {
+			result, err := a.improveArticle(ctx, issue, article.Name, branchName)
+			if err != nil {
 				slog.Warn("Failed to improve article", "article", article.Name, "error", err)
 				errors = append(errors, fmt.Sprintf("Failed to improve '%s': %v", article.Name, err))
-			} else {
-				articlesImproved = append(articlesImproved, article.Name)
+			}
+			if result != nil {
+				improvementResults = append(improvementResults, result)
 			}
 		}
 	}
 
 	log.Printf("Completed %d iterations for topic #%d", iterations, issueNum)
 
-	// Post summary comment to issue
+	// Build comprehensive summary
 	var summaryBuilder strings.Builder
 	summaryBuilder.WriteString("## 📊 Research Bot Summary\n\n")
 	summaryBuilder.WriteString(fmt.Sprintf("- **Branch:** `%s`\n", branchName))
-	summaryBuilder.WriteString(fmt.Sprintf("- **Completed:** %s\n\n", time.Now().UTC().Format(time.RFC3339)))
+	summaryBuilder.WriteString(fmt.Sprintf("- **Duration:** %s\n", time.Since(startTime).Round(time.Second)))
+	summaryBuilder.WriteString(fmt.Sprintf("- **Iterations:** %d\n\n", iterations))
 
+	// Articles created
 	if len(articlesCreated) > 0 {
 		summaryBuilder.WriteString(fmt.Sprintf("### ✅ Articles Created (%d)\n", len(articlesCreated)))
 		for _, a := range articlesCreated {
@@ -558,14 +571,31 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		summaryBuilder.WriteString("\n")
 	}
 
-	if len(articlesImproved) > 0 {
-		summaryBuilder.WriteString(fmt.Sprintf("### 📝 Articles Improved (%d)\n", len(articlesImproved)))
-		for _, a := range articlesImproved {
-			summaryBuilder.WriteString(fmt.Sprintf("- %s\n", a))
+	// Articles improved - with details
+	successfulImprovements := []*ImprovementResult{}
+	for _, r := range improvementResults {
+		if r.Success {
+			successfulImprovements = append(successfulImprovements, r)
+		}
+	}
+
+	if len(successfulImprovements) > 0 {
+		summaryBuilder.WriteString(fmt.Sprintf("### 📝 Articles Improved (%d)\n", len(successfulImprovements)))
+		for _, r := range successfulImprovements {
+			if r.Mode == "Add New Section" {
+				summaryBuilder.WriteString(fmt.Sprintf("- **%s**: Added section \"%s\"", r.ArticleName, r.SectionName))
+			} else {
+				summaryBuilder.WriteString(fmt.Sprintf("- **%s**: Improved section \"%s\" (score: %d/10)", r.ArticleName, r.SectionName, r.Score))
+			}
+			if r.SourceTitle != "" {
+				summaryBuilder.WriteString(fmt.Sprintf(" — [%s](%s)", r.SourceTitle, r.SourceURL))
+			}
+			summaryBuilder.WriteString("\n")
 		}
 		summaryBuilder.WriteString("\n")
 	}
 
+	// Errors
 	if len(errors) > 0 {
 		summaryBuilder.WriteString(fmt.Sprintf("### ⚠️ Errors (%d)\n", len(errors)))
 		for _, e := range errors {
@@ -574,10 +604,12 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		summaryBuilder.WriteString("\n")
 	}
 
-	if len(articlesCreated) == 0 && len(articlesImproved) == 0 {
+	// No activity
+	if len(articlesCreated) == 0 && len(successfulImprovements) == 0 {
 		summaryBuilder.WriteString("No articles were processed in this run.\n")
 	}
 
+	// Post single summary comment
 	if err := a.gh.CommentOnIssue(issueNum, summaryBuilder.String()); err != nil {
 		slog.Warn("Failed to post summary comment", "issue", issueNum, "error", err)
 	}
@@ -785,10 +817,14 @@ summary: "Initial overview based on %s"
 // improveArticle improves an existing article using one of two modes:
 // Mode A: Find a new source, create temp article, compare sections, add new section if valuable
 // Mode B: Select an existing section, search for more details, improve that section
-func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName, branchName string) error {
+func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName, branchName string) (*ImprovementResult, error) {
 	topic := cleanTopic(articleName)
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
-	issueNum := *issue.Number
+
+	result := &ImprovementResult{
+		ArticleName:    articleName,
+		SkippedSources: []string{},
+	}
 
 	log.Printf("[Improvement] Starting improvement for article '%s' on branch '%s'", topic, branchName)
 
@@ -799,7 +835,8 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 		// Try to find the article on main branch
 		articleContent, articleSHA, err = a.gh.GetFile("main", articlePath)
 		if err != nil {
-			return fmt.Errorf("failed to load article %s: %w", articlePath, err)
+			result.ErrorMessage = fmt.Sprintf("failed to load article %s: %v", articlePath, err)
+			return result, fmt.Errorf("failed to load article %s: %w", articlePath, err)
 		}
 	}
 
@@ -814,34 +851,37 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 	rand.Seed(time.Now().UnixNano())
 	useAddNewSection := rand.Intn(2) == 0
 
+	if useAddNewSection {
+		result.Mode = "Add New Section"
+	} else {
+		result.Mode = "Improve Existing Section"
+	}
+
 	var actionLog strings.Builder
 	actionLog.WriteString(fmt.Sprintf("## Improvement Attempt: %s\n\n", topic))
-	actionLog.WriteString(fmt.Sprintf("- **Mode:** %s\n", map[bool]string{true: "Add New Section", false: "Improve Existing Section"}[useAddNewSection]))
+	actionLog.WriteString(fmt.Sprintf("- **Mode:** %s\n", result.Mode))
 
 	if useAddNewSection {
-		err = a.improveModeAddSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog)
+		err = a.improveModeAddSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result)
 	} else {
-		err = a.improveModeImproveSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog)
+		err = a.improveModeImproveSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result)
 	}
 
 	// Save action log to debug folder
 	debugPath := fmt.Sprintf("%s/improvement-log-%s.md", debugBasePath(slug), time.Now().Format("20060102-150405"))
 	a.saveDebugText(branchName, debugPath, "Save improvement log", actionLog.String())
 
-	// Comment on issue with summary
-	comment := actionLog.String()
-	if len(comment) > 60000 { // GitHub comment limit
-		comment = comment[:60000] + "\n\n*[Truncated]*"
-	}
-	if err := a.gh.CommentOnIssue(issueNum, comment); err != nil {
-		slog.Warn("Failed to comment on issue", "issue", issueNum, "error", err)
+	if err != nil {
+		result.ErrorMessage = err.Error()
+		return result, err
 	}
 
-	return err
+	result.Success = true
+	return result, nil
 }
 
 // improveModeAddSection implements Mode A: Find new source, create temp article, add new section
-func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder) error {
+func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult) error {
 	log.Printf("[Mode A] Searching for new source for topic '%s'", topic)
 	actionLog.WriteString("\n### Search for New Source\n\n")
 
@@ -871,6 +911,7 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 		} else if encCheck.IsEncyclopedia {
 			log.Printf("[Mode A] Skipping encyclopedia source: %s (%s)", domain, encCheck.Reason)
 			actionLog.WriteString(fmt.Sprintf("- Skipped encyclopedia: %s (%s)\n", domain, encCheck.Reason))
+			result.SkippedSources = append(result.SkippedSources, domain)
 			continue
 		}
 
@@ -895,6 +936,8 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 				Summary: summary.Summary,
 			}
 			found = true
+			result.SourceTitle = r.Title
+			result.SourceURL = r.Href
 			log.Printf("[Mode A] Found relevant source: %s", r.Title)
 			actionLog.WriteString(fmt.Sprintf("- **Selected source:** [%s](%s)\n", r.Title, r.Href))
 			break
@@ -966,13 +1009,14 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	authMgr := authority.NewManager(a.gh)
 	_ = a.saveSourceSummary(ctx, sourceInfo, topic, slug, branchName, authMgr, false)
 
+	result.SectionName = comparison.SectionTitle
 	actionLog.WriteString(fmt.Sprintf("\n### Result\n\n- **Success:** Added section '%s' to article\n", comparison.SectionTitle))
 	log.Printf("[Mode A] Successfully added section '%s' to article '%s'", comparison.SectionTitle, topic)
 	return nil
 }
 
 // improveModeImproveSection implements Mode B: Select existing section, search for details, improve it
-func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder) error {
+func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult) error {
 	log.Printf("[Mode B] Improving existing section for topic '%s'", topic)
 
 	if len(existingSections) == 0 {
@@ -1030,6 +1074,8 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 	var sourceInfo SourceInfo
 	found := false
 
+	result.SectionName = selectedSection.Title
+
 	for _, r := range results {
 		if strings.HasSuffix(r.Href, ".pdf") {
 			continue
@@ -1043,6 +1089,7 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 		} else if encCheck.IsEncyclopedia {
 			log.Printf("[Mode B] Skipping encyclopedia source: %s", domain)
 			actionLog.WriteString(fmt.Sprintf("- Skipped encyclopedia: %s\n", domain))
+			result.SkippedSources = append(result.SkippedSources, domain)
 			continue
 		}
 
@@ -1065,6 +1112,8 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 				Summary: summary.Summary,
 			}
 			found = true
+			result.SourceTitle = r.Title
+			result.SourceURL = r.Href
 			actionLog.WriteString(fmt.Sprintf("- **Selected source:** [%s](%s)\n", r.Title, r.Href))
 			break
 		}
@@ -1091,6 +1140,7 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 		score = &llm.ImprovementScore{Score: 7, Recommendation: "accept", IsImproved: true}
 	}
 
+	result.Score = score.Score
 	actionLog.WriteString(fmt.Sprintf("\n### Improvement Score\n\n"))
 	actionLog.WriteString(fmt.Sprintf("- **Score:** %d/10\n", score.Score))
 	actionLog.WriteString(fmt.Sprintf("- **Recommendation:** %s\n", score.Recommendation))
@@ -1104,7 +1154,7 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 	if score.Score < 7 || score.Recommendation != "accept" {
 		actionLog.WriteString(fmt.Sprintf("\n- **Result:** Improvement rejected (score too low)\n"))
 		log.Printf("[Mode B] Improvement rejected: score=%d, recommendation=%s", score.Score, score.Recommendation)
-		return nil
+		return fmt.Errorf("improvement rejected: score %d/10", score.Score)
 	}
 
 	// Replace the section in the article
