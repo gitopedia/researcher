@@ -43,16 +43,16 @@ type StepState struct {
 
 // ImprovementResult tracks the outcome of an article improvement attempt
 type ImprovementResult struct {
-	ArticleName     string
-	Mode            string // "Add New Section" or "Improve Existing Section"
-	Success         bool
-	SectionName     string   // Section added or improved
-	SectionsAdded   []string // For batch Mode A improvements
-	SourceTitle     string
-	SourceURL       string
-	Score           int // For Mode B improvements
-	ErrorMessage    string
-	SkippedSources  []string // Encyclopedia sources that were skipped
+	ArticleName    string
+	Mode           string // "Add New Section" or "Improve Existing Section"
+	Success        bool
+	SectionName    string   // Section added or improved
+	SectionsAdded  []string // For batch Mode A improvements
+	SourceTitle    string
+	SourceURL      string
+	Score          int // For Mode B improvements
+	ErrorMessage   string
+	SkippedSources []string // Encyclopedia sources that were skipped
 }
 
 // ArticleMetadata tracks sources for an article
