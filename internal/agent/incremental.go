@@ -814,6 +814,7 @@ func getEnvBool(key string, defaultVal bool) bool {
 // It processes N articles (creating new or improving existing), then creates a PR
 func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue, botUsername string) error {
 	iterations := getEnvInt("TOPIC_PROCESSING_ITERATIONS", 100)
+	improvementsPerNewArticle := getEnvInt("IMPROVEMENTS_PER_NEW_ARTICLE", 10)
 	issueNum := *issue.Number
 	topicTitle := issue.GetTitle()
 
@@ -883,6 +884,22 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 			if err := a.checkOffArticle(issueNum, article.Name); err != nil {
 				slog.Warn("Failed to check off article", "article", article.Name, "error", err)
 			}
+
+			// Run improvement iterations on the newly created article
+			log.Printf("Running %d improvement iterations on new article '%s'", improvementsPerNewArticle, article.Name)
+			for impIter := 1; impIter <= improvementsPerNewArticle; impIter++ {
+				log.Printf("[New Article Improvement %d/%d] Improving '%s'", impIter, improvementsPerNewArticle, article.Name)
+				result, err := a.improveArticle(ctx, issue, article.Name, branchName, failedSources)
+				if err != nil {
+					slog.Warn("Failed to improve new article", "article", article.Name, "iteration", impIter, "error", err)
+					errors = append(errors, fmt.Sprintf("Failed to improve '%s' (iter %d): %v", article.Name, impIter, err))
+					// Continue trying more improvements even if one fails
+					continue
+				}
+				if result != nil {
+					improvementResults = append(improvementResults, result)
+				}
+			}
 		} else if len(completedArticles) > 0 {
 			// All articles complete, improve existing
 			article := completedArticles[rand.Intn(len(completedArticles))]
@@ -898,14 +915,19 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		}
 	}
 
-	log.Printf("Completed %d iterations for topic #%d", iterations, issueNum)
+	// Calculate total iterations including per-article improvements
+	totalImprovementIterations := len(articlesCreated) * improvementsPerNewArticle
+	totalIterations := iterations + totalImprovementIterations
+	log.Printf("Completed %d main iterations + %d new-article improvements (%d total) for topic #%d", 
+		iterations, totalImprovementIterations, totalIterations, issueNum)
 
 	// Build comprehensive summary
 	var summaryBuilder strings.Builder
 	summaryBuilder.WriteString("## 📊 Research Bot Summary\n\n")
 	summaryBuilder.WriteString(fmt.Sprintf("- **Branch:** `%s`\n", branchName))
 	summaryBuilder.WriteString(fmt.Sprintf("- **Duration:** %s\n", time.Since(startTime).Round(time.Second)))
-	summaryBuilder.WriteString(fmt.Sprintf("- **Iterations:** %d\n\n", iterations))
+	summaryBuilder.WriteString(fmt.Sprintf("- **Iterations:** %d (+ %d per new article = %d total)\n\n", 
+		iterations, totalImprovementIterations, totalIterations))
 
 	// Articles created
 	if len(articlesCreated) > 0 {
