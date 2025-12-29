@@ -813,7 +813,7 @@ func getEnvBool(key string, defaultVal bool) bool {
 // processTopicWithIterations handles a claimed topic issue by iterating through articles
 // It processes N articles (creating new or improving existing), then creates a PR
 func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue, botUsername string) error {
-	iterations := getEnvInt("TOPIC_PROCESSING_ITERATIONS", 100)
+	iterations := getEnvInt("TOPIC_PROCESSING_ITERATIONS", 50)
 	improvementsPerNewArticle := getEnvInt("IMPROVEMENTS_PER_NEW_ARTICLE", 10)
 	issueNum := *issue.Number
 	topicTitle := issue.GetTitle()
@@ -918,7 +918,7 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 	// Calculate total iterations including per-article improvements
 	totalImprovementIterations := len(articlesCreated) * improvementsPerNewArticle
 	totalIterations := iterations + totalImprovementIterations
-	log.Printf("Completed %d main iterations + %d new-article improvements (%d total) for topic #%d", 
+	log.Printf("Completed %d main iterations + %d new-article improvements (%d total) for topic #%d",
 		iterations, totalImprovementIterations, totalIterations, issueNum)
 
 	// Build comprehensive summary
@@ -926,7 +926,7 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 	summaryBuilder.WriteString("## 📊 Research Bot Summary\n\n")
 	summaryBuilder.WriteString(fmt.Sprintf("- **Branch:** `%s`\n", branchName))
 	summaryBuilder.WriteString(fmt.Sprintf("- **Duration:** %s\n", time.Since(startTime).Round(time.Second)))
-	summaryBuilder.WriteString(fmt.Sprintf("- **Iterations:** %d (+ %d per new article = %d total)\n\n", 
+	summaryBuilder.WriteString(fmt.Sprintf("- **Iterations:** %d (+ %d per new article = %d total)\n\n",
 		iterations, totalImprovementIterations, totalIterations))
 
 	// Articles created
