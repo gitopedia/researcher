@@ -10,13 +10,13 @@ Configuration is loaded from `config/base.env` with optional overrides in `confi
 ## Model Configuration
 
 ```bash
-# Fast model for quick tasks (topic suggestion, JSON conversion)
+# Fast model for quick tasks (topic suggestion, JSON conversion, section extraction)
 LLM_MODEL_FAST=qwen3:8b
 
-# Article model for generation (summarization, content integration)
+# Article model for generation (summarization, article content, section merging)
 LLM_MODEL_ARTICLE=deepseek-r1:14b
 
-# Enable thinking mode for supported models
+# Enable thinking mode for supported models (qwen3, deepseek-r1)
 LLM_THINK_MODE=true
 ```
 
@@ -27,26 +27,46 @@ RUN_PROFILE=test   # Fast iteration: 1 topic, fewer sources
 RUN_PROFILE=prod   # Full fidelity: 10 topics, more sources
 ```
 
-## Key Settings
+## Topic Processing
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PHASE1_TARGET_SOURCES` | 20 | Sources to gather per topic |
+| `TOPIC_PROCESSING_ITERATIONS` | 10 | Iterations per claimed topic |
+| `IMPROVEMENTS_PER_NEW_ARTICLE` | 10 | Improvement passes after creating new article |
+| `CREATE_PR_AFTER_ITERATIONS` | false | Create PR when done (or just commit to branch) |
+| `AUTO_MERGE_READY_PRS` | false | Auto-merge approved PRs at run start |
 | `MAX_TOPICS_PER_RUN` | 10 | Topics processed per run |
-| `MAX_RESEARCH_ROUNDS` | 2 | Gap-filling iterations |
-| `SOURCES_PER_SECTION` | 8 | Sources per article section |
 | `LOOP_INTERVAL_SECONDS` | 60 | Delay between runs |
 
-## Disable Phases
+## Search & Source Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PHASE1_TARGET_SOURCES` | 20 | Target sources to gather per topic |
+| `PHASE1_SEARCH_NUM_QUERIES` | 10 | Different search queries per topic |
+| `TARGET_SUMMARIES_PER_QUERY` | 5 | Summaries to collect per search query |
+| `SOURCE_SUMMARY_MIN_WORDS` | 200 | Minimum words for valid source summary |
+| `SEARCH_MAX_CHARS` | 200000 | Max chars of page text before summarization |
+| `SEARCH_RESULTS_PER_QUERY` | 20 | Search results per query |
+| `SEARCH_MAX_FETCH_CONCURRENCY` | 3 | Concurrent headless browser fetches |
+
+## PR Monitoring
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PR_POLL_INTERVAL_SECONDS` | 30 | How often to poll PR status |
+| `PR_MAX_WAIT_MINUTES` | 30 | Max time to wait for PR ready |
+| `MAX_CONCURRENT_PRS` | 1 | Maximum simultaneous open PRs |
+
+## Knowledge-Base Integration
 
 ```bash
-# Skip specific phases (comma-separated)
-DISABLE_PHASES=phase7           # Skip citations
-DISABLE_PHASES=phase5,phase7    # Skip discovery and citations
+USE_KNOWLEDGE_BASE=false
+KB_API_URL=http://localhost:8081
 ```
 
 ## Debug Mode
 
 ```bash
-RESEARCH_DEBUG_SOURCES=true  # Save raw pages and LLM outputs
+RESEARCH_DEBUG_SOURCES=true  # Save raw pages and LLM outputs to _debug/
 ```

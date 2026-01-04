@@ -1,0 +1,35 @@
+name: Bump Version
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'VERSION'  # Don't trigger on version commits
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Bump patch version
+        run: |
+          VERSION=$(cat VERSION)
+          # Split version into parts
+          IFS='.' read -r major minor patch <<< "$VERSION"
+          # Increment patch
+          patch=$((patch + 1))
+          NEW_VERSION="$major.$minor.$patch"
+          echo "$NEW_VERSION" > VERSION
+          echo "Bumped version: $VERSION -> $NEW_VERSION"
+      
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to $(cat VERSION) [skip ci]"
+          git push
+

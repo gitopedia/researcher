@@ -152,14 +152,42 @@ Then set the issue type to "Research Topic" via GraphQL.
 2. **Domain Created** - Links to root, root updated to link back
 3. **Category Created** - Links to domain, domain updated to link back
 4. **Topic Created** - Links to category, category updated to link back
-5. **Article Selected** - Researcher picks an unchecked article
-6. **Research & PR** - Article created and PR opened
-7. **Article Checked** - Researcher marks `- [x] Article` when complete
+5. **Topic Claimed** - Researcher assigns itself to prevent race conditions
+6. **Articles Processed** - Researcher iterates through unchecked articles
+7. **Summary Posted** - Researcher posts comment summarizing changes
+8. **Topic Released** - Researcher unassigns itself when done
 
-## How the Researcher Picks Articles
+## How the Researcher Claims Topics
 
-1. Uses GraphQL to fetch all issues with "Research Topic" issue type
-2. Parses task list checkboxes from each issue body
-3. Filters to unchecked articles (`- [ ] Article`)
-4. Randomly selects one article to research
-5. After completing research, updates issue body to mark the article as done (`- [x] Article`)
+1. Fetches all open issues with "Research Topic" issue type via GraphQL
+2. Filters to topics that are:
+   - Not assigned to anyone
+   - Don't have the `pending review` label
+   - Don't have an open PR referencing them
+3. Randomly selects one available topic
+4. Claims the topic by assigning itself to the issue
+5. Waits briefly to verify sole ownership (prevents race conditions)
+
+## How the Researcher Processes Articles
+
+Once a topic is claimed, the researcher runs `TOPIC_PROCESSING_ITERATIONS` iterations:
+
+1. Parses task list checkboxes from the issue body
+2. Separates incomplete (`- [ ]`) from completed (`- [x]`) articles
+3. If incomplete articles exist:
+   - Picks one randomly
+   - Creates the article from web sources
+   - Marks the checkbox as done (`- [x]`)
+   - Runs `IMPROVEMENTS_PER_NEW_ARTICLE` improvement passes
+4. If all articles are complete:
+   - Picks a completed article randomly
+   - Runs one improvement iteration (Mode A or Mode B)
+5. Posts a summary comment with all changes made
+6. Unassigns itself from the topic
+
+## Code References
+
+- `processTopicWithIterations()` in `internal/agent/incremental.go`
+- `claimIssue()` in `internal/agent/agent.go`
+- `ParseArticlesFromBody()` in `internal/github/client.go`
+- `CheckArticleInBody()` in `internal/github/client.go`

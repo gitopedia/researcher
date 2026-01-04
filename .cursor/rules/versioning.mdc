@@ -1,60 +1,66 @@
+---
+description: Versioning and release management
+globs: ["VERSION", "CHANGELOG.md", ".github/workflows/*.yml"]
+---
+
 # Versioning and Release Management
 
-This project uses semantic versioning. When making changes, follow these guidelines.
+This project uses semantic versioning with CI-driven patch auto-increment.
 
 ## Version File
 
-The current version is stored in `VERSION` at the repository root. This is a plain text file containing just the version number (e.g., `0.3.0`).
+The current version is stored in `VERSION` at the repository root. This is a plain text file containing just the version number (e.g., `0.3.30`).
 
-## Auto-Incrementing Patch Versions
+## CI-Driven Auto-Increment
 
-Git hooks automatically increment the patch version after each commit:
+A GitHub Actions workflow automatically increments the patch version on every merge to `main`:
 
 ```
-0.3.0 → 0.3.1 → 0.3.2 → 0.3.3 ...
+0.3.29 → 0.3.30 → 0.3.31 → 0.3.32 ...
 ```
 
-This means every commit gets a unique version number without manual intervention.
+### How It Works
 
-### Setup
+1. A commit is merged to `main`
+2. The `version-bump.yml` workflow triggers
+3. It reads the current `VERSION`, increments the patch number
+4. It commits the updated `VERSION` with `[skip ci]` to prevent loops
+5. The version bump appears in the commit history
 
-Run once to install the git hooks:
-```bash
-./scripts/install-hooks.sh
-```
+### Workflow Location
 
-### How it works
-
-The **post-commit hook** automatically increments the patch version after each commit.
+`.github/workflows/version-bump.yml`
 
 ### Manual Version Bumps
 
-- **Minor version** (new features): Edit VERSION to `0.4.0`
-- **Major version** (breaking changes): Edit VERSION to `1.0.0`
+For minor or major version changes, manually edit the `VERSION` file:
 
-After manually setting a new minor/major version, the patch will auto-increment from there:
+- **Minor version** (new features): Change to `0.4.0`
+- **Major version** (breaking changes): Change to `1.0.0`
+
+After your commit merges, CI will continue auto-incrementing the patch from there:
 ```
 Manual: 0.4.0
-Next commits: 0.4.1 → 0.4.2 → 0.4.3 ...
+Next merges: 0.4.1 → 0.4.2 → 0.4.3 ...
 ```
 
 ## When to Update Version
 
-### Patch Version (0.0.X) - Bug fixes
-Increment for:
-- Bug fixes that don't change behavior
+### Patch Version (0.0.X) - Automatic
+Incremented automatically for every merge. Covers:
+- Bug fixes
 - Documentation updates
-- Minor refactoring without feature changes
+- Minor refactoring
 
-### Minor Version (0.X.0) - New features
-Increment for:
+### Minor Version (0.X.0) - Manual
+Manually edit VERSION for:
 - New features or capabilities
 - New configuration options
 - New CLI flags
-- Significant improvements to existing features
+- Significant improvements
 
-### Major Version (X.0.0) - Breaking changes
-Increment for:
+### Major Version (X.0.0) - Manual
+Manually edit VERSION for:
 - Breaking API changes
 - Breaking configuration changes
 - Major architectural changes
@@ -63,7 +69,7 @@ Increment for:
 
 When committing changes, update `CHANGELOG.md`:
 
-1. Add entries under `## [Unreleased]` section (create if it doesn't exist)
+1. Add entries under `## [Unreleased]` section
 2. Use these categories:
    - `### Added` - New features
    - `### Changed` - Changes to existing functionality
@@ -72,7 +78,7 @@ When committing changes, update `CHANGELOG.md`:
    - `### Deprecated` - Features to be removed
    - `### Security` - Security fixes
 
-Example entry:
+Example:
 ```markdown
 ## [Unreleased]
 
@@ -85,9 +91,8 @@ Example entry:
 
 ## Commit Message Guidelines
 
-For version-related commits:
-- `feat:` - New feature (triggers minor version consideration)
-- `fix:` - Bug fix (triggers patch version consideration)
+- `feat:` - New feature (consider minor bump)
+- `fix:` - Bug fix
 - `docs:` - Documentation only
 - `refactor:` - Code change that neither fixes a bug nor adds a feature
 - `perf:` - Performance improvement
@@ -96,15 +101,15 @@ For version-related commits:
 
 ## Release Process
 
-When ready to release a new version:
+When ready to release a new minor/major version:
 
 1. **Update VERSION file** with the new version number
 2. **Update CHANGELOG.md**:
-   - Change `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`
-   - Add comparison link at bottom: `[X.Y.Z]: https://github.com/gitopedia/researcher/compare/vPREV...vX.Y.Z`
-3. **Commit** with message: `release: vX.Y.Z`
-4. **Create git tag**: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
-5. **Push with tags**: `git push origin main --tags`
+   - Change `## [Unreleased]` to `## [X.Y.0] - YYYY-MM-DD`
+   - Add comparison link at bottom
+3. **Create PR** with message: `release: vX.Y.0`
+4. **After merge**, create git tag: `git tag -a vX.Y.0 -m "Release vX.Y.0"`
+5. **Push tag**: `git push origin vX.Y.0`
 
 ## Version in Generated Content
 
@@ -114,30 +119,3 @@ The version is automatically embedded in:
 - Startup logs
 
 This allows tracking which version of the researcher generated each piece of content.
-
-## Example Workflow
-
-When making a feature change:
-
-```bash
-# 1. Make your code changes
-# 2. Update CHANGELOG.md with your changes under [Unreleased]
-# 3. If releasing, update VERSION and convert [Unreleased] to version header
-# 4. Commit with appropriate prefix
-git commit -m "feat: add new topic suggestion algorithm"
-# 5. Push
-git push origin main
-```
-
-For a release:
-```bash
-# After all features are merged
-# 1. Update VERSION: echo "0.4.0" > VERSION
-# 2. Update CHANGELOG.md with release date
-# 3. Commit
-git commit -am "release: v0.4.0"
-# 4. Tag
-git tag -a v0.4.0 -m "Release v0.4.0"
-# 5. Push with tags
-git push origin main --tags
-```

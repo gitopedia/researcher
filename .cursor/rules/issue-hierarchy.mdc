@@ -169,16 +169,26 @@ Every issue links both up (to parent) and down (to children):
 | Category | Domain | Topics |
 | Topic | Category | Articles (checkboxes) |
 
-## Article Selection Flow
+## Topic Selection Flow
 
 When the researcher runs:
 
-1. **Fetch Issues** - Uses GraphQL to get all open issues with "Research Topic" issue type
-2. **Parse Articles** - Extracts checkboxes from each issue body
-3. **Filter Available** - Collects all unchecked articles
-4. **Random Selection** - Picks one article randomly
-5. **Research** - Performs the full research pipeline
-6. **Update Checkbox** - Marks the article as done
+1. **Fetch Topics** - Uses GraphQL to get all open issues with "Research Topic" issue type
+2. **Filter Available** - Excludes topics that are assigned, have `pending review` label, or have open PRs
+3. **Random Selection** - Picks one available topic randomly
+4. **Claim Topic** - Assigns itself to the issue to prevent race conditions
+5. **Create Branch** - Creates a research branch for all work
+
+## Article Processing Flow
+
+Once a topic is claimed, the researcher iterates:
+
+1. **Parse Articles** - Extracts checkboxes from the issue body
+2. **Prioritize Incomplete** - Focuses on unchecked articles first
+3. **Create or Improve** - Creates new articles, or improves existing ones
+4. **Update Checkbox** - Marks articles as done after creation
+5. **Post Summary** - Comments on the issue with all changes
+6. **Release Topic** - Unassigns itself when done
 
 ## Code Implementation
 
@@ -235,5 +245,6 @@ gh.UpdateIssueBody(issueNumber, newBody)
 ## Related Files
 
 - `internal/github/client.go` - `GetTopicIssues()`, `ParseArticlesFromBody()`, `CheckArticleInBody()`, `UpdateIssueBody()`
-- `internal/agent/agent.go` - `Run()` function with article selection logic
+- `internal/agent/agent.go` - `Run()`, `claimIssue()`, topic selection and claiming logic
+- `internal/agent/incremental.go` - `processTopicWithIterations()`, article processing and improvement
 - `.cursor/rules/github-issues.mdc` - CLI commands for managing issues

@@ -1,99 +1,83 @@
 # Gitopedia Researcher
 
-The Researcher is an AI-powered agent that automatically creates encyclopedia articles for Gitopedia using a **multi-phase generation pipeline**. It monitors GitHub issues for research requests, gathers information from web sources, and generates well-sourced, comprehensive Markdown articles.
+The Researcher is an AI-powered agent that automatically creates and improves encyclopedia articles for Gitopedia using an **iterative improvement model**. It monitors GitHub issues for research topics, gathers information from web sources, and generates well-sourced, comprehensive Markdown articles.
 
-## Multi-Phase Architecture
+## Iterative Improvement Architecture
 
-The researcher builds articles iteratively through 7 phases, allowing for deeper research and higher quality output:
+The researcher uses a topic-based iteration model that creates articles and continuously improves them through multiple passes:
 
 ```mermaid
 flowchart TB
-    subgraph Phase1["Phase 1: Foundation Research"]
-        Search["Web Search<br/>(DuckDuckGo)"]
-        Fetch["Fetch Pages<br/>(Headless Chrome)"]
-        Summarize["Summarize Sources<br/>(qwen3:14b)"]
-        Sources["Source Summaries"]
+    subgraph TopicClaim [Topic Claiming]
+        Fetch[Fetch Topic Issues]
+        Filter[Filter Available Topics]
+        Claim[Claim via Assignment]
     end
 
-    subgraph Phase2["Phase 2: Outline & Gap Analysis"]
-        Outline["Generate Outline<br/>(qwen3:32b)"]
-        Gaps["Identify Gaps<br/>(qwen3:14b)"]
+    subgraph IterationLoop [Iteration Loop]
+        Pick[Pick Article from Checkboxes]
+        Check{Article Exists?}
+        CreateNew[Create New Article]
+        Improve[Run Improvement Iteration]
     end
 
-    subgraph Phase3["Phase 3: Targeted Research"]
-        TargetSearch["Targeted Searches"]
-        NewSources["Additional Sources"]
+    subgraph ImproveModes [Improvement Modes]
+        ModeA[Mode A: Add New Section]
+        ModeB[Mode B: Improve Existing Section]
     end
 
-    subgraph Phase4["Phase 4: Section Generation"]
-        Section1["Section 1"]
-        Section2["Section 2"]
-        SectionN["Section N"]
+    subgraph Finalize [Finalization]
+        Summary[Post Summary Comment]
+        CreatePR[Create PR if enabled]
+        Unassign[Unassign from Issue]
     end
 
-    subgraph Phase5["Phase 5: Section Discovery"]
-        Discover["Suggest New Sections<br/>(qwen3:14b)"]
-        NewSections["Generate New Sections"]
-    end
-
-    subgraph Phase6["Phase 6: Integration"]
-        Integrate["Polish & Integrate<br/>(qwen3:32b)"]
-    end
-
-    subgraph Phase7["Phase 7: Citations"]
-        AddRefs["Add References<br/>(qwen3:14b)"]
-        Final["Final Article"]
-    end
-
-    Search --> Fetch --> Summarize --> Sources
-    Sources --> Outline --> Gaps
-    Gaps -->|"Has gaps"| TargetSearch --> NewSources
-    NewSources -->|"Re-analyze"| Gaps
-    Gaps -->|"No gaps"| Section1 & Section2 & SectionN
-    Section1 & Section2 & SectionN --> Discover
-    Discover --> NewSections --> Integrate
-    Integrate --> AddRefs --> Final
+    Fetch --> Filter --> Claim --> Pick
+    Pick --> Check
+    Check -->|No| CreateNew --> Pick
+    Check -->|Yes| Improve
+    Improve --> ModeA
+    Improve --> ModeB
+    ModeA --> Pick
+    ModeB --> Pick
+    Pick -->|N iterations complete| Summary --> CreatePR --> Unassign
 ```
 
-## Phase Details
+## How It Works
 
-### Phase 1: Foundation Research
-- Executes multiple search queries for topic variety
-- Fetches page content via headless Chrome
-- Summarizes sources using LLM with thinking mode
-- Filters for relevance and minimum word count
+### 1. Topic Claiming
+- Fetches all open issues with "Research Topic" issue type
+- Filters to unassigned topics without pending PRs
+- Claims a topic by assigning itself to the issue
+- Creates a research branch for all work
+
+### 2. Article Creation
+- Picks unchecked articles from topic issue checkboxes
+- Searches the web for relevant sources (filters encyclopedias)
+- Summarizes source content via LLM
+- Generates initial "mini-article" from the summary
 - Saves source summaries to `_incoming/sources/`
 
-### Phase 2: Outline & Gap Analysis
-- Generates structured article outline from sources
-- Identifies gaps in research coverage
-- Suggests additional sections needed
+### 3. Article Improvement (Two Modes)
+Each iteration randomly selects one of two improvement modes:
 
-### Phase 3: Targeted Research (Iterative)
-- Performs focused searches to fill identified gaps
-- Adds new sources to the knowledge base
-- Re-analyzes gaps after each round
-- Configurable max rounds (default: 2)
+**Mode A: Add New Section**
+- LLM suggests a missing section based on topic context
+- Searches for sources specific to the suggested section
+- Generates a mini-article from the new source
+- Extracts and adds valuable new sections to the existing article
 
-### Phase 4: Section Generation
-- Generates each section individually
-- Uses RAG to select relevant sources per section
-- Maintains coherence with already-written sections
+**Mode B: Improve Existing Section**
+- Selects an existing section (weighted toward shorter sections)
+- LLM generates a contextual search query
+- Finds new source with additional details
+- Merges new information into the existing section
+- Scores the improvement; accepts only if score ≥ 7/10
 
-### Phase 5: Section Discovery
-- Analyzes sources for missed topics
-- Suggests additional sections to add
-- Generates content for discovered sections
-
-### Phase 6: Integration & Polish
-- Merges all sections into cohesive article
-- Improves transitions and flow
-- Ensures consistent style and tone
-
-### Phase 7: Citation Addition
-- Adds footnote markers `[^N]` to article
-- Uses only provided sources (prevents hallucination)
-- Appends References section
+### 4. Finalization
+- Posts a summary comment to the issue with all changes
+- Optionally creates a PR (if `CREATE_PR_AFTER_ITERATIONS=true`)
+- Unassigns itself from the issue
 
 ## Multi-Model Configuration
 
@@ -102,14 +86,14 @@ Different models are used for different task complexities:
 | Task | Model | Thinking Mode |
 |------|-------|---------------|
 | Topic Suggestion | qwen3:8b | No |
-| Source Summarization | qwen3:14b | Yes |
-| Entity Extraction | qwen3:14b | Yes |
-| Outline Generation | qwen3:32b | No |
-| Gap Analysis | qwen3:14b | No |
-| Section Generation | qwen3:32b | Yes |
-| Section Discovery | qwen3:14b | No |
-| Article Integration | qwen3:32b | No |
-| Reference Addition | qwen3:14b | No |
+| JSON Conversion | qwen3:8b | No |
+| Section Extraction | qwen3:8b | No |
+| Encyclopedia Check | qwen3:8b | No |
+| Source Summarization | deepseek-r1:14b | No (long output) |
+| Entity Extraction | deepseek-r1:14b | No |
+| Article Generation | deepseek-r1:14b | Yes |
+| Section Comparison | deepseek-r1:14b | Yes |
+| Section Merging | deepseek-r1:14b | Yes |
 
 ## Prerequisites
 
@@ -123,41 +107,49 @@ gh auth status
 ### Ollama
 
 ```bash
-# Fast model
+# Fast model (topic suggestion, JSON tasks)
 ollama pull qwen3:8b
 
-# Medium model
-ollama pull qwen3:14b
+# Article model (generation, summarization)
+ollama pull deepseek-r1:14b
 
-# Large model
-ollama pull qwen3:32b
-
-# Embedding model (for knowledge-base)
+# Embedding model (for knowledge-base, optional)
 ollama pull nomic-embed-text
 ```
 
 ## Configuration
 
-Configuration is loaded from `config/base.env` with optional overrides in `.env`.
+Configuration is loaded from `config/base.env` with optional overrides in `config/.env`.
 
 ### Key Settings
 
 ```bash
 # Run profile
-RUN_PROFILE=test             # Fast iteration (1 topic, fewer sources/sections)
-# RUN_PROFILE=prod           # Full-fidelity generation
+RUN_PROFILE=prod             # prod or test
 
 # Multi-model configuration
-LLM_MODEL_FAST=qwen3:8b      # Fast tasks
-LLM_MODEL_ARTICLE=qwen3:32b  # Article generation & entity extraction
+LLM_MODEL_FAST=qwen3:8b          # Fast tasks
+LLM_MODEL_ARTICLE=deepseek-r1:14b # Article generation
 
 # LLM Thinking Mode
 LLM_THINK_MODE=true
 
-# Research settings
-PHASE1_TARGET_SOURCES=20     # Initial sources to gather
-MAX_RESEARCH_ROUNDS=2        # Gap-filling iterations (1 in RUN_PROFILE=test)
-SOURCES_PER_SECTION=8        # Sources per section (RAG) (3 in RUN_PROFILE=test)
+# Topic Processing
+TOPIC_PROCESSING_ITERATIONS=10       # Iterations per claimed topic
+IMPROVEMENTS_PER_NEW_ARTICLE=10      # Improvement passes after creating article
+CREATE_PR_AFTER_ITERATIONS=false     # Create PR when done (or just commit to branch)
+AUTO_MERGE_READY_PRS=false           # Auto-merge approved PRs
+
+# Search & Source Settings
+PHASE1_TARGET_SOURCES=20             # Target sources to gather
+PHASE1_SEARCH_NUM_QUERIES=10         # Search queries per topic
+TARGET_SUMMARIES_PER_QUERY=5         # Summaries per search query
+SOURCE_SUMMARY_MIN_WORDS=200         # Minimum words for valid summary
+SEARCH_MAX_CHARS=200000              # Max chars from page before summarization
+
+# Main Loop
+LOOP_INTERVAL_SECONDS=60             # Delay between runs
+MAX_TOPICS_PER_RUN=10                # Topics to process per run
 
 # Knowledge-base integration (optional)
 USE_KNOWLEDGE_BASE=false
@@ -182,14 +174,28 @@ docker compose logs -f researcher
 cd researcher
 
 # Normal mode (continuous loop)
-go run . 
+go run .
 
 # Single run mode
 go run . --once
 
 # Merge-only mode (just merge pending PRs)
 go run . --merge-only
+
+# Local development (no GitHub push)
+go run . --once --repo-path "../gitopedia" --no-commit
 ```
+
+### CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--once` | Run one iteration and exit |
+| `--merge-only` | Only merge ready PRs, don't research |
+| `--repo-path` | Path to local gitopedia repository |
+| `--no-commit` | Stage changes but don't commit |
+| `--step` | Step-by-step mode (legacy, for debugging) |
+| `--step-name` | Specific step to run in step mode |
 
 ## Workflow Sequence
 
@@ -199,45 +205,40 @@ sequenceDiagram
     participant Agent as Researcher
     participant Web as Web Search
     participant LLM as Ollama
-    participant PR as GitHub PR
+    participant Branch as Git Branch
 
-    Issue->>Agent: research-request label
-    
-    Note over Agent: Phase 1: Foundation
-    Agent->>Web: Search queries
-    Web->>Agent: Results
-    loop For each result
-        Agent->>Web: Fetch page
-        Agent->>LLM: Summarize (14b + think)
+    Agent->>Issue: Fetch topic issues
+    Agent->>Issue: Claim via assignment
+
+    Agent->>Branch: Create research branch
+
+    loop For each iteration
+        Agent->>Issue: Pick unchecked article
+        alt Article doesn't exist
+            Agent->>Web: Search for sources
+            Agent->>LLM: Summarize source
+            Agent->>LLM: Generate mini-article
+            Agent->>Branch: Save article + source
+            Agent->>Issue: Check off article
+        else Article exists
+            alt Mode A: Add Section
+                Agent->>LLM: Suggest new section
+                Agent->>Web: Search for section topic
+                Agent->>LLM: Generate mini-article
+                Agent->>LLM: Compare sections
+                Agent->>Branch: Add new section
+            else Mode B: Improve Section
+                Agent->>LLM: Generate search query
+                Agent->>Web: Search for details
+                Agent->>LLM: Merge section content
+                Agent->>LLM: Score improvement
+                Agent->>Branch: Update section if score >= 7
+            end
+        end
     end
-    
-    Note over Agent: Phase 2: Outline
-    Agent->>LLM: Generate outline (32b)
-    Agent->>LLM: Analyze gaps (14b)
-    
-    Note over Agent: Phase 3: Targeted Research
-    loop While gaps exist
-        Agent->>Web: Targeted searches
-        Agent->>LLM: Summarize new sources
-        Agent->>LLM: Re-analyze gaps
-    end
-    
-    Note over Agent: Phase 4: Sections
-    loop For each section
-        Agent->>LLM: Generate section (32b + think)
-    end
-    
-    Note over Agent: Phase 5: Discovery
-    Agent->>LLM: Discover sections (14b)
-    Agent->>LLM: Generate new sections
-    
-    Note over Agent: Phase 6: Integration
-    Agent->>LLM: Integrate article (32b)
-    
-    Note over Agent: Phase 7: Citations
-    Agent->>LLM: Add references (14b)
-    
-    Agent->>PR: Create PR with article
+
+    Agent->>Issue: Post summary comment
+    Agent->>Issue: Unassign self
 ```
 
 ## Output Format
@@ -247,89 +248,95 @@ Articles are created with YAML frontmatter:
 ```yaml
 ---
 id: 01KBCVQXJS3QK3JCRGTWBFH2A6
-title: Quantum Mechanics
-author: Gitopedia Researcher
-summary: A comprehensive overview of quantum mechanics...
-tags: [physics, quantum, science]
+title: "Quantum Mechanics"
+slug: "quantum-mechanics"
 created: 2025-12-03T04:06:38Z
-researcher_version: 0.3.6
+tags: ["physics", "quantum", "science"]
+researcher_version: "0.3.29"
+model: "deepseek-r1:14b"
+iterations: 5
+summary: "Initial overview based on Source Title"
 ---
 
 # Quantum Mechanics
 
-Content with citations[^1] to sources[^2]...
+Content with factual information...
+
+## Section Added by Mode A
+
+New section content from improvement iterations...
 
 ## References
 
-[^1]: Source title - https://example.com
-[^2]: Another source - https://example.org
+[^1]: [Source Title](https://example.com)
+[^2]: [Another Source](https://example.org)
 ```
 
 ## Versioning
 
-The researcher uses semantic versioning:
+The researcher uses semantic versioning with CI-driven auto-increment:
 
 - Version stored in `VERSION` file
-- Patch version auto-increments on commit (via git hook)
+- Patch version auto-increments on every merge to `main` (via GitHub Actions)
 - Changes documented in `CHANGELOG.md`
 - Version embedded in generated articles
 
-### Installing Git Hooks
-
-```bash
-cd researcher
-./scripts/install-hooks.sh
-```
+The workflow (`.github/workflows/version-bump.yml`) handles patch bumps automatically. For minor/major version changes, manually edit the `VERSION` file before merging.
 
 ## Debugging & Debug Artifacts
 
-Enable richer debug output to save intermediate artifacts for retrospective analysis.  
-Debug files are committed into the PR branch under `Compendium/_debug/`:
+Debug files are saved under `Compendium/_debug/articles/{slug}/`:
 
-- `articles/{slug}/outline.json` – Generated outline
-- `articles/{slug}/phase1_sources.json` – Phase 1 sources and references
-- `articles/{slug}/phase2_gap_analysis.json` – Gap analysis result
-- `articles/{slug}/phase3_targeted_research.json` – Targeted research inputs/outputs
-- `articles/{slug}/phase4_sections/section-*.md` – Section and subsection drafts
-- `articles/{slug}/phase5_discovery.json` – Discovered sections
-- `articles/{slug}/phase6_integrated.md` – Integrated article before citations
-- `articles/{slug}/phase7_cited.md` – Article after citation insertion
-- `articles/{slug}/entities.json` – Extracted and resolved entities
+- `improvement-log-{timestamp}.md` – Log of improvement attempt
+- `temp-article-{timestamp}.md` – Temporary article from new source
+- `state.json` – Research state (for step-by-step mode)
+
+Article metadata is tracked in `Compendium/_incoming/.meta/{slug}.json`:
+- Search queries executed
+- Sources used
+- Sources skipped (with reasons)
 
 Fast iteration workflow:
 
 ```bash
-# Faster test runs
-RUN_PROFILE=test MAX_TOPICS_PER_RUN=1 go run . --once
+# Quick test run
+RUN_PROFILE=test go run . --once
 
-# Full-fidelity production-style run
+# Full-fidelity production run
 RUN_PROFILE=prod go run . --once
+
+# Local development without GitHub
+go run . --once --repo-path "../gitopedia" --no-commit
 ```
 
 ## Project Structure
 
 ```
 researcher/
+├── .github/
+│   └── workflows/
+│       └── version-bump.yml # CI-driven version auto-increment
 ├── config/
-│   └── base.env         # Default configuration
+│   └── base.env             # Default configuration
 ├── internal/
 │   ├── agent/
-│   │   ├── agent.go     # Main agent logic
-│   │   └── phases.go    # Multi-phase generation
-│   ├── authority/       # Entity authority management
-│   ├── github/          # GitHub API client
-│   ├── kb/              # Knowledge-base client
-│   ├── llm/             # LLM client and prompts
-│   └── search/          # Web search and fetch
+│   │   ├── agent.go         # Main agent logic, topic claiming
+│   │   ├── incremental.go   # Iteration loop, improvement modes
+│   │   └── agent_existing.go # Existing PR processing
+│   ├── authority/           # Entity authority management
+│   ├── github/              # GitHub API client
+│   ├── kb/                  # Knowledge-base client
+│   ├── llm/                 # LLM client and prompts
+│   │   └── prompts/         # Externalized prompt templates
+│   └── search/              # Web search and fetch
 ├── infra/
 │   ├── docker-compose.yml
-│   └── README.md        # Infrastructure docs
+│   └── README.md            # Infrastructure docs
 ├── scripts/
-│   ├── install-hooks.sh
-│   └── update-version.sh
-├── VERSION              # Current version
-├── CHANGELOG.md         # Version history
-└── main.go              # Entry point
+│   └── pull-models.sh       # Helper scripts
+├── VERSION                  # Current version
+├── CHANGELOG.md             # Version history
+└── main.go                  # Entry point
 ```
 
 ## Related Documentation
