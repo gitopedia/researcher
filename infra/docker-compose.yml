@@ -75,6 +75,48 @@ services:
       - LLM_BASE_URL=http://ollama:11434/v1
       - KB_API_URL=http://knowledge-base:8081
 
+  # ComfyUI - Node-based Stable Diffusion UI
+  # Web interface at http://localhost:8188
+  # Using mmartial's image with CUDA 13.1 for RTX 5070 Ti support
+  comfyui:
+    image: mmartial/comfyui-nvidia-docker:ubuntu24_cuda13.1-latest
+    container_name: comfyui
+    ports:
+      - "8188:8188"
+    volumes:
+      # Local directories for easy model management
+      - ./comfyui/basedir:/basedir
+      - ./comfyui/run:/comfy/mnt
+    environment:
+      - USE_UV=true
+      - WANTED_UID=0
+      - WANTED_GID=0
+      - BASE_DIRECTORY=/basedir
+      - SECURITY_LEVEL=normal
+      - USE_NEW_MANAGER=true
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISABLE_UPGRADES=true  # Skip pip upgrades on startup
+      - COMFY_CMDLINE_EXTRA=--lowvram --disable-cuda-malloc --disable-pinned-memory
+      # Disable CUDA pinned memory to avoid pin errors
+      - PYTORCH_NO_CUDA_MEMORY_CACHING=1
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,pinned_use_cuda_host_register:False
+    # Critical for CUDA memory pinning with large models
+    shm_size: 16g
+    ipc: host
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    # GPU support (shares GPU with Ollama)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, utility]
+
 volumes:
   ollama_data:
   qdrant_data:

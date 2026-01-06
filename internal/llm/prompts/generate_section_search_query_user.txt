@@ -1,0 +1,15 @@
+Category path: {{.Category}} > {{.Subcategory}} > {{.Topic}}
+Section to improve: {{.SectionTitle}}
+Current section content (summary): {{.ContentSummary}}
+
+Generate a search query that will find sources to expand this section. Include the category context to avoid ambiguity.
+
+Respond with JSON:
+{
+  "search_query": "{{.Category}} {{.Subcategory}} {{.Topic}} [section-specific terms]"
+}
+
+
+
+
+

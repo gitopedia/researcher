@@ -98,6 +98,19 @@ type ImprovementScore struct {
 	Recommendation string   `json:"recommendation"` // "accept" or "reject"
 }
 
+// SuggestSectionResult contains the LLM's suggestion for a new section to add
+type SuggestSectionResult struct {
+	SectionTitle string `json:"section_title"`
+	InsertAfter  string `json:"insert_after"`
+	SearchQuery  string `json:"search_query"`
+	Rationale    string `json:"rationale"`
+}
+
+// SearchQueryResult contains an LLM-generated search query with category context
+type SearchQueryResult struct {
+	SearchQuery string `json:"search_query"`
+}
+
 type Generator interface {
 	GenerateArticle(ctx context.Context, topic, contextData string) (*ArticleResult, error)
 	AddReferences(ctx context.Context, article string, sources string) (string, error)
@@ -118,6 +131,10 @@ type Generator interface {
 	CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*SectionComparisonResult, error)
 	MergeSection(ctx context.Context, topic, sectionTitle, currentSection, newContent string) (string, error)
 	ScoreImprovement(ctx context.Context, topic, sectionTitle, originalSection, revisedSection string) (*ImprovementScore, error)
+
+	// Context-aware search query generation
+	SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []ArticleSection) (*SuggestSectionResult, error)
+	GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, contentSummary string) (*SearchQueryResult, error)
 }
 
 // Ensure Client implements Generator

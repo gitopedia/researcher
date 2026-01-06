@@ -1,0 +1,73 @@
+{
+  "domains": {
+    "home.cern": {
+      "timeout_count": 1,
+      "first_seen": "2026-01-02T02:36:47.9056872+13:00",
+      "last_seen": "2026-01-02T02:36:47.9056872+13:00"
+    },
+    "nuclear-energy.net": {
+      "timeout_count": 3,
+      "first_seen": "2026-01-02T03:03:06.2986843+13:00",
+      "last_seen": "2026-01-02T12:53:12.2645372+13:00"
+    },
+    "pressbooks.online.ucf.edu": {
+      "timeout_count": 2,
+      "first_seen": "2026-01-01T18:34:16.7316153+13:00",
+      "last_seen": "2026-01-01T21:23:55.3975387+13:00"
+    },
+    "scitechdaily.com": {
+      "timeout_count": 1,
+      "first_seen": "2026-01-01T17:18:12.767112+13:00",
+      "last_seen": "2026-01-01T17:18:12.767112+13:00"
+    },
+    "suchscience.net": {
+      "timeout_count": 1,
+      "first_seen": "2026-01-01T17:13:30.8711148+13:00",
+      "last_seen": "2026-01-01T17:13:30.8711148+13:00"
+    },
+    "www.astronomy.com": {
+      "timeout_count": 5,
+      "first_seen": "2026-01-02T02:10:25.7015826+13:00",
+      "last_seen": "2026-01-02T03:24:49.6174566+13:00",
+      "protected_at": "2026-01-02T03:24:49.6174566+13:00"
+    },
+    "www.britannica.com": {
+      "timeout_count": 5,
+      "first_seen": "2026-01-01T13:25:37.2887433+13:00",
+      "last_seen": "2026-01-01T13:33:24.7629242+13:00",
+      "protected_at": "2026-01-01T13:33:24.7629242+13:00"
+    },
+    "www.encyclopedia.com": {
+      "timeout_count": 1,
+      "first_seen": "2026-01-02T03:38:58.3444613+13:00",
+      "last_seen": "2026-01-02T03:38:58.3444613+13:00"
+    },
+    "www.livescience.com": {
+      "timeout_count": 5,
+      "first_seen": "2026-01-01T17:17:51.7411126+13:00",
+      "last_seen": "2026-01-02T02:55:21.4676664+13:00",
+      "protected_at": "2026-01-02T02:55:21.4676664+13:00"
+    },
+    "www.newscientist.com": {
+      "timeout_count": 2,
+      "first_seen": "2026-01-02T03:28:59.3704956+13:00",
+      "last_seen": "2026-01-02T03:34:25.8448822+13:00"
+    },
+    "www.physicsclassroom.com": {
+      "timeout_count": 2,
+      "first_seen": "2026-01-02T02:00:39.3755991+13:00",
+      "last_seen": "2026-01-02T02:30:35.6194435+13:00"
+    },
+    "www.sciencefacts.net": {
+      "timeout_count": 5,
+      "first_seen": "2026-01-02T03:30:12.9072013+13:00",
+      "last_seen": "2026-01-02T15:33:46.510089+13:00",
+      "protected_at": "2026-01-02T15:33:46.510089+13:00"
+    },
+    "www.space.com": {
+      "timeout_count": 4,
+      "first_seen": "2026-01-01T18:28:27.5466158+13:00",
+      "last_seen": "2026-01-03T13:19:00.5827353+13:00"
+    }
+  }
+}

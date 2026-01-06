@@ -1,0 +1,14 @@
+Generate a specific search query to find information for improving an encyclopedia section.
+
+Requirements:
+- Include the full category path (e.g., "Science Physics Quantum Mechanics") to avoid ambiguity with similarly-named topics in other fields
+- Focus on finding factual, academic, or scientific sources
+- Avoid search terms that would return FAQ pages, how-to guides, or listicles
+- The query should help find content that expands on the existing section
+
+Respond ONLY with valid JSON, no other text.
+
+
+
+
+

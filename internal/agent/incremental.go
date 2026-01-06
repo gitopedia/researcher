@@ -681,6 +681,20 @@ func cleanTopic(title string) string {
 	return topic
 }
 
+// extractCategoryContext extracts category, subcategory, and topic from issue title
+// e.g., "Science > Physics > Quantum Mechanics" -> ("Science", "Physics", "Quantum Mechanics")
+func extractCategoryContext(issueTitle string) (category, subcategory, topic string) {
+	parts := strings.Split(issueTitle, " > ")
+	if len(parts) >= 3 {
+		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+	}
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[0]), "", strings.TrimSpace(parts[1])
+	}
+	// Fallback: just use the title as the topic
+	return "", "", strings.TrimSpace(issueTitle)
+}
+
 // processNewTopic handles the creation of a new research topic from scratch.
 func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	title := *issue.Title
@@ -1195,10 +1209,14 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 	actionLog.WriteString(fmt.Sprintf("## Improvement Attempt: %s\n\n", topic))
 	actionLog.WriteString(fmt.Sprintf("- **Mode:** %s\n", result.Mode))
 
+	// Extract category context from issue title
+	issueTitle := issue.GetTitle()
+	category, subcategory, topicName := extractCategoryContext(issueTitle)
+
 	if useAddNewSection {
-		err = a.improveModeAddSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources)
+		err = a.improveModeAddSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources, category, subcategory, topicName)
 	} else {
-		err = a.improveModeImproveSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources)
+		err = a.improveModeImproveSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources, category, subcategory, topicName)
 	}
 
 	// Save action log to debug folder
@@ -1215,12 +1233,27 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 }
 
 // improveModeAddSection implements Mode A: Find new source, create temp article, add new section
-func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool) error {
-	log.Printf("[Mode A] Searching for new source for topic '%s'", topic)
+func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool, category, subcategory, topicName string) error {
+	log.Printf("[Mode A] Asking LLM to suggest a new section for topic '%s' (%s > %s > %s)", topic, category, subcategory, topicName)
+	actionLog.WriteString("\n### Suggest New Section\n\n")
+
+	// Ask LLM to suggest what new section to add and provide a search query
+	suggestion, err := a.llm.SuggestNewSection(ctx, category, subcategory, topicName, existingSections)
+	if err != nil {
+		actionLog.WriteString(fmt.Sprintf("- **Error:** Failed to get section suggestion: %v\n", err))
+		return fmt.Errorf("failed to get section suggestion: %w", err)
+	}
+
+	actionLog.WriteString(fmt.Sprintf("- **Suggested section:** %s\n", suggestion.SectionTitle))
+	actionLog.WriteString(fmt.Sprintf("- **Insert after:** %s\n", suggestion.InsertAfter))
+	actionLog.WriteString(fmt.Sprintf("- **Rationale:** %s\n", suggestion.Rationale))
+	actionLog.WriteString(fmt.Sprintf("- **Search query:** %s\n", suggestion.SearchQuery))
+
+	log.Printf("[Mode A] Suggested section '%s', searching with query: %s", suggestion.SectionTitle, suggestion.SearchQuery)
 	actionLog.WriteString("\n### Search for New Source\n\n")
 
-	// Search for a new source using helper with global ignore list, metadata, and pagination
-	query := topic + " details facts"
+	// Use the LLM-generated search query with category context
+	query := suggestion.SearchQuery
 	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, failedSources)
 	if err != nil {
 		actionLog.WriteString(fmt.Sprintf("- **Error:** %v\n", err))
@@ -1344,42 +1377,78 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	return nil
 }
 
+// selectSectionWeighted selects a section with bias toward shorter sections that need improvement
+func selectSectionWeighted(sections []llm.ArticleSection) *llm.ArticleSection {
+	if len(sections) == 0 {
+		return nil
+	}
+
+	// Calculate weights: shorter sections get higher weight (more likely to need improvement)
+	var weights []float64
+	var totalWeight float64
+	for _, s := range sections {
+		wordCount := len(strings.Fields(s.Content))
+		// Inverse weight: fewer words = higher weight
+		// +50 to avoid extreme weights for very short sections
+		weight := 1.0 / float64(wordCount+50)
+		weights = append(weights, weight)
+		totalWeight += weight
+	}
+
+	// Weighted random selection
+	r := rand.Float64() * totalWeight
+	cumulative := 0.0
+	for i, w := range weights {
+		cumulative += w
+		if r <= cumulative {
+			return &sections[i]
+		}
+	}
+	return &sections[len(sections)-1]
+}
+
 // improveModeImproveSection implements Mode B: Select existing section, search for details, improve it
-func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool) error {
-	log.Printf("[Mode B] Improving existing section for topic '%s'", topic)
+func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool, category, subcategory, topicName string) error {
+	log.Printf("[Mode B] Improving existing section for topic '%s' (%s > %s > %s)", topic, category, subcategory, topicName)
 
 	if len(existingSections) == 0 {
 		actionLog.WriteString("- **Result:** No sections found to improve\n")
 		return fmt.Errorf("no sections found to improve")
 	}
 
-	// Select a random section (prefer level 2 sections)
-	var level2Sections []llm.ArticleSection
+	// Filter to level 2 sections (H2), excluding References
+	var eligibleSections []llm.ArticleSection
 	for _, s := range existingSections {
 		if s.Level == 2 && s.Title != "References" {
-			level2Sections = append(level2Sections, s)
+			eligibleSections = append(eligibleSections, s)
 		}
 	}
 
-	var selectedSection llm.ArticleSection
-	if len(level2Sections) > 0 {
-		selectedSection = level2Sections[rand.Intn(len(level2Sections))]
-	} else {
-		// Filter out References section
-		var nonRefSections []llm.ArticleSection
+	// If no H2 sections, try other non-Reference sections
+	if len(eligibleSections) == 0 {
 		for _, s := range existingSections {
 			if s.Title != "References" {
-				nonRefSections = append(nonRefSections, s)
+				eligibleSections = append(eligibleSections, s)
 			}
 		}
-		if len(nonRefSections) == 0 {
-			actionLog.WriteString("- **Result:** No suitable sections to improve\n")
-			return fmt.Errorf("no suitable sections to improve")
-		}
-		selectedSection = nonRefSections[rand.Intn(len(nonRefSections))]
 	}
 
-	actionLog.WriteString(fmt.Sprintf("\n### Selected Section: %s\n\n", selectedSection.Title))
+	if len(eligibleSections) == 0 {
+		actionLog.WriteString("- **Result:** No suitable sections to improve\n")
+		return fmt.Errorf("no suitable sections to improve")
+	}
+
+	// Use weighted selection - bias toward shorter sections that need improvement
+	selected := selectSectionWeighted(eligibleSections)
+	if selected == nil {
+		actionLog.WriteString("- **Result:** Failed to select section\n")
+		return fmt.Errorf("failed to select section")
+	}
+	selectedSection := *selected
+
+	wordCount := len(strings.Fields(selectedSection.Content))
+	actionLog.WriteString(fmt.Sprintf("\n### Selected Section: %s (word count: %d)\n\n", selectedSection.Title, wordCount))
+	log.Printf("[Mode B] Selected section '%s' with %d words (weighted selection)", selectedSection.Title, wordCount)
 
 	// Extract the current section content from the article
 	currentSectionContent := extractSectionContent(articleContent, selectedSection.Title)
@@ -1387,9 +1456,18 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 		actionLog.WriteString("- **Warning:** Could not extract section content\n")
 	}
 
-	// Search for more details about this specific section using helper with global ignore list, metadata, and pagination
-	query := fmt.Sprintf("%s %s", topic, selectedSection.Title)
-	log.Printf("[Mode B] Searching for: %s", query)
+	// Generate a context-aware search query using LLM
+	queryResult, err := a.llm.GenerateSectionSearchQuery(ctx, category, subcategory, topicName, selectedSection.Title, currentSectionContent)
+	if err != nil {
+		// Fallback to simple query if LLM fails
+		log.Printf("[Mode B] Warning: Failed to generate LLM search query: %v, using fallback", err)
+		queryResult = &llm.SearchQueryResult{
+			SearchQuery: fmt.Sprintf("%s %s %s %s", category, subcategory, topicName, selectedSection.Title),
+		}
+	}
+
+	query := queryResult.SearchQuery
+	log.Printf("[Mode B] Searching with LLM-generated query: %s", query)
 	actionLog.WriteString(fmt.Sprintf("- **Search query:** %s\n", query))
 
 	result.SectionName = selectedSection.Title

@@ -1,0 +1,19 @@
+Category: {{.Category}}
+Subcategory: {{.Subcategory}}
+Topic: {{.Topic}}
+
+Existing sections in the article:
+{{.Sections}}
+
+Suggest a new section to add. Respond with JSON:
+{
+  "section_title": "Proposed Section Title",
+  "insert_after": "Name of existing section to insert after",
+  "search_query": "{{.Category}} {{.Subcategory}} {{.Topic}} [specific aspect to search]",
+  "rationale": "Brief explanation of why this section adds value"
+}
+
+
+
+
+

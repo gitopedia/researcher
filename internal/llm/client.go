@@ -58,10 +58,14 @@ type Client struct {
 	extractSectionsUserTemplate        *template.Template
 	compareSectionsSystemTemplate      *template.Template
 	compareSectionsUserTemplate        *template.Template
-	mergeSectionSystemTemplate         *template.Template
-	mergeSectionUserTemplate           *template.Template
-	scoreImprovementSystemTemplate     *template.Template
-	scoreImprovementUserTemplate       *template.Template
+	mergeSectionSystemTemplate              *template.Template
+	mergeSectionUserTemplate                *template.Template
+	scoreImprovementSystemTemplate          *template.Template
+	scoreImprovementUserTemplate            *template.Template
+	suggestNewSectionSystemTemplate         *template.Template
+	suggestNewSectionUserTemplate           *template.Template
+	generateSectionSearchQuerySystemTemplate *template.Template
+	generateSectionSearchQueryUserTemplate   *template.Template
 }
 
 type ollamaChatRequest struct {
@@ -309,6 +313,27 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load score_improvement_user template: %w", err)
 	}
 
+	// Context-aware search query templates
+	suggestNewSectionSystem, err := loadTemplate("prompts/suggest_new_section_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load suggest_new_section_system template: %w", err)
+	}
+
+	suggestNewSectionUser, err := loadTemplate("prompts/suggest_new_section_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load suggest_new_section_user template: %w", err)
+	}
+
+	generateSectionSearchQuerySystem, err := loadTemplate("prompts/generate_section_search_query_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_section_search_query_system template: %w", err)
+	}
+
+	generateSectionSearchQueryUser, err := loadTemplate("prompts/generate_section_search_query_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_section_search_query_user template: %w", err)
+	}
+
 	return &Client{
 		client:                            openai.NewClientWithConfig(config),
 		httpClient:                        httpClient,
@@ -345,10 +370,14 @@ func NewClient() (*Client, error) {
 		extractSectionsUserTemplate:        extractSectionsUser,
 		compareSectionsSystemTemplate:      compareSectionsSystem,
 		compareSectionsUserTemplate:        compareSectionsUser,
-		mergeSectionSystemTemplate:         mergeSectionSystem,
-		mergeSectionUserTemplate:           mergeSectionUser,
-		scoreImprovementSystemTemplate:     scoreImprovementSystem,
-		scoreImprovementUserTemplate:       scoreImprovementUser,
+		mergeSectionSystemTemplate:               mergeSectionSystem,
+		mergeSectionUserTemplate:                 mergeSectionUser,
+		scoreImprovementSystemTemplate:           scoreImprovementSystem,
+		scoreImprovementUserTemplate:             scoreImprovementUser,
+		suggestNewSectionSystemTemplate:          suggestNewSectionSystem,
+		suggestNewSectionUserTemplate:            suggestNewSectionUser,
+		generateSectionSearchQuerySystemTemplate: generateSectionSearchQuerySystem,
+		generateSectionSearchQueryUserTemplate:   generateSectionSearchQueryUser,
 	}, nil
 }
 
@@ -1669,5 +1698,107 @@ func (c *Client) ScoreImprovement(ctx context.Context, topic, sectionTitle, orig
 		return nil, fmt.Errorf("failed to parse score_improvement JSON: %w", err)
 	}
 	log.Printf("ScoreImprovement: score=%d, recommendation=%s in %v", result.Score, result.Recommendation, time.Since(startTime))
+	return &result, nil
+}
+
+// SuggestNewSection asks the LLM to suggest a new section to add to an article
+func (c *Client) SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []ArticleSection) (*SuggestSectionResult, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.suggestNewSectionSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute suggest_new_section system template: %w", err)
+	}
+
+	// Format existing sections for the prompt
+	var sectionsStr string
+	for _, s := range existingSections {
+		prefix := strings.Repeat("#", s.Level) + " "
+		sectionsStr += fmt.Sprintf("%s%s\n", prefix, s.Title)
+	}
+
+	data := map[string]interface{}{
+		"Category":    category,
+		"Subcategory": subcategory,
+		"Topic":       topic,
+		"Sections":    sectionsStr,
+	}
+	var userBuf bytes.Buffer
+	if err := c.suggestNewSectionUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute suggest_new_section user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelSuggestTopics, // Use fast model
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result SuggestSectionResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse suggest_new_section JSON: %w", err)
+	}
+	log.Printf("SuggestNewSection: suggested '%s' after '%s', query='%s' in %v",
+		result.SectionTitle, result.InsertAfter, result.SearchQuery, time.Since(startTime))
+	return &result, nil
+}
+
+// GenerateSectionSearchQuery asks the LLM to generate a search query for improving a section
+func (c *Client) GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, contentSummary string) (*SearchQueryResult, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.generateSectionSearchQuerySystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute generate_section_search_query system template: %w", err)
+	}
+
+	// Truncate content summary if too long
+	if len(contentSummary) > 500 {
+		contentSummary = contentSummary[:500] + "..."
+	}
+
+	data := map[string]interface{}{
+		"Category":       category,
+		"Subcategory":    subcategory,
+		"Topic":          topic,
+		"SectionTitle":   sectionTitle,
+		"ContentSummary": contentSummary,
+	}
+	var userBuf bytes.Buffer
+	if err := c.generateSectionSearchQueryUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute generate_section_search_query user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelSuggestTopics, // Use fast model
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.2,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result SearchQueryResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse generate_section_search_query JSON: %w", err)
+	}
+	log.Printf("GenerateSectionSearchQuery: query='%s' in %v", result.SearchQuery, time.Since(startTime))
 	return &result, nil
 }

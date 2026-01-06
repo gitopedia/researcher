@@ -99,6 +99,10 @@ func (m *MockSearch) Search(q string) ([]search.Result, error) {
 	return []search.Result{{Title: "Res", Body: "Content", Href: "http://example.com/test"}}, nil
 }
 
+func (m *MockSearch) SearchPage(q string, page int) ([]search.Result, error) {
+	return []search.Result{{Title: "Res Page " + string(rune(page)), Body: "Content", Href: "http://example.com/test"}}, nil
+}
+
 func (m *MockSearch) FetchContent(url string) (string, error) {
 	// Return enough content to pass the 100 character minimum
 	return "Mock content from URL that is long enough to pass the minimum length check and provide sufficient test data for the summarization process.", nil
@@ -200,6 +204,55 @@ func (m *MockLLM) CheckRedundancy(ctx context.Context, topic, existingArticle, n
 
 func (m *MockLLM) IntegrateContent(ctx context.Context, topic, existingArticle, newContent string) (string, error) {
 	return existingArticle + "\n\n" + newContent, nil
+}
+
+// Article improvement methods
+func (m *MockLLM) IsEncyclopediaSource(ctx context.Context, domain, url, title string) (*llm.EncyclopediaCheckResult, error) {
+	return &llm.EncyclopediaCheckResult{IsEncyclopedia: false, Reason: "Mock: not encyclopedia"}, nil
+}
+
+func (m *MockLLM) ExtractSections(ctx context.Context, article string) ([]llm.ArticleSection, error) {
+	return []llm.ArticleSection{
+		{Level: 2, Title: "Introduction", HasContent: true, Content: "Mock intro content"},
+		{Level: 2, Title: "History", HasContent: true, Content: "Mock history content"},
+	}, nil
+}
+
+func (m *MockLLM) CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*llm.SectionComparisonResult, error) {
+	return &llm.SectionComparisonResult{
+		HasNewSection: true,
+		SectionsToAdd: []llm.SectionToAdd{
+			{Title: "New Section", Content: "New content", InsertAfter: "Introduction", Reason: "Mock addition"},
+		},
+	}, nil
+}
+
+func (m *MockLLM) MergeSection(ctx context.Context, topic, sectionTitle, currentSection, newContent string) (string, error) {
+	return currentSection + "\n\n" + newContent, nil
+}
+
+func (m *MockLLM) ScoreImprovement(ctx context.Context, topic, sectionTitle, originalSection, revisedSection string) (*llm.ImprovementScore, error) {
+	return &llm.ImprovementScore{
+		IsImproved:     true,
+		Score:          8,
+		Improvements:   []string{"Added more detail"},
+		Recommendation: "accept",
+	}, nil
+}
+
+func (m *MockLLM) SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []llm.ArticleSection) (*llm.SuggestSectionResult, error) {
+	return &llm.SuggestSectionResult{
+		SectionTitle: "Applications",
+		InsertAfter:  "History",
+		SearchQuery:  category + " " + subcategory + " " + topic + " applications research",
+		Rationale:    "Mock: Adding applications section",
+	}, nil
+}
+
+func (m *MockLLM) GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, contentSummary string) (*llm.SearchQueryResult, error) {
+	return &llm.SearchQueryResult{
+		SearchQuery: category + " " + subcategory + " " + topic + " " + sectionTitle + " detailed information",
+	}, nil
 }
 
 func TestAgentRun(t *testing.T) {
