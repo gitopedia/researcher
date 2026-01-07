@@ -124,15 +124,10 @@ Configuration is loaded from `config/base.env` with optional overrides in `confi
 ### Key Settings
 
 ```bash
-# Run profile
-RUN_PROFILE=prod             # prod or test
-
 # Multi-model configuration
 LLM_MODEL_FAST=qwen3:8b          # Fast tasks
 LLM_MODEL_ARTICLE=deepseek-r1:14b # Article generation
-
-# LLM Thinking Mode
-LLM_THINK_MODE=true
+LLM_THINK_MODE=true              # Enable reasoning mode
 
 # Topic Processing
 TOPIC_PROCESSING_ITERATIONS=10       # Iterations per claimed topic
@@ -140,16 +135,12 @@ IMPROVEMENTS_PER_NEW_ARTICLE=10      # Improvement passes after creating article
 CREATE_PR_AFTER_ITERATIONS=false     # Create PR when done (or just commit to branch)
 AUTO_MERGE_READY_PRS=false           # Auto-merge approved PRs
 
-# Search & Source Settings
-PHASE1_TARGET_SOURCES=20             # Target sources to gather
-PHASE1_SEARCH_NUM_QUERIES=10         # Search queries per topic
-TARGET_SUMMARIES_PER_QUERY=5         # Summaries per search query
-SOURCE_SUMMARY_MIN_WORDS=200         # Minimum words for valid summary
+# Search Settings
+SEARCH_RESULTS_PER_QUERY=20          # Search results per query
 SEARCH_MAX_CHARS=200000              # Max chars from page before summarization
 
 # Main Loop
 LOOP_INTERVAL_SECONDS=60             # Delay between runs
-MAX_TOPICS_PER_RUN=10                # Topics to process per run
 
 # Knowledge-base integration (optional)
 USE_KNOWLEDGE_BASE=false
@@ -299,11 +290,8 @@ Article metadata is tracked in `Compendium/_incoming/.meta/{slug}.json`:
 Fast iteration workflow:
 
 ```bash
-# Quick test run
-RUN_PROFILE=test go run . --once
-
-# Full-fidelity production run
-RUN_PROFILE=prod go run . --once
+# Single run
+go run . --once
 
 # Local development without GitHub
 go run . --once --repo-path "../gitopedia" --no-commit

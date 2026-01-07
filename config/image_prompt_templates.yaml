@@ -1,0 +1,529 @@
+# Image Prompt Templates Configuration
+# Category-specific prompt structures with guidance, elements, and moods
+#
+# Resolution order (with merging):
+# 1. Start with default.<imageType>
+# 2. Merge categories.<Category>.<imageType>
+# 3. Merge categories.<Category>.subcategories.<Subcategory>.<imageType>
+#
+# Fields:
+# - template: The prompt structure with placeholders
+# - guidance: Instructions for the LLM on visual language
+# - suggested_elements: Domain-specific visual elements (merged from all levels)
+# - color_moods: Appropriate color palettes (overridden at each level)
+
+# Default template for uncategorized topics
+default:
+  header:
+    template: >
+      An abstract digital illustration depicting {{.Topic}}, 
+      featuring {{.KeyElements}}, 
+      with a {{.ColorMood}} palette in a modern {{.ArtStyle}}.
+    guidance: |
+      Create a visually striking header image for an encyclopedia article.
+      Use abstract, modern visuals with symbolic representation of the topic.
+      Include geometric shapes, clean lines, and professional aesthetics.
+      The image should be suitable as a 1920x1080 header banner.
+    suggested_elements:
+      - symbolic icons
+      - geometric patterns
+      - abstract shapes
+      - clean typography elements
+    color_moods:
+      - "bold and minimal color scheme"
+      - "muted earth tones with accent color"
+      - "monochromatic with vibrant accent"
+      - "professional blue and white palette"
+
+# Category-specific configurations
+categories:
+  Science:
+    header:
+      template: >
+        An abstract digital illustration depicting {{.Topic}}, 
+        featuring {{.KeyElements}}, 
+        with a {{.ColorMood}} palette in a {{.ArtStyle}}.
+      guidance: |
+        For scientific topics, use abstract and futuristic visuals that convey complexity and innovation.
+        Include imagery like particles, waves, circuits, or laboratory elements.
+        Render with a modern look - glowing neon effects on dark backgrounds work exceptionally well.
+        The style should be clean and high-tech, emphasizing the precision and wonder of science.
+        Avoid overly literal representations; prefer symbolic and abstract interpretations.
+      suggested_elements:
+        - subatomic particles
+        - wave interference patterns
+        - circuit traces
+        - molecular structures
+        - energy fields
+        - data visualization elements
+        - laboratory glassware silhouettes
+      color_moods:
+        - "dark background with glowing neon-blue accents"
+        - "deep space purple with electric cyan highlights"
+        - "clean white with vibrant accent colors"
+        - "midnight blue with particle light trails"
+    subcategories:
+      Physics:
+        header:
+          suggested_elements:
+            - quantum wave functions
+            - entangled particle pairs
+            - spacetime curvature grids
+            - electromagnetic field lines
+            - Feynman diagram elements
+            - interference patterns
+      Biology:
+        header:
+          suggested_elements:
+            - cellular structures and membranes
+            - DNA double helix
+            - organic growth patterns
+            - bioluminescent elements
+            - neural network patterns
+            - microscopic organisms
+      Chemistry:
+        header:
+          suggested_elements:
+            - molecular bond structures
+            - crystalline lattice formations
+            - atomic orbital clouds
+            - chemical reaction arrows
+            - periodic table elements
+      Astronomy:
+        header:
+          guidance: |
+            For astronomy topics, embrace the cosmic scale and wonder of space.
+            Use deep space imagery with stars, nebulae, and celestial bodies.
+            Include elements that convey the vastness and mystery of the universe.
+          suggested_elements:
+            - spiral galaxies
+            - stellar nebulae
+            - planetary bodies
+            - asteroid fields
+            - cosmic radiation
+            - telescope imagery
+          color_moods:
+            - "deep space black with stellar highlights"
+            - "nebula purple and pink with star points"
+            - "cosmic blue with golden starlight"
+      Mathematics:
+        header:
+          suggested_elements:
+            - geometric fractals
+            - mathematical curves and surfaces
+            - number sequences visualization
+            - graph theory networks
+            - topological shapes
+            - golden ratio spirals
+      "Computer Science":
+        header:
+          suggested_elements:
+            - binary code streams
+            - network topology diagrams
+            - algorithm flow visualization
+            - circuit board patterns
+            - data structure trees
+            - encryption key patterns
+
+  History:
+    header:
+      template: >
+        A stylized illustration of {{.Topic}}, 
+        featuring {{.KeyElements}}, 
+        rendered in a {{.ArtStyle}} with {{.ColorMood}}.
+      guidance: |
+        For historical topics, blend iconic imagery from the period with contemporary graphic style.
+        Use recognizable symbols: architecture, artifacts, maps, flags, and period-appropriate elements.
+        Combine vintage motifs with modern design sensibilities.
+        Art Deco-inspired geometry works exceptionally well with historical symbols.
+        The image should evoke the era while remaining visually modern and accessible.
+      suggested_elements:
+        - period architecture silhouettes
+        - historical artifacts
+        - vintage map elements
+        - symbolic flags or emblems
+        - period-appropriate typography
+        - historical figure silhouettes
+      color_moods:
+        - "gold and deep blue accents"
+        - "sepia-toned with metallic highlights"
+        - "parchment cream with aged patina"
+        - "rich burgundy with bronze accents"
+    subcategories:
+      "Ancient History":
+        header:
+          suggested_elements:
+            - classical columns and temples
+            - ancient ruins
+            - hieroglyphics or cuneiform
+            - mythological symbols
+            - ancient coins and seals
+            - amphora and pottery shapes
+          color_moods:
+            - "weathered stone grey with gold leaf"
+            - "terracotta and ochre earth tones"
+            - "marble white with aged patina"
+      "Medieval History":
+        header:
+          suggested_elements:
+            - illuminated manuscript borders
+            - gothic architectural elements
+            - heraldic shields and crests
+            - castle silhouettes
+            - chainmail and armor patterns
+            - religious iconography
+          color_moods:
+            - "deep burgundy with gold illumination"
+            - "castle stone grey with banner colors"
+            - "manuscript vellum with rich pigments"
+      "Modern History":
+        header:
+          suggested_elements:
+            - industrial machinery silhouettes
+            - vintage photography aesthetic
+            - propaganda poster elements
+            - newspaper headline typography
+            - factory smokestacks
+            - early automobile shapes
+          color_moods:
+            - "sepia documentary photography tones"
+            - "bold propaganda poster colors"
+            - "industrial grey with accent colors"
+      "Military History":
+        header:
+          suggested_elements:
+            - strategic map overlays
+            - military insignia and medals
+            - battlefield terrain contours
+            - weapon silhouettes
+            - fortification diagrams
+            - military formation patterns
+
+  Geography:
+    header:
+      template: >
+        A stylized geographic visualization of {{.Topic}}, 
+        featuring {{.KeyElements}}, 
+        rendered in a {{.ArtStyle}} with {{.ColorMood}}.
+      guidance: |
+        For geography topics, use cartographic and topographic visual language.
+        Include map elements, terrain features, and spatial visualization.
+        Blend satellite imagery aesthetics with artistic interpretation.
+        Show the relationship between land, water, and human elements.
+      suggested_elements:
+        - topographic contour lines
+        - map projection grids
+        - terrain elevation shading
+        - compass rose elements
+        - scale bar graphics
+        - latitude/longitude lines
+      color_moods:
+        - "satellite imagery earth tones"
+        - "topographic green and brown gradients"
+        - "ocean blue with land mass contrast"
+        - "relief map natural palette"
+    subcategories:
+      "Physical Geography":
+        header:
+          suggested_elements:
+            - mountain range profiles
+            - river delta patterns
+            - tectonic plate boundaries
+            - climate zone gradients
+            - ocean current flows
+            - volcanic formation cross-sections
+      "Human Geography":
+        header:
+          suggested_elements:
+            - urban grid patterns
+            - population density gradients
+            - transportation networks
+            - cultural region boundaries
+            - economic activity symbols
+            - migration flow arrows
+
+  People:
+    header:
+      template: >
+        A creative portrait composition of {{.Topic}}, 
+        incorporating {{.KeyElements}} in a {{.ArtStyle}}.
+      guidance: |
+        For biographical topics, create artistic portraits or collages that reflect the person's contributions.
+        Double exposure style works exceptionally well - blending portrait elements with thematic imagery.
+        The image should suggest the person's likeness or silhouette while symbolizing their work or legacy.
+        Avoid photorealistic portraits; prefer stylized, artistic interpretations.
+        Include visual elements that represent their field, achievements, or era.
+      suggested_elements:
+        - silhouette or profile outline
+        - symbols of their field
+        - their notable achievements
+        - era-appropriate elements
+        - tools of their trade
+        - legacy symbols
+      color_moods:
+        - "monochromatic high-contrast"
+        - "warm sepia tones with highlights"
+        - "dramatic chiaroscuro lighting"
+        - "elegant grayscale with accent color"
+    subcategories:
+      Scientists:
+        header:
+          suggested_elements:
+            - laboratory equipment silhouettes
+            - mathematical equations
+            - discovery moment imagery
+            - scientific instruments
+            - Nobel medal elements
+            - research paper aesthetics
+      Artists:
+        header:
+          suggested_elements:
+            - paint palette and brushes
+            - artistic movement motifs
+            - canvas and easel elements
+            - signature artistic style references
+            - studio environment hints
+            - creative tool silhouettes
+          color_moods:
+            - "artist's palette vibrant colors"
+            - "gallery exhibition lighting"
+            - "creative studio warm tones"
+      Leaders:
+        header:
+          suggested_elements:
+            - governmental architecture
+            - leadership symbols
+            - historical moment imagery
+            - national emblems
+            - speech podium elements
+            - crowd silhouettes
+      Philosophers:
+        header:
+          suggested_elements:
+            - ancient library scrolls
+            - contemplative pose silhouettes
+            - thought bubble abstractions
+            - classical Greek elements
+            - writing quill and book
+            - dialogue scene hints
+          color_moods:
+            - "classical antiquity earth tones"
+            - "contemplative twilight blues"
+            - "scholarly warm candlelight"
+
+  Arts:
+    header:
+      template: >
+        An artistic visualization celebrating {{.Topic}}, 
+        featuring {{.KeyElements}}, 
+        rendered in a {{.ArtStyle}} with {{.ColorMood}}.
+      guidance: |
+        For arts topics, let the artistic medium inspire the visual language.
+        Reference the relevant artistic movement or style in the composition.
+        Create images that feel like they could belong in a gallery or museum.
+        Balance artistic expression with clear communication of the topic.
+      suggested_elements:
+        - artistic medium textures
+        - gallery exhibition elements
+        - creative expression symbols
+        - artistic tool silhouettes
+        - frame and canvas borders
+        - movement-specific motifs
+      color_moods:
+        - "gallery white with artwork accents"
+        - "artistic movement color palette"
+        - "museum exhibition lighting"
+        - "creative studio atmosphere"
+    subcategories:
+      "Visual Arts":
+        header:
+          suggested_elements:
+            - painterly brushstroke textures
+            - canvas weave patterns
+            - color theory wheel elements
+            - perspective grid lines
+            - sculptor's chisel marks
+            - print making patterns
+      Music:
+        header:
+          suggested_elements:
+            - sound wave visualizations
+            - musical notation symbols
+            - instrument silhouettes
+            - concert hall acoustics
+            - vinyl record grooves
+            - frequency spectrum bars
+          color_moods:
+            - "concert stage dramatic lighting"
+            - "vinyl record warm tones"
+            - "symphony orchestra elegance"
+      Literature:
+        header:
+          suggested_elements:
+            - vintage book spines
+            - typewriter key elements
+            - flowing text ribbons
+            - quill pen and inkwell
+            - library shelf patterns
+            - open book pages
+          color_moods:
+            - "aged paper and leather tones"
+            - "library warm wood colors"
+            - "manuscript ink and parchment"
+      Architecture:
+        header:
+          suggested_elements:
+            - blueprint line drawings
+            - structural framework
+            - building elevation outlines
+            - floor plan patterns
+            - construction crane silhouettes
+            - architectural detail closeups
+          color_moods:
+            - "blueprint cyan on white"
+            - "concrete and steel industrial"
+            - "architectural rendering neutrals"
+
+  Technology:
+    header:
+      template: >
+        A cutting-edge visualization of {{.Topic}}, 
+        featuring {{.KeyElements}}, 
+        rendered in a {{.ArtStyle}} with {{.ColorMood}}.
+      guidance: |
+        For technology topics, emphasize innovation, precision, and the future.
+        Use clean, modern aesthetics with hints of the underlying complexity.
+        Circuit patterns, data flows, and interface elements work well.
+        Balance technical accuracy with visual appeal and accessibility.
+      suggested_elements:
+        - circuit board traces
+        - data flow visualizations
+        - interface wireframes
+        - innovation light bulb motifs
+        - gear and mechanism elements
+        - progress indicator graphics
+      color_moods:
+        - "tech startup vibrant accents on dark"
+        - "clean Apple-inspired minimalism"
+        - "matrix green digital aesthetic"
+        - "blueprint technical precision"
+    subcategories:
+      Engineering:
+        header:
+          suggested_elements:
+            - technical schematic drawings
+            - mechanical gear assemblies
+            - precision measurement tools
+            - structural stress diagrams
+            - CAD wireframe elements
+            - manufacturing process flows
+      "Information Technology":
+        header:
+          suggested_elements:
+            - server rack silhouettes
+            - network topology diagrams
+            - cloud computing symbols
+            - security lock graphics
+            - database cylinder icons
+            - API connection lines
+
+  Philosophy:
+    header:
+      template: >
+        An abstract conceptual visualization of {{.Topic}}, 
+        featuring {{.KeyElements}}, 
+        rendered in a {{.ArtStyle}} with {{.ColorMood}}.
+      guidance: |
+        For philosophy topics, embrace abstraction and symbolic representation.
+        Visualize concepts, arguments, and thought processes rather than literal subjects.
+        Use imagery that invites contemplation and deeper thinking.
+        Balance intellectual weight with visual accessibility.
+      suggested_elements:
+        - abstract thought bubbles
+        - logical tree diagrams
+        - balance and scale symbols
+        - infinity and recursion patterns
+        - question mark motifs
+        - connecting idea lines
+      color_moods:
+        - "contemplative deep blues and purples"
+        - "classical Greek marble tones"
+        - "scholarly warm candlelight amber"
+        - "existential dramatic shadows"
+    subcategories:
+      Ethics:
+        header:
+          suggested_elements:
+            - scales of justice
+            - moral compass imagery
+            - choice pathway diagrams
+            - yin-yang balance symbols
+            - handshake and agreement motifs
+      Metaphysics:
+        header:
+          suggested_elements:
+            - existence and void contrasts
+            - reality layer visualizations
+            - consciousness representations
+            - universe and self connections
+            - being and nothingness abstractions
+      Logic:
+        header:
+          suggested_elements:
+            - logical gate symbols
+            - truth table grids
+            - syllogism flow diagrams
+            - Venn diagram overlaps
+            - proof tree structures
+
+  Culture:
+    header:
+      template: >
+        A vibrant cultural visualization of {{.Topic}}, 
+        featuring {{.KeyElements}}, 
+        rendered in a {{.ArtStyle}} with {{.ColorMood}}.
+      guidance: |
+        For culture topics, celebrate the richness and diversity of human expression.
+        Incorporate traditional patterns, motifs, and symbols authentically.
+        Balance cultural specificity with universal visual appeal.
+        Show respect for cultural heritage while maintaining modern design sensibilities.
+      suggested_elements:
+        - traditional pattern elements
+        - cultural symbol motifs
+        - heritage artifact silhouettes
+        - celebration and ritual imagery
+        - traditional costume elements
+        - folk art patterns
+      color_moods:
+        - "vibrant festival colors"
+        - "traditional cultural palette"
+        - "heritage earth tones with accents"
+        - "ceremonial gold and rich fabrics"
+    subcategories:
+      Religion:
+        header:
+          suggested_elements:
+            - sacred geometry patterns
+            - spiritual light rays
+            - devotional architecture elements
+            - religious symbol motifs
+            - prayer and meditation poses
+            - sacred text aesthetics
+          color_moods:
+            - "stained glass jewel tones"
+            - "golden divine light"
+            - "peaceful spiritual blues"
+      Mythology:
+        header:
+          suggested_elements:
+            - mythological creature silhouettes
+            - legendary weapon imagery
+            - epic scene compositions
+            - hero journey pathways
+            - divine intervention rays
+            - ancient symbol borders
+          color_moods:
+            - "epic fantasy rich palette"
+            - "legendary golden age tones"
+            - "mythological drama lighting"
+

@@ -159,3 +159,84 @@ func (m *LocalGitManager) ResetToMain() error {
 
 	return nil
 }
+
+// ListDirectory lists the contents of a directory
+func (m *LocalGitManager) ListDirectory(branch, path string) ([]github.DirectoryEntry, error) {
+	fullPath := filepath.Join(m.repoPath, path)
+
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory %s: %w", path, err)
+	}
+
+	var result []github.DirectoryEntry
+	for _, entry := range entries {
+		result = append(result, github.DirectoryEntry{
+			Name:  entry.Name(),
+			IsDir: entry.IsDir(),
+		})
+	}
+
+	return result, nil
+}
+
+// AddBinaryFile adds a binary file to the repository
+func (m *LocalGitManager) AddBinaryFile(branch, repoPath, localPath, message string) error {
+	// Copy the file to the repo
+	destPath := filepath.Join(m.repoPath, repoPath)
+	destDir := filepath.Dir(destPath)
+
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	content, err := os.ReadFile(localPath)
+	if err != nil {
+		return fmt.Errorf("failed to read local file: %w", err)
+	}
+
+	if err := os.WriteFile(destPath, content, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	// In no-commit mode, just write files without staging or committing
+	if m.noCommit {
+		return nil
+	}
+
+	if _, err := m.runGit("add", repoPath); err != nil {
+		return err
+	}
+
+	_, err = m.runGit("commit", "-m", message)
+	return err
+}
+
+// ListFilesInBranch lists all files in a branch under the given path (local implementation)
+func (m *LocalGitManager) ListFilesInBranch(branch, path string) ([]string, error) {
+	fullPath := filepath.Join(m.repoPath, path)
+
+	var files []string
+	err := filepath.Walk(fullPath, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			// Convert to relative path from repo root
+			relPath, err := filepath.Rel(m.repoPath, filePath)
+			if err != nil {
+				return err
+			}
+			// Normalize path separators to forward slashes
+			relPath = filepath.ToSlash(relPath)
+			files = append(files, relPath)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to list files in %s: %w", path, err)
+	}
+
+	return files, nil
+}

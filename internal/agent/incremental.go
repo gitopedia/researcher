@@ -17,6 +17,7 @@ import (
 	"github.com/gitopedia/researcher/internal/github"
 	"github.com/gitopedia/researcher/internal/llm"
 	"github.com/gitopedia/researcher/internal/search"
+	"github.com/gitopedia/researcher/internal/styles"
 	gh "github.com/google/go-github/v57/github"
 	"github.com/oklog/ulid/v2"
 )
@@ -914,6 +915,15 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 					improvementResults = append(improvementResults, result)
 				}
 			}
+
+			// Generate image prompt after improvements complete
+			category, subcategory, _ := extractCategoryContext(issue.GetTitle())
+			if err := a.generateHeaderImagePrompt(ctx, article.Name, branchName, category, subcategory); err != nil {
+				slog.Warn("Failed to generate image prompt", "article", article.Name, "error", err)
+				errors = append(errors, fmt.Sprintf("Failed to generate image prompt for '%s': %v", article.Name, err))
+			} else {
+				log.Printf("Generated header image prompt for '%s'", article.Name)
+			}
 		} else if len(completedArticles) > 0 {
 			// All articles complete, improve existing
 			article := completedArticles[rand.Intn(len(completedArticles))]
@@ -993,6 +1003,17 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 	// Post single summary comment
 	if err := a.gh.CommentOnIssue(issueNum, summaryBuilder.String()); err != nil {
 		slog.Warn("Failed to post summary comment", "issue", issueNum, "error", err)
+	}
+
+	// Run image generation as finalization step (if enabled)
+	if getEnvBool("GENERATE_IMAGES_AFTER_RUN", true) {
+		log.Println("=== Running Image Generation Finalization ===")
+		if err := a.GenerateImages(ctx, branchName); err != nil {
+			slog.Warn("Image generation finalization failed", "error", err)
+			errors = append(errors, fmt.Sprintf("Image generation failed: %v", err))
+		}
+	} else {
+		log.Println("Image generation skipped (GENERATE_IMAGES_AFTER_RUN=false)")
 	}
 
 	// Check if PR creation is enabled
@@ -1851,4 +1872,217 @@ func appendReference(content string, sourceTitle, sourceURL string) string {
 	}
 
 	return strings.TrimRight(result.String(), "\n")
+}
+
+// generateHeaderImagePrompt generates an image prompt for the article header and saves it to the debug folder
+func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, branchName, category, subcategory string) error {
+	topic := cleanTopic(articleName)
+	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
+
+	log.Printf("[Image Prompt] Generating header image prompt for '%s' (%s > %s)", topic, category, subcategory)
+
+	// Load the article content
+	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
+	articleContent, _, err := a.gh.GetFile(branchName, articlePath)
+	if err != nil {
+		return fmt.Errorf("failed to load article: %w", err)
+	}
+
+	// Step 1: Extract article-specific visual elements using LLM
+	log.Printf("[Image Prompt] Extracting visual elements from article...")
+	visualReq := llm.VisualElementsRequest{
+		Topic:          topic,
+		Category:       category,
+		Subcategory:    subcategory,
+		ArticleContent: articleContent,
+	}
+	visualElements, err := a.llm.ExtractVisualElements(ctx, visualReq)
+	if err != nil {
+		slog.Warn("Failed to extract visual elements, using defaults", "error", err)
+		visualElements = &llm.VisualElements{}
+	}
+
+	// Extract article summary for additional context
+	summary := extractArticleSummary(articleContent, 500)
+
+	// Get config directory path
+	configDir := getEnvOrDefault("CONFIG_DIR", "config")
+
+	// Load style configuration
+	styleMgr := styles.NewManager(configDir)
+	if err := styleMgr.Load(); err != nil {
+		return fmt.Errorf("failed to load style config: %w", err)
+	}
+
+	// Resolve category-based configuration (for styles and colors)
+	resolved := styleMgr.ResolveAll("header", category, subcategory)
+
+	// Select 1-2 random artistic styles from config
+	numStyles := 1
+	if len(resolved.ArtisticStyles) > 2 {
+		numStyles = 2
+	}
+	selectedStyles := styleMgr.SelectRandomStyles(resolved.ArtisticStyles, numStyles)
+
+	// Select a random color mood from config
+	colorMood := styleMgr.SelectRandomColorMood(resolved.ColorMoods)
+
+	// Step 2: Generate the image prompt with structured elements (not flattened)
+	req := llm.ImagePromptRequest{
+		Topic:             topic,
+		Category:          category,
+		Subcategory:       subcategory,
+		ArticleSummary:    summary,
+		ExtractedElements: visualElements, // Pass full structured extraction
+		ColorMood:         colorMood,
+		ArtisticStyles:    selectedStyles,
+		CategoryGuidance:  resolved.Guidance,
+	}
+
+	result, err := a.llm.GenerateImagePrompt(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to generate image prompt: %w", err)
+	}
+
+	// Save the full extraction debug JSON for visibility into what was extracted
+	debugDir := debugBasePath(slug)
+	extractionDebugPath := fmt.Sprintf("%s/extraction_debug.json", debugDir)
+	extractionDebug := map[string]interface{}{
+		"topic":       topic,
+		"category":    category,
+		"subcategory": subcategory,
+		"extraction": map[string]interface{}{
+			"key_concepts":       visualElements.KeyConcepts,
+			"specific_phenomena": visualElements.SpecificPhenomena,
+			"notable_figures":    visualElements.NotableFigures,
+			"iconic_imagery":     visualElements.IconicImagery,
+			"math_elements":      visualElements.MathElements,
+		},
+		"style_config": map[string]interface{}{
+			"selected_styles": selectedStyles,
+			"color_mood":      colorMood,
+		},
+		"generated_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	extractionJSON, _ := json.MarshalIndent(extractionDebug, "", "  ")
+	if err := a.gh.CreateFile(branchName, extractionDebugPath, fmt.Sprintf("Add extraction debug for %s", topic), string(extractionJSON)); err != nil {
+		slog.Warn("Failed to save extraction debug", "error", err)
+	}
+
+	// Save the prompt to the debug folder with extraction details
+	promptPath := fmt.Sprintf("%s/header_image_prompt.txt", debugDir)
+	promptContent := fmt.Sprintf("# Header Image Prompt for: %s\n", topic)
+	promptContent += fmt.Sprintf("# Category: %s > %s\n", category, subcategory)
+	promptContent += fmt.Sprintf("# Styles: %s\n", strings.Join(selectedStyles, ", "))
+	promptContent += fmt.Sprintf("# Color Mood: %s\n", colorMood)
+	promptContent += fmt.Sprintf("# Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
+	promptContent += fmt.Sprintf("# Model: %s\n", result.Model)
+	promptContent += fmt.Sprintf("# Extracted Elements:\n")
+	if len(visualElements.KeyConcepts) > 0 {
+		promptContent += fmt.Sprintf("#   Key Concepts: %s\n", strings.Join(visualElements.KeyConcepts, ", "))
+	}
+	if len(visualElements.SpecificPhenomena) > 0 {
+		promptContent += fmt.Sprintf("#   Phenomena: %s\n", strings.Join(visualElements.SpecificPhenomena, ", "))
+	}
+	if len(visualElements.IconicImagery) > 0 {
+		promptContent += fmt.Sprintf("#   Iconic Imagery: %s\n", strings.Join(visualElements.IconicImagery, ", "))
+	}
+	if len(visualElements.NotableFigures) > 0 {
+		promptContent += fmt.Sprintf("#   Notable Figures: %s\n", strings.Join(visualElements.NotableFigures, ", "))
+	}
+	if len(visualElements.MathElements) > 0 {
+		promptContent += fmt.Sprintf("#   Math Elements: %s\n", strings.Join(visualElements.MathElements, ", "))
+	}
+	if result.Thinking != "" {
+		promptContent += fmt.Sprintf("# LLM Reasoning:\n#   %s\n", strings.ReplaceAll(result.Thinking, "\n", "\n#   "))
+	}
+	promptContent += "\n"
+	promptContent += result.Prompt
+
+	if err := a.gh.CreateFile(branchName, promptPath, fmt.Sprintf("Add header image prompt for %s", topic), promptContent); err != nil {
+		return fmt.Errorf("failed to save image prompt: %w", err)
+	}
+
+	log.Printf("[Image Prompt] Saved prompt to %s (%d chars)", promptPath, len(result.Prompt))
+
+	return nil
+}
+
+
+// extractArticleSummary extracts a summary from the article content
+// It tries to get the intro section (content before the first ## heading after frontmatter)
+// or falls back to the first maxLen characters
+func extractArticleSummary(content string, maxLen int) string {
+	// Skip frontmatter
+	lines := strings.Split(content, "\n")
+	inFrontmatter := false
+	contentStart := 0
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if !inFrontmatter {
+				inFrontmatter = true
+			} else {
+				contentStart = i + 1
+				break
+			}
+		}
+	}
+
+	// Get content after frontmatter
+	if contentStart > 0 && contentStart < len(lines) {
+		lines = lines[contentStart:]
+	}
+
+	// Find intro section (content before first heading)
+	var introLines []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Stop at first heading
+		if strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+		// Skip empty lines at the start
+		if len(introLines) == 0 && trimmed == "" {
+			continue
+		}
+		introLines = append(introLines, line)
+	}
+
+	intro := strings.TrimSpace(strings.Join(introLines, "\n"))
+
+	// If intro is too short, try to get more content
+	if len(intro) < 100 {
+		fullContent := strings.TrimSpace(strings.Join(lines, "\n"))
+		if len(fullContent) > maxLen {
+			// Try to break at a sentence
+			truncated := fullContent[:maxLen]
+			lastPeriod := strings.LastIndex(truncated, ". ")
+			if lastPeriod > maxLen/2 {
+				return truncated[:lastPeriod+1]
+			}
+			return truncated + "..."
+		}
+		return fullContent
+	}
+
+	// Truncate if needed
+	if len(intro) > maxLen {
+		lastPeriod := strings.LastIndex(intro[:maxLen], ". ")
+		if lastPeriod > maxLen/2 {
+			return intro[:lastPeriod+1]
+		}
+		return intro[:maxLen] + "..."
+	}
+
+	return intro
+}
+
+// getEnvOrDefault returns the environment variable value or a default
+func getEnvOrDefault(key, defaultVal string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultVal
 }

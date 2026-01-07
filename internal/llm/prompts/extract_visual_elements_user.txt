@@ -1,0 +1,35 @@
+Analyze this encyclopedia article and extract visual elements for creating a header image.
+
+Article Title: {{.Topic}}
+Category: {{.Category}}{{if .Subcategory}} > {{.Subcategory}}{{end}}
+
+---
+Article Content:
+{{.ArticleContent}}
+---
+
+Extract visual elements and output as JSON in this exact format:
+{
+  "key_concepts": ["concept 1", "concept 2", "concept 3"],
+  "specific_phenomena": ["phenomenon 1", "phenomenon 2"],
+  "notable_figures": ["person 1", "person 2"],
+  "iconic_imagery": ["image/metaphor 1", "image/metaphor 2"],
+  "math_elements": ["equation/structure 1"]
+}
+
+CRITICAL RULES - Only extract what EXPLICITLY appears in this article:
+- key_concepts: 3-5 main visualizable ideas that are EXPLICITLY DISCUSSED in this article
+- specific_phenomena: Named experiments, paradoxes, theorems that are ACTUALLY MENTIONED BY NAME
+- notable_figures: Scientists or historical figures WHO ARE NAMED in the article text
+- iconic_imagery: Thought experiments or metaphors that ARE DESCRIBED in the article
+- math_elements: Equations or formulas that APPEAR in the article
+
+DO NOT:
+- Infer related concepts not mentioned in the article
+- Add general knowledge about the topic
+- Include things that "should" be there but aren't
+- Hallucinate or embellish - only extract verbatim or near-verbatim content
+
+If a category has no explicit mentions in the article, use an empty array [].
+Output only the JSON, nothing else.
+

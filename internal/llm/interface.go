@@ -64,9 +64,9 @@ type EncyclopediaCheckResult struct {
 
 // ArticleSection represents a section extracted from an article
 type ArticleSection struct {
-	Level      int    `json:"level"`       // Heading level (2 for ##, 3 for ###, etc.)
-	Title      string `json:"title"`       // Section heading text
-	HasContent bool   `json:"has_content"` // Whether section has meaningful content
+	Level      int    `json:"level"`             // Heading level (2 for ##, 3 for ###, etc.)
+	Title      string `json:"title"`             // Section heading text
+	HasContent bool   `json:"has_content"`       // Whether section has meaningful content
 	Content    string `json:"content,omitempty"` // The actual section content (optional)
 }
 
@@ -80,8 +80,8 @@ type SectionToAdd struct {
 
 // SectionComparisonResult indicates if new sections should be added
 type SectionComparisonResult struct {
-	HasNewSection  bool           `json:"has_new_section"`
-	SectionsToAdd  []SectionToAdd `json:"sections_to_add,omitempty"`
+	HasNewSection bool           `json:"has_new_section"`
+	SectionsToAdd []SectionToAdd `json:"sections_to_add,omitempty"`
 	// Legacy single section fields for backward compatibility
 	SectionTitle   string `json:"section_title,omitempty"`
 	SectionContent string `json:"section_content,omitempty"`
@@ -111,6 +111,42 @@ type SearchQueryResult struct {
 	SearchQuery string `json:"search_query"`
 }
 
+// ImagePromptRequest contains all the data needed to generate an image prompt
+type ImagePromptRequest struct {
+	Topic             string          // The article topic/title
+	Category          string          // Top-level category (e.g., "Science")
+	Subcategory       string          // Subcategory (e.g., "Physics")
+	ArticleSummary    string          // Summary or intro of the article content
+	ExtractedElements *VisualElements // Full structured extraction from article
+	ColorMood         string          // Selected color/mood option (from config)
+	ArtisticStyles    []string        // Selected artistic style(s) (from config)
+	CategoryGuidance  string          // Guidance text for this category (from config)
+}
+
+// ImagePromptResult contains the generated image prompt
+type ImagePromptResult struct {
+	Prompt   string // The generated image generation prompt
+	Model    string // The model used to generate the prompt
+	Thinking string // The model's reasoning trace (if thinking mode enabled)
+}
+
+// VisualElements contains article-specific visual concepts extracted for image generation
+type VisualElements struct {
+	KeyConcepts       []string `json:"key_concepts"`       // Main visualizable concepts specific to this article
+	SpecificPhenomena []string `json:"specific_phenomena"` // Named experiments, paradoxes, theorems, effects
+	NotableFigures    []string `json:"notable_figures"`    // Scientists, inventors, historical figures mentioned
+	IconicImagery     []string `json:"iconic_imagery"`     // Famous thought experiments, metaphors, visual descriptions
+	MathElements      []string `json:"math_elements"`      // Equations, formulas, mathematical structures
+}
+
+// VisualElementsRequest contains the data needed to extract visual elements
+type VisualElementsRequest struct {
+	Topic          string // Article title
+	Category       string // Top-level category
+	Subcategory    string // Subcategory
+	ArticleContent string // Full article content
+}
+
 type Generator interface {
 	GenerateArticle(ctx context.Context, topic, contextData string) (*ArticleResult, error)
 	AddReferences(ctx context.Context, article string, sources string) (string, error)
@@ -135,6 +171,10 @@ type Generator interface {
 	// Context-aware search query generation
 	SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []ArticleSection) (*SuggestSectionResult, error)
 	GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, contentSummary string) (*SearchQueryResult, error)
+
+	// Image generation
+	ExtractVisualElements(ctx context.Context, req VisualElementsRequest) (*VisualElements, error)
+	GenerateImagePrompt(ctx context.Context, req ImagePromptRequest) (*ImagePromptResult, error)
 }
 
 // Ensure Client implements Generator

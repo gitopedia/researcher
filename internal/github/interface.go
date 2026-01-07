@@ -67,6 +67,17 @@ type GitHubClient interface {
 
 	// Mode checks
 	IsLocal() bool
+
+	// Image generation support
+	ListDirectory(branch, path string) ([]DirectoryEntry, error)
+	AddBinaryFile(branch, path, localPath, message string) error
+	GetCurrentBranch() (string, error)
+}
+
+// DirectoryEntry represents a file or directory in a repository
+type DirectoryEntry struct {
+	Name  string
+	IsDir bool
 }
 
 // PRInfo contains basic info about a PR

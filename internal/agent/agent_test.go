@@ -92,6 +92,10 @@ func (m *MockGitHub) GetRepoPath() string                                { retur
 func (m *MockGitHub) SetNoCommit(bool)                                   {}
 func (m *MockGitHub) GetCurrentBranch() (string, error)                  { return "main", nil }
 func (m *MockGitHub) ResetToMain() error                                 { return nil }
+func (m *MockGitHub) ListDirectory(branch, path string) ([]github.DirectoryEntry, error) {
+	return []github.DirectoryEntry{}, nil
+}
+func (m *MockGitHub) AddBinaryFile(branch, repoPath, localPath, message string) error { return nil }
 
 type MockSearch struct{}
 
@@ -252,6 +256,23 @@ func (m *MockLLM) SuggestNewSection(ctx context.Context, category, subcategory, 
 func (m *MockLLM) GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, contentSummary string) (*llm.SearchQueryResult, error) {
 	return &llm.SearchQueryResult{
 		SearchQuery: category + " " + subcategory + " " + topic + " " + sectionTitle + " detailed information",
+	}, nil
+}
+
+func (m *MockLLM) GenerateImagePrompt(ctx context.Context, req llm.ImagePromptRequest) (*llm.ImagePromptResult, error) {
+	return &llm.ImagePromptResult{
+		Prompt: "A mock image prompt for " + req.Topic,
+		Model:  "mock-model",
+	}, nil
+}
+
+func (m *MockLLM) ExtractVisualElements(ctx context.Context, req llm.VisualElementsRequest) (*llm.VisualElements, error) {
+	return &llm.VisualElements{
+		KeyConcepts:       []string{"mock concept 1", "mock concept 2"},
+		SpecificPhenomena: []string{"mock phenomenon"},
+		NotableFigures:    []string{"mock scientist"},
+		IconicImagery:     []string{"mock imagery"},
+		MathElements:      []string{"mock equation"},
 	}, nil
 }
 

@@ -1,0 +1,231 @@
+# Artistic Styles Configuration
+# Hierarchical style config by image type, category, and subcategory
+#
+# Resolution order:
+# 1. categories.<Category>.subcategories.<Subcategory>.<imageType>
+# 2. categories.<Category>.<imageType>
+# 3. default.<imageType>
+
+# Default styles used when no category/subcategory match
+default:
+  header:
+    - bauhaus design
+    - minimalist flat vector
+    - modern geometric abstract
+    - clean contemporary illustration
+    - bold graphic design
+
+# Category-specific style configurations
+categories:
+  Science:
+    header:
+      - futuristic digital art
+      - abstract particle visualization
+      - glowing neon on dark background
+      - sleek high-tech aesthetic
+      - scientific schematic style
+      - holographic display aesthetic
+    subcategories:
+      Physics:
+        header:
+          - quantum wave interference patterns
+          - cosmic nebula visualization
+          - subatomic particle trails
+          - spacetime fabric distortion
+          - energy field visualization
+      Biology:
+        header:
+          - organic cellular patterns
+          - botanical scientific illustration
+          - bioluminescent deep sea aesthetic
+          - microscopic world visualization
+          - natural growth patterns
+      Chemistry:
+        header:
+          - molecular structure visualization
+          - crystalline formations
+          - atomic orbital patterns
+          - chemical reaction dynamics
+      Astronomy:
+        header:
+          - cosmic deep space visualization
+          - stellar phenomena illustration
+          - planetary system diagram style
+          - nebula cloud aesthetic
+      Mathematics:
+        header:
+          - geometric fractal patterns
+          - mathematical topology visualization
+          - algorithmic generative art
+          - abstract number theory aesthetic
+      Computer Science:
+        header:
+          - digital circuit board aesthetic
+          - data flow visualization
+          - neural network patterns
+          - binary code matrix style
+
+  History:
+    header:
+      - art deco geometric
+      - vintage map illustration
+      - sepia-toned historical aesthetic
+      - classical engraving style
+      - period-appropriate illustration
+    subcategories:
+      "Ancient History":
+        header:
+          - classical antiquity motifs
+          - weathered stone texture
+          - ancient mosaic patterns
+          - archaeological artifact style
+          - mythological iconography
+      "Medieval History":
+        header:
+          - illuminated manuscript style
+          - gothic architectural motifs
+          - heraldic design elements
+          - tapestry-inspired aesthetic
+      "Modern History":
+        header:
+          - documentary photography style
+          - propaganda poster aesthetic
+          - industrial revolution imagery
+          - vintage newspaper illustration
+      "Military History":
+        header:
+          - strategic map visualization
+          - military insignia design
+          - battlefield terrain illustration
+
+  Geography:
+    header:
+      - topographic map aesthetic
+      - satellite imagery style
+      - cartographic illustration
+      - terrain visualization
+    subcategories:
+      "Physical Geography":
+        header:
+          - geological cross-section style
+          - landform visualization
+          - natural landscape illustration
+      "Human Geography":
+        header:
+          - urban planning diagram style
+          - demographic visualization
+          - cultural pattern illustration
+
+  People:
+    header:
+      - double exposure portrait
+      - stylized biographical collage
+      - monochromatic high-contrast
+      - artistic silhouette composition
+      - iconic portrait style
+    subcategories:
+      Scientists:
+        header:
+          - portrait with scientific symbols
+          - laboratory setting aesthetic
+          - discovery moment illustration
+      Artists:
+        header:
+          - creative palette integration
+          - artistic movement style blend
+          - studio environment aesthetic
+      Leaders:
+        header:
+          - statesmanship portrait style
+          - historical moment visualization
+          - leadership iconography
+      Philosophers:
+        header:
+          - contemplative portrait aesthetic
+          - abstract thought visualization
+          - intellectual symbolism
+
+  Arts:
+    header:
+      - artistic movement inspired
+      - gallery exhibition aesthetic
+      - creative expression visualization
+      - medium-specific illustration
+    subcategories:
+      "Visual Arts":
+        header:
+          - painterly brushstroke style
+          - canvas texture aesthetic
+          - color theory visualization
+      Music:
+        header:
+          - sound wave visualization
+          - musical notation integration
+          - instrument silhouette composition
+      Literature:
+        header:
+          - vintage book cover aesthetic
+          - typographic illustration
+          - literary symbolism style
+      Architecture:
+        header:
+          - architectural blueprint style
+          - structural visualization
+          - building elevation aesthetic
+
+  Technology:
+    header:
+      - cutting-edge tech aesthetic
+      - innovation visualization
+      - digital interface style
+      - futuristic product design
+    subcategories:
+      Engineering:
+        header:
+          - technical schematic style
+          - mechanical precision aesthetic
+          - blueprint visualization
+      "Information Technology":
+        header:
+          - digital network visualization
+          - code-inspired aesthetic
+          - cloud computing imagery
+
+  Philosophy:
+    header:
+      - abstract conceptual visualization
+      - symbolic representation
+      - contemplative aesthetic
+      - intellectual diagram style
+    subcategories:
+      Ethics:
+        header:
+          - moral dilemma visualization
+          - balance and justice symbolism
+      Metaphysics:
+        header:
+          - existence and reality abstraction
+          - cosmic philosophical aesthetic
+      Logic:
+        header:
+          - logical structure diagram
+          - reasoning flow visualization
+
+  Culture:
+    header:
+      - cultural pattern integration
+      - traditional motif modernization
+      - heritage-inspired design
+      - folk art aesthetic
+    subcategories:
+      Religion:
+        header:
+          - sacred geometry patterns
+          - spiritual symbolism
+          - devotional art aesthetic
+      Mythology:
+        header:
+          - mythological scene illustration
+          - legendary creature visualization
+          - epic narrative style
+

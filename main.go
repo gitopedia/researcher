@@ -24,6 +24,9 @@ func main() {
 	stepName := flag.String("step-name", "", "Specific step to run (discovery, summarization, drafting, finalize)")
 	repoPath := flag.String("repo-path", "../gitopedia", "Path to local gitopedia repository")
 	noCommit := flag.Bool("no-commit", false, "Add changes to staging area but don't commit")
+	generateImages := flag.Bool("generate-images", false, "Run image generation only for pending prompts on current branch")
+	backfillImages := flag.Bool("backfill-images", false, "Generate prompts for existing articles that don't have them, then generate images")
+	branchName := flag.String("branch", "", "Branch name for image operations (required with --generate-images or --backfill-images)")
 	flag.Parse()
 
 	// Initialize structured, colorized logging using Go's standard library slog,
@@ -42,14 +45,18 @@ func main() {
 
 	log.Printf("Gitopedia Researcher v%s", agent.Version)
 	log.Printf("Repository: %s", *repoPath)
-	if *mergeOnly {
+	if *backfillImages {
+		log.Println("Starting in backfill images mode (generate prompts + images for existing articles)...")
+	} else if *generateImages {
+		log.Println("Starting in image generation mode...")
+	} else if *mergeOnly {
 		log.Println("Starting in merge-only mode...")
 	} else if *stepByStep {
 		log.Printf("Starting in step-by-step mode (Step: %s)...", *stepName)
 	} else {
 		log.Println("Starting in full mode...")
 	}
-	if !*once {
+	if !*once && !*generateImages {
 		log.Println("Press Ctrl+C to gracefully shutdown (will wait for current task to complete)")
 	}
 
@@ -94,6 +101,38 @@ func main() {
 
 	if *noCommit {
 		a.SetNoCommit(true)
+	}
+
+	// Handle backfill images mode (generate prompts for existing articles, then images)
+	if *backfillImages {
+		if *branchName == "" {
+			log.Fatal("--branch is required when using --backfill-images")
+		}
+		log.Printf("Backfilling images for branch: %s", *branchName)
+		if err := a.BackfillImagePrompts(ctx, *branchName); err != nil {
+			log.Fatalf("Backfill image prompts failed: %v", err)
+		}
+		log.Println("Backfill completed, now generating images...")
+		if err := a.GenerateImagesForBranch(ctx, *branchName); err != nil {
+			log.Fatalf("Image generation failed: %v", err)
+		}
+		log.Println("Backfill and image generation completed successfully")
+		logging.Close()
+		return
+	}
+
+	// Handle image generation mode
+	if *generateImages {
+		if *branchName == "" {
+			log.Fatal("--branch is required when using --generate-images")
+		}
+		log.Printf("Generating images for branch: %s", *branchName)
+		if err := a.GenerateImagesForBranch(ctx, *branchName); err != nil {
+			log.Fatalf("Image generation failed: %v", err)
+		}
+		log.Println("Image generation completed successfully")
+		logging.Close()
+		return
 	}
 
 	// Loop interval configuration

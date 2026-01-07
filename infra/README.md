@@ -110,7 +110,7 @@ Enable Ollama's thinking capability for better instruction following:
 LLM_THINK_MODE=true
 ```
 
-When enabled with `RESEARCH_DEBUG_SOURCES=true`, thinking traces are saved to `_debug/articles/{slug}/thinking.txt`.
+Thinking traces help the model reason through complex instructions before responding.
 
 ### Knowledge-Base Integration
 

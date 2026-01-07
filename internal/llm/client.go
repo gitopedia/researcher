@@ -66,6 +66,11 @@ type Client struct {
 	suggestNewSectionUserTemplate           *template.Template
 	generateSectionSearchQuerySystemTemplate *template.Template
 	generateSectionSearchQueryUserTemplate   *template.Template
+	// Image generation templates
+	generateImagePromptSystemTemplate      *template.Template
+	generateImagePromptUserTemplate        *template.Template
+	extractVisualElementsSystemTemplate    *template.Template
+	extractVisualElementsUserTemplate      *template.Template
 }
 
 type ollamaChatRequest struct {
@@ -334,6 +339,28 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load generate_section_search_query_user template: %w", err)
 	}
 
+	// Image generation templates
+	generateImagePromptSystem, err := loadTemplate("prompts/generate_image_prompt_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_image_prompt_system template: %w", err)
+	}
+
+	generateImagePromptUser, err := loadTemplate("prompts/generate_image_prompt_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_image_prompt_user template: %w", err)
+	}
+
+	// Visual elements extraction templates
+	extractVisualElementsSystem, err := loadTemplate("prompts/extract_visual_elements_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load extract_visual_elements_system template: %w", err)
+	}
+
+	extractVisualElementsUser, err := loadTemplate("prompts/extract_visual_elements_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load extract_visual_elements_user template: %w", err)
+	}
+
 	return &Client{
 		client:                            openai.NewClientWithConfig(config),
 		httpClient:                        httpClient,
@@ -378,6 +405,10 @@ func NewClient() (*Client, error) {
 		suggestNewSectionUserTemplate:            suggestNewSectionUser,
 		generateSectionSearchQuerySystemTemplate: generateSectionSearchQuerySystem,
 		generateSectionSearchQueryUserTemplate:   generateSectionSearchQueryUser,
+		generateImagePromptSystemTemplate:        generateImagePromptSystem,
+		generateImagePromptUserTemplate:          generateImagePromptUser,
+		extractVisualElementsSystemTemplate:      extractVisualElementsSystem,
+		extractVisualElementsUserTemplate:        extractVisualElementsUser,
 	}, nil
 }
 
@@ -1801,4 +1832,180 @@ func (c *Client) GenerateSectionSearchQuery(ctx context.Context, category, subca
 	}
 	log.Printf("GenerateSectionSearchQuery: query='%s' in %v", result.SearchQuery, time.Since(startTime))
 	return &result, nil
+}
+
+// ExtractVisualElements extracts article-specific visual concepts for image generation
+func (c *Client) ExtractVisualElements(ctx context.Context, req VisualElementsRequest) (*VisualElements, error) {
+	startTime := time.Now()
+
+	// Execute system template
+	var systemBuf bytes.Buffer
+	if err := c.extractVisualElementsSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute extract_visual_elements system template: %w", err)
+	}
+
+	// Execute user template with article data
+	userData := map[string]interface{}{
+		"Topic":          req.Topic,
+		"Category":       req.Category,
+		"Subcategory":    req.Subcategory,
+		"ArticleContent": req.ArticleContent,
+	}
+	var userBuf bytes.Buffer
+	if err := c.extractVisualElementsUserTemplate.Execute(&userBuf, userData); err != nil {
+		return nil, fmt.Errorf("failed to execute extract_visual_elements user template: %w", err)
+	}
+
+	log.Printf("ExtractVisualElements: Extracting visual elements for '%s' (%s > %s)", req.Topic, req.Category, req.Subcategory)
+
+	// Use faster model for extraction (it's a structured task)
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelSuggestTopics, // Use fast model
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3, // Lower temperature for more consistent extraction
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract visual elements: %w", err)
+	}
+
+	// Parse JSON response
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result VisualElements
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		log.Printf("ExtractVisualElements: Failed to parse JSON, raw response: %s", resp.Choices[0].Message.Content)
+		// Return empty result rather than failing completely
+		result = VisualElements{
+			KeyConcepts:       []string{},
+			SpecificPhenomena: []string{},
+			NotableFigures:    []string{},
+			IconicImagery:     []string{},
+			MathElements:      []string{},
+		}
+	}
+
+	log.Printf("ExtractVisualElements: Extracted %d concepts, %d phenomena, %d figures, %d imagery, %d math elements in %v",
+		len(result.KeyConcepts), len(result.SpecificPhenomena), len(result.NotableFigures),
+		len(result.IconicImagery), len(result.MathElements), time.Since(startTime))
+
+	return &result, nil
+}
+
+// GenerateImagePrompt generates an image generation prompt for an article header
+func (c *Client) GenerateImagePrompt(ctx context.Context, req ImagePromptRequest) (*ImagePromptResult, error) {
+	startTime := time.Now()
+
+	// Ensure we have valid extracted elements (use empty struct if nil)
+	extractedElements := req.ExtractedElements
+	if extractedElements == nil {
+		extractedElements = &VisualElements{}
+	}
+
+	// Execute system template with category guidance
+	systemData := map[string]interface{}{
+		"CategoryGuidance": req.CategoryGuidance,
+	}
+	var systemBuf bytes.Buffer
+	if err := c.generateImagePromptSystemTemplate.Execute(&systemBuf, systemData); err != nil {
+		return nil, fmt.Errorf("failed to execute generate_image_prompt system template: %w", err)
+	}
+
+	// Execute user template with structured extraction data
+	userData := map[string]interface{}{
+		"Topic":             req.Topic,
+		"Category":          req.Category,
+		"Subcategory":       req.Subcategory,
+		"ArticleSummary":    req.ArticleSummary,
+		"ExtractedElements": extractedElements, // Pass full structured extraction
+		"ColorMood":         req.ColorMood,
+		"ArtisticStyles":    req.ArtisticStyles, // Pass as slice for template iteration
+	}
+	var userBuf bytes.Buffer
+	if err := c.generateImagePromptUserTemplate.Execute(&userBuf, userData); err != nil {
+		return nil, fmt.Errorf("failed to execute generate_image_prompt user template: %w", err)
+	}
+
+	log.Printf("GenerateImagePrompt: Generating prompt for '%s' (%s > %s)", req.Topic, req.Category, req.Subcategory)
+
+	var result ImagePromptResult
+	result.Model = c.modelGenerateArticle
+
+	// Use thinking mode if enabled for better creative output
+	if c.ThinkingEnabled() {
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.7)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate image prompt: %w", err)
+		}
+		result.Prompt = strings.TrimSpace(resp.Message.Content)
+		result.Thinking = resp.Message.Thinking
+	} else {
+		resp, err := c.client.CreateChatCompletion(
+			ctx,
+			openai.ChatCompletionRequest{
+				Model: c.modelGenerateArticle,
+				Messages: []openai.ChatCompletionMessage{
+					{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+					{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+				},
+				Temperature: 0.7,
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate image prompt: %w", err)
+		}
+		result.Prompt = strings.TrimSpace(resp.Choices[0].Message.Content)
+	}
+
+	// Clean up the prompt - remove any markdown or extra formatting
+	result.Prompt = cleanImagePrompt(result.Prompt)
+
+	log.Printf("GenerateImagePrompt: Generated prompt in %v (%d chars)", time.Since(startTime), len(result.Prompt))
+	return &result, nil
+}
+
+// cleanImagePrompt removes any markdown formatting or extra text from the generated prompt
+func cleanImagePrompt(prompt string) string {
+	// Remove markdown code blocks if present
+	prompt = strings.TrimSpace(prompt)
+	if strings.HasPrefix(prompt, "```") {
+		lines := strings.Split(prompt, "\n")
+		var cleanLines []string
+		inCodeBlock := false
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "```") {
+				inCodeBlock = !inCodeBlock
+				continue
+			}
+			if !inCodeBlock || (inCodeBlock && !strings.HasPrefix(strings.TrimSpace(line), "```")) {
+				cleanLines = append(cleanLines, line)
+			}
+		}
+		prompt = strings.Join(cleanLines, "\n")
+	}
+
+	// Remove any leading "Prompt:" or similar labels
+	prompt = strings.TrimSpace(prompt)
+	prefixes := []string{"Prompt:", "Image prompt:", "Final prompt:", "Output:"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(strings.ToLower(prompt), strings.ToLower(prefix)) {
+			prompt = strings.TrimSpace(prompt[len(prefix):])
+		}
+	}
+
+	// Remove surrounding quotes if present
+	if (strings.HasPrefix(prompt, "\"") && strings.HasSuffix(prompt, "\"")) ||
+		(strings.HasPrefix(prompt, "'") && strings.HasSuffix(prompt, "'")) {
+		prompt = prompt[1 : len(prompt)-1]
+	}
+
+	return strings.TrimSpace(prompt)
 }
