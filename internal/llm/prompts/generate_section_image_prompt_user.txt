@@ -1,0 +1,29 @@
+Generate an image prompt for this article section.
+
+Article: {{.ArticleTitle}}
+Section Title: {{.SectionTitle}}
+Category: {{.Category}}{{if .Subcategory}} > {{.Subcategory}}{{end}}
+
+Image Type: {{.ImageType}}
+Artistic Style: {{.ArtisticStyle}}
+
+---
+Section Content:
+{{.SectionContent}}
+---
+
+Key Elements to Visualize:
+{{- range .KeyElements}}
+- {{.}}
+{{- end}}
+
+---
+
+Generate a {{.ImageType}} prompt that:
+1. Clearly illustrates the key concepts from this section
+2. Uses the {{.ImageType}} format conventions
+3. Incorporates the {{.ArtisticStyle}} style
+4. Would work as an educational supporting graphic
+
+Output only the final prompt text, nothing else.
+

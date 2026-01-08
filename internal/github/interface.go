@@ -50,6 +50,14 @@ type GitHubClient interface {
 	DeleteFile(branch, path, message, sha string) error
 	MarkPRReady(prNumber int) error
 
+	// Image generation support
+	ListDirectory(branch, path string) ([]string, error)
+	AddBinaryFile(branch, path, message string, content []byte) error
+
+	// Local git operations
+	GetCurrentBranch() (string, error)
+	ResetToMain() error
+
 	// Label management
 	AddLabel(issueNumber int, label string) error
 	RemoveLabel(issueNumber int, label string) error
@@ -67,17 +75,6 @@ type GitHubClient interface {
 
 	// Mode checks
 	IsLocal() bool
-
-	// Image generation support
-	ListDirectory(branch, path string) ([]DirectoryEntry, error)
-	AddBinaryFile(branch, path, localPath, message string) error
-	GetCurrentBranch() (string, error)
-}
-
-// DirectoryEntry represents a file or directory in a repository
-type DirectoryEntry struct {
-	Name  string
-	IsDir bool
 }
 
 // PRInfo contains basic info about a PR

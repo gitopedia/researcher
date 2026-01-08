@@ -1,0 +1,37 @@
+Evaluate this article section for image suitability.
+
+Article: {{.ArticleTitle}}
+Section Title: {{.SectionTitle}}
+Category: {{.Category}}{{if .Subcategory}} > {{.Subcategory}}{{end}}
+
+---
+Section Content:
+{{.SectionContent}}
+---
+
+Score each image type from 0-100 and provide brief reasoning.
+Output as JSON in this exact format:
+{
+  "scores": {
+    "diagram": 0,
+    "chart": 0,
+    "timeline": 0,
+    "flowchart": 0,
+    "illustration": 0,
+    "schematic": 0
+  },
+  "reasoning": {
+    "diagram": "reason",
+    "chart": "reason",
+    "timeline": "reason",
+    "flowchart": "reason",
+    "illustration": "reason",
+    "schematic": "reason"
+  },
+  "recommended_type": "type_name_or_none",
+  "recommended_score": 0,
+  "key_elements_to_visualize": ["element1", "element2"]
+}
+
+Output only the JSON, nothing else.
+

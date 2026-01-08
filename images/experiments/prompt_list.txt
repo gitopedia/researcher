@@ -1,0 +1,118 @@
+# Image Generation Experiment Prompts
+# Format: ID | Category | Style | Prompt
+# Generated images will be named: {ID}.png
+
+# === STYLE EXPERIMENTS (001-020) ===
+001 | style | cyberpunk | Quantum particles floating in a neon-lit cyberpunk cityscape, holographic data streams, rain-slicked surfaces reflecting pink and cyan lights, dystopian futurism
+002 | style | art-deco | Quantum energy patterns in art deco style, geometric golden rays, symmetrical designs, 1920s elegance, black and gold palette
+003 | style | watercolor | Soft watercolor painting of subatomic particles, flowing washes of blue and purple, organic bleeding edges, dreamlike quality
+004 | style | isometric | Isometric 3D illustration of a quantum computer, clean geometric shapes, pastel colors, technical precision, flat shading
+005 | style | minimalist | Ultra-minimalist representation of wave-particle duality, single thin line transforming from wave to dot, vast negative space, monochrome
+006 | style | vaporwave | Quantum realm in vaporwave aesthetic, pink and purple gradients, Greek statues, glitch effects, retro-futuristic
+007 | style | japanese-ink | Quantum mechanics as Japanese sumi-e ink painting, elegant brushstrokes, zen simplicity, particle as single ink dot creating ripples
+008 | style | stained-glass | Quantum entanglement depicted as medieval stained glass window, vibrant jewel tones, lead line divisions, sacred geometry
+009 | style | blueprint | Technical blueprint of quantum wave function, white lines on dark blue, engineering annotations, precise measurements
+010 | style | oil-painting | Classical oil painting style of atomic orbitals, rich textures, chiaroscuro lighting, Renaissance master technique
+011 | style | low-poly | Low-poly 3D render of quantum superposition, faceted geometric forms, bold colors, modern game art aesthetic
+012 | style | line-art | Intricate line art illustration of quantum field theory, continuous flowing lines, no fills, pen and ink style
+013 | style | neon-noir | Dark noir scene with neon quantum equations floating in smoke, detective aesthetic, moody shadows, single color accent
+014 | style | paper-cut | Layered paper cut art of wave interference patterns, depth through shadows, white paper on dark background
+015 | style | pixel-art | Retro pixel art of quantum physics concepts, 16-bit aesthetic, limited palette, nostalgic gaming style
+016 | style | bauhaus | Bauhaus design interpretation of atomic structure, primary colors, geometric shapes, functional minimalism
+017 | style | psychedelic | Psychedelic 1960s poster style quantum visualization, swirling colors, kaleidoscopic patterns, fractal elements
+018 | style | brutalist | Brutalist graphic design of quantum mechanics, heavy typography, raw textures, stark contrasts, industrial feel
+019 | style | nouveau | Art nouveau flowing curves depicting electron orbitals, organic forms, decorative borders, muted earth tones
+020 | style | glitch | Digital glitch art of quantum uncertainty, corrupted pixels, RGB splitting, data moshing effects
+
+# === COLOR PALETTE EXPERIMENTS (021-035) ===
+021 | color | monochrome-blue | Quantum waves in monochromatic blue palette, from navy to ice blue, depth through value only
+022 | color | warm-sunset | Quantum particles glowing in warm sunset colors, oranges reds and golds, ember-like energy
+023 | color | acid-green | Radioactive-looking quantum field in acid green and black, toxic glow, hazard aesthetic
+024 | color | pastel-soft | Soft pastel visualization of superposition, baby pink and mint, gentle and approachable
+025 | color | high-contrast | Extreme high contrast black and white quantum imagery, stark shadows, no midtones
+026 | color | duotone-purple | Duotone image in purple and gold of entangled particles, elegant and regal
+027 | color | neon-rainbow | Full neon rainbow spectrum quantum energy burst, vibrant LGBTQ pride colors, celebratory
+028 | color | earth-tones | Quantum physics in natural earth tones, browns greens and terracotta, organic science
+029 | color | ice-cold | Frozen quantum state in ice blue and white, crystalline structures, absolute zero feeling
+030 | color | fire-hot | Quantum energy as pure fire, reds oranges yellows, plasma-like intensity
+031 | color | grayscale | Pure grayscale quantum mechanics visualization, no color, focus on form and light
+032 | color | retrowave | Retrowave color scheme for quantum concepts, hot pink magenta and cyan on dark purple
+033 | color | muted-vintage | Vintage muted colors depicting wave function, faded photographs, nostalgic science
+034 | color | jewel-tones | Rich jewel tones for quantum entanglement, emerald ruby sapphire amethyst, luxurious
+035 | color | oxidized-metal | Quantum art in oxidized copper and iron tones, patina textures, aged industrial
+
+# === SUBJECT MATTER EXPERIMENTS (036-055) ===
+036 | subject | double-slit | Double slit experiment visualization, particle beam splitting, interference pattern forming on screen
+037 | subject | schrodinger-cat | Abstract representation of Schrodinger's cat, overlapping alive and dead states, quantum box
+038 | subject | spin-states | Electron spin states visualization, up and down arrows, magnetic field lines, quantum spinning tops
+039 | subject | tunnel-effect | Quantum tunneling through energy barrier, particle ghosting through wall, probability cloud passing through
+040 | subject | decoherence | Quantum decoherence process, organized patterns dissolving into chaos, environmental interference
+041 | subject | qubit | Single qubit in superposition, Bloch sphere representation, quantum computing foundation
+042 | subject | bell-test | Bell test experiment setup, entangled photon pairs, measurement apparatus, correlation detection
+043 | subject | uncertainty | Heisenberg uncertainty principle, blurred position and momentum, complementary variables
+044 | subject | wave-collapse | Wave function collapse moment, probability cloud crystallizing into definite state, observation effect
+045 | subject | photon | Single photon visualization, light quantum, wave-packet traveling through space
+046 | subject | quantum-field | Quantum field fluctuations, virtual particles appearing and disappearing, vacuum energy
+047 | subject | atom-model | Modern quantum atomic model, probability clouds replacing orbits, electron density distribution
+048 | subject | antimatter | Matter-antimatter pair creation, particle-antiparticle emerging from energy, annihilation
+049 | subject | planck-scale | Planck scale visualization, spacetime foam, quantum gravity effects, smallest possible distances
+050 | subject | many-worlds | Many worlds interpretation, branching realities, parallel universe tree, quantum decisions
+051 | subject | quantum-foam | Quantum foam texture, spacetime at smallest scales, bubbling reality, chaotic structure
+052 | subject | entanglement-swap | Entanglement swapping process, four particles, teleportation of quantum state
+053 | subject | superposition-decay | Superposition gradually decaying, multiple states fading to one, time evolution
+054 | subject | quantum-eraser | Quantum eraser experiment, information destruction restoring interference, which-path detection
+055 | subject | epr-paradox | EPR paradox visualization, Einstein Podolsky Rosen thought experiment, hidden variables challenge
+
+# === COMPOSITION EXPERIMENTS (056-070) ===
+056 | composition | centered-symmetry | Perfectly centered symmetric quantum mandala, radial balance, meditative focus
+057 | composition | rule-of-thirds | Quantum particle placed at rule of thirds intersection, dynamic tension, professional photography
+058 | composition | diagonal-flow | Diagonal composition of quantum wave propagation, dynamic movement, energy direction
+059 | composition | frame-within | Frame within frame composition, quantum world seen through portal or microscope
+060 | composition | negative-space | Mostly negative space with small quantum element, vast emptiness, cosmic scale
+061 | composition | full-bleed | Full bleed edge-to-edge quantum energy, immersive, no boundaries, overwhelming
+062 | composition | triptych | Triptych format showing quantum process in three stages, before during after
+063 | composition | golden-spiral | Golden spiral composition with quantum elements following fibonacci curve, natural harmony
+064 | composition | asymmetric | Intentionally asymmetric unbalanced quantum composition, dynamic tension, modern art
+065 | composition | layered-depth | Multiple layers of depth with quantum elements at different z-positions, parallax effect
+066 | composition | circular | Circular composition with quantum activity contained within sphere, contained universe
+067 | composition | vertical-flow | Vertical flowing composition, quantum energy cascading downward, gravity-like
+068 | composition | horizontal-band | Horizontal band composition, quantum timeline or spectrum, left to right reading
+069 | composition | corner-anchor | Main quantum element anchored in corner, radiating outward, explosive origin
+070 | composition | scattered | Scattered composition with quantum particles randomly distributed, chaos theory
+
+# === MOOD EXPERIMENTS (071-085) ===
+071 | mood | mysterious | Mysterious foggy quantum realm, half-hidden elements, enigmatic shadows, questions unanswered
+072 | mood | energetic | High-energy explosive quantum burst, dynamic motion blur, intense activity, powerful
+073 | mood | serene | Serene calm quantum harmony, gentle waves, peaceful coexistence, meditation
+074 | mood | chaotic | Chaotic quantum fluctuations, disorder entropy, unpredictable patterns, turbulent
+075 | mood | melancholic | Melancholic fading quantum state, endings and decay, beautiful sadness, transience
+076 | mood | triumphant | Triumphant quantum breakthrough, light emerging, discovery moment, eureka feeling
+077 | mood | ominous | Ominous dark quantum void, threatening unknown, cosmic horror, existential dread
+078 | mood | playful | Playful whimsical quantum particles, bouncing energy, cartoon-like joy, fun science
+079 | mood | romantic | Romantic entanglement of particles, dance-like connection, love metaphor, intimate
+080 | mood | clinical | Clinical sterile quantum laboratory view, cold precision, scientific detachment
+081 | mood | nostalgic | Nostalgic retro-science quantum imagery, vintage equipment, old textbook illustrations
+082 | mood | futuristic | Ultra-futuristic quantum technology, advanced civilization, transcendent science
+083 | mood | spiritual | Spiritual transcendent quantum visualization, consciousness connection, enlightenment
+084 | mood | industrial | Industrial quantum machinery, factory of particles, mechanical production
+085 | mood | organic | Organic living quantum system, biological metaphors, cells and growth, alive
+
+# === HYBRID EXPERIMENTS (086-100) ===
+086 | hybrid | cyberpunk-noir | Cyberpunk noir quantum detective scene, rain neon shadows, mystery investigation
+087 | hybrid | art-deco-space | Art deco meets space age, 1920s geometry in cosmic setting, retro-futurism
+088 | hybrid | japanese-neon | Japanese ink painting with neon accents, tradition meets technology, east west fusion
+089 | hybrid | steampunk-quantum | Steampunk Victorian quantum apparatus, brass gears copper pipes, anachronistic science
+090 | hybrid | bio-tech | Biotechnology organic quantum computer, living circuits, DNA computing, hybrid life
+091 | hybrid | crystal-cave | Quantum realm as crystal cave interior, geometric mineral formations, natural precision
+092 | hybrid | ocean-depth | Deep ocean quantum metaphor, bioluminescence, pressure darkness, alien beauty
+093 | hybrid | cosmic-mandala | Cosmic spiritual mandala of quantum reality, sacred geometry, universal consciousness
+094 | hybrid | circuit-nature | Electronic circuits growing like plants, quantum nature hybrid, technology evolution
+095 | hybrid | ancient-future | Ancient Egyptian hieroglyphics depicting quantum concepts, timeless knowledge
+096 | hybrid | music-visual | Quantum mechanics as musical visualization, sound waves, rhythm patterns, synesthesia
+097 | hybrid | architecture | Quantum concepts as impossible architecture, Escher-like structures, spatial paradox
+098 | hybrid | weather-quantum | Quantum uncertainty as weather system, probability clouds literally, atmospheric science
+099 | hybrid | microscope-view | Electron microscope aesthetic, quantum scale reality, scientific instrument view
+100 | hybrid | dream-logic | Dream-like surrealist quantum world, Dali-inspired melting reality, subconscious physics
+
+
+

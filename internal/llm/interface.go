@@ -56,7 +56,7 @@ type RedundancyResult struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
-// EncyclopediaCheckResult indicates whether a source is encyclopedia-like
+// EncyclopediaCheckResult contains the result of checking if a source is an encyclopedia
 type EncyclopediaCheckResult struct {
 	IsEncyclopedia bool   `json:"is_encyclopedia"`
 	Reason         string `json:"reason,omitempty"`
@@ -64,87 +64,134 @@ type EncyclopediaCheckResult struct {
 
 // ArticleSection represents a section extracted from an article
 type ArticleSection struct {
-	Level      int    `json:"level"`             // Heading level (2 for ##, 3 for ###, etc.)
-	Title      string `json:"title"`             // Section heading text
-	HasContent bool   `json:"has_content"`       // Whether section has meaningful content
-	Content    string `json:"content,omitempty"` // The actual section content (optional)
+	Title   string `json:"title"`
+	Level   int    `json:"level"`
+	Content string `json:"content,omitempty"`
 }
 
-// SectionToAdd represents a single section that should be added to an article
+// NewSectionSuggestion represents a suggestion for a new section to add
+type NewSectionSuggestion struct {
+	SectionTitle string `json:"section_title"`
+	InsertAfter  string `json:"insert_after"`
+	Rationale    string `json:"rationale"`
+	SearchQuery  string `json:"search_query"`
+}
+
+// SectionComparison represents the result of comparing two articles' sections
+type SectionComparison struct {
+	HasNewSection  bool           `json:"has_new_section"`
+	SectionsToAdd  []SectionToAdd `json:"sections_to_add"`
+	SectionTitle   string         `json:"section_title,omitempty"`   // Legacy single section
+	SectionContent string         `json:"section_content,omitempty"` // Legacy single section
+	InsertAfter    string         `json:"insert_after,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+}
+
+// SectionToAdd represents a section to be added to an article
 type SectionToAdd struct {
 	Title       string `json:"title"`
 	Content     string `json:"content"`
 	InsertAfter string `json:"insert_after"`
-	Reason      string `json:"reason,omitempty"`
+	Reason      string `json:"reason"`
 }
 
-// SectionComparisonResult indicates if new sections should be added
-type SectionComparisonResult struct {
-	HasNewSection bool           `json:"has_new_section"`
-	SectionsToAdd []SectionToAdd `json:"sections_to_add,omitempty"`
-	// Legacy single section fields for backward compatibility
-	SectionTitle   string `json:"section_title,omitempty"`
-	SectionContent string `json:"section_content,omitempty"`
-	InsertAfter    string `json:"insert_after,omitempty"`
-	Reason         string `json:"reason,omitempty"`
+// SectionOrderRequest contains input for ordering sections
+type SectionOrderRequest struct {
+	Topic            string
+	ExistingSections []ArticleSection
+	NewSections      []SectionToAdd
 }
 
-// ImprovementScore evaluates if a section revision is worthwhile
-type ImprovementScore struct {
-	IsImproved     bool     `json:"is_improved"`
-	Score          int      `json:"score"` // 1-10
-	Improvements   []string `json:"improvements,omitempty"`
-	Concerns       []string `json:"concerns,omitempty"`
-	Recommendation string   `json:"recommendation"` // "accept" or "reject"
+// SectionOrderResult contains the ordered section titles
+type SectionOrderResult struct {
+	OrderedTitles []string `json:"ordered_titles"`
+	Reasoning     string   `json:"reasoning,omitempty"`
 }
 
-// SuggestSectionResult contains the LLM's suggestion for a new section to add
-type SuggestSectionResult struct {
-	SectionTitle string `json:"section_title"`
-	InsertAfter  string `json:"insert_after"`
-	SearchQuery  string `json:"search_query"`
-	Rationale    string `json:"rationale"`
-}
-
-// SearchQueryResult contains an LLM-generated search query with category context
+// SearchQueryResult contains a generated search query
 type SearchQueryResult struct {
 	SearchQuery string `json:"search_query"`
 }
 
-// ImagePromptRequest contains all the data needed to generate an image prompt
-type ImagePromptRequest struct {
-	Topic             string          // The article topic/title
-	Category          string          // Top-level category (e.g., "Science")
-	Subcategory       string          // Subcategory (e.g., "Physics")
-	ArticleSummary    string          // Summary or intro of the article content
-	ExtractedElements *VisualElements // Full structured extraction from article
-	ColorMood         string          // Selected color/mood option (from config)
-	ArtisticStyles    []string        // Selected artistic style(s) (from config)
-	CategoryGuidance  string          // Guidance text for this category (from config)
+// ImprovementScore represents the quality score of an improvement
+type ImprovementScore struct {
+	Score          int      `json:"score"`
+	Recommendation string   `json:"recommendation"`
+	IsImproved     bool     `json:"is_improved"`
+	Improvements   []string `json:"improvements,omitempty"`
+	Concerns       []string `json:"concerns,omitempty"`
 }
 
-// ImagePromptResult contains the generated image prompt
-type ImagePromptResult struct {
-	Prompt   string // The generated image generation prompt
-	Model    string // The model used to generate the prompt
-	Thinking string // The model's reasoning trace (if thinking mode enabled)
-}
-
-// VisualElements contains article-specific visual concepts extracted for image generation
+// VisualElements contains extracted visual concepts from an article
 type VisualElements struct {
-	KeyConcepts       []string `json:"key_concepts"`       // Main visualizable concepts specific to this article
-	SpecificPhenomena []string `json:"specific_phenomena"` // Named experiments, paradoxes, theorems, effects
-	NotableFigures    []string `json:"notable_figures"`    // Scientists, inventors, historical figures mentioned
-	IconicImagery     []string `json:"iconic_imagery"`     // Famous thought experiments, metaphors, visual descriptions
-	MathElements      []string `json:"math_elements"`      // Equations, formulas, mathematical structures
+	KeyConcepts       []string `json:"key_concepts"`
+	SpecificPhenomena []string `json:"specific_phenomena"`
+	NotableFigures    []string `json:"notable_figures"`
+	IconicImagery     []string `json:"iconic_imagery"`
+	MathElements      []string `json:"math_elements"`
 }
 
-// VisualElementsRequest contains the data needed to extract visual elements
+// VisualElementsRequest contains the input for visual element extraction
 type VisualElementsRequest struct {
-	Topic          string // Article title
-	Category       string // Top-level category
-	Subcategory    string // Subcategory
-	ArticleContent string // Full article content
+	Topic          string
+	Category       string
+	Subcategory    string
+	ArticleContent string
+}
+
+// ImagePromptRequest contains the input for image prompt generation
+type ImagePromptRequest struct {
+	Topic             string
+	Category          string
+	Subcategory       string
+	ArticleSummary    string
+	ExtractedElements *VisualElements
+	ColorMood         string
+	ArtisticStyles    []string
+	CategoryGuidance  string
+}
+
+// ImagePromptResult contains the generated image prompt and metadata
+type ImagePromptResult struct {
+	Prompt   string
+	Model    string
+	Thinking string
+}
+
+// SectionImageEvaluationRequest contains the input for section image evaluation
+type SectionImageEvaluationRequest struct {
+	ArticleTitle   string
+	SectionTitle   string
+	SectionContent string
+	Category       string
+	Subcategory    string
+}
+
+// SectionImageEvaluationResult contains the evaluation scores for different image types
+type SectionImageEvaluationResult struct {
+	Scores                 map[string]int    `json:"scores"`
+	Reasoning              map[string]string `json:"reasoning"`
+	RecommendedType        string            `json:"recommended_type"`
+	RecommendedScore       int               `json:"recommended_score"`
+	KeyElementsToVisualize []string          `json:"key_elements_to_visualize"`
+}
+
+// SectionImagePromptRequest contains the input for section image prompt generation
+type SectionImagePromptRequest struct {
+	ArticleTitle   string
+	SectionTitle   string
+	SectionContent string
+	Category       string
+	Subcategory    string
+	ImageType      string
+	ArtisticStyle  string
+	KeyElements    []string
+}
+
+// SectionImagePromptResult contains the generated section image prompt
+type SectionImagePromptResult struct {
+	Prompt string
+	Model  string
 }
 
 type Generator interface {
@@ -160,21 +207,20 @@ type Generator interface {
 	CheckRelevance(ctx context.Context, topic, content string) (*RelevanceResult, error)
 	CheckRedundancy(ctx context.Context, topic, existingArticle, newContent string) (*RedundancyResult, error)
 	IntegrateContent(ctx context.Context, topic, existingArticle, newContent string) (string, error)
-
-	// Article improvement methods
 	IsEncyclopediaSource(ctx context.Context, domain, url, title string) (*EncyclopediaCheckResult, error)
-	ExtractSections(ctx context.Context, article string) ([]ArticleSection, error)
-	CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*SectionComparisonResult, error)
-	MergeSection(ctx context.Context, topic, sectionTitle, currentSection, newContent string) (string, error)
-	ScoreImprovement(ctx context.Context, topic, sectionTitle, originalSection, revisedSection string) (*ImprovementScore, error)
+	ExtractSections(ctx context.Context, articleContent string) ([]ArticleSection, error)
+	SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []ArticleSection) (*NewSectionSuggestion, error)
+	CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*SectionComparison, error)
+	OrderSections(ctx context.Context, req SectionOrderRequest) (*SectionOrderResult, error)
+	GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, sectionContent string) (*SearchQueryResult, error)
+	MergeSection(ctx context.Context, topic, sectionTitle, currentContent, newContent string) (string, error)
+	ScoreImprovement(ctx context.Context, topic, sectionTitle, originalContent, improvedContent string) (*ImprovementScore, error)
 
-	// Context-aware search query generation
-	SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []ArticleSection) (*SuggestSectionResult, error)
-	GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, contentSummary string) (*SearchQueryResult, error)
-
-	// Image generation
+	// Image generation methods
 	ExtractVisualElements(ctx context.Context, req VisualElementsRequest) (*VisualElements, error)
 	GenerateImagePrompt(ctx context.Context, req ImagePromptRequest) (*ImagePromptResult, error)
+	EvaluateSectionImage(ctx context.Context, req SectionImageEvaluationRequest) (*SectionImageEvaluationResult, error)
+	GenerateSectionImagePrompt(ctx context.Context, req SectionImagePromptRequest) (*SectionImagePromptResult, error)
 }
 
 // Ensure Client implements Generator

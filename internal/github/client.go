@@ -1058,6 +1058,56 @@ func (c *Client) DeleteFile(branch, path, message, sha string) error {
 	return err
 }
 
+// ListDirectory lists directories (not files) at the given path
+func (c *Client) ListDirectory(branch, path string) ([]string, error) {
+	if err := c.ensureValidToken(); err != nil {
+		return nil, err
+	}
+
+	_, dirContents, _, err := c.client.Repositories.GetContents(c.ctx, c.owner, c.repo, path, &github.RepositoryContentGetOptions{
+		Ref: branch,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var dirs []string
+	for _, content := range dirContents {
+		if content.GetType() == "dir" {
+			dirs = append(dirs, content.GetName())
+		}
+	}
+	return dirs, nil
+}
+
+// AddBinaryFile adds a binary file (e.g., an image) to the repository
+func (c *Client) AddBinaryFile(branch, path, message string, content []byte) error {
+	if err := c.ensureValidToken(); err != nil {
+		return err
+	}
+
+	opts := &github.RepositoryContentFileOptions{
+		Message: github.String(message),
+		Content: content,
+		Branch:  github.String(branch),
+	}
+
+	_, _, err := c.client.Repositories.CreateFile(c.ctx, c.owner, c.repo, path, opts)
+	return err
+}
+
+// GetCurrentBranch returns the current branch name (not applicable for remote API)
+func (c *Client) GetCurrentBranch() (string, error) {
+	// For remote GitHub API, this doesn't apply - return main as default
+	return "main", nil
+}
+
+// ResetToMain resets to main branch (not applicable for remote API)
+func (c *Client) ResetToMain() error {
+	// For remote GitHub API, this is a no-op
+	return nil
+}
+
 func (c *Client) MarkPRReady(prNumber int) error {
 	// GitHub API doesn't have a direct "mark ready" endpoint
 	// We need to use the GraphQL API or update the PR
@@ -1443,69 +1493,4 @@ func CheckArticleInBody(body, articleName string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-// ListDirectory lists the contents of a directory in a branch
-func (c *Client) ListDirectory(branch, path string) ([]DirectoryEntry, error) {
-	if err := c.ensureValidToken(); err != nil {
-		return nil, fmt.Errorf("failed to refresh token: %w", err)
-	}
-
-	opts := &github.RepositoryContentGetOptions{
-		Ref: branch,
-	}
-
-	_, dirContents, _, err := c.client.Repositories.GetContents(c.ctx, c.owner, c.repo, path, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list directory %s: %w", path, err)
-	}
-
-	var entries []DirectoryEntry
-	for _, content := range dirContents {
-		entries = append(entries, DirectoryEntry{
-			Name:  content.GetName(),
-			IsDir: content.GetType() == "dir",
-		})
-	}
-
-	return entries, nil
-}
-
-// AddBinaryFile adds a binary file to the repository from a local file path
-// This uses base64 encoding to upload binary content via the GitHub API
-func (c *Client) AddBinaryFile(branch, repoPath, localPath, message string) error {
-	if err := c.ensureValidToken(); err != nil {
-		return fmt.Errorf("failed to refresh token: %w", err)
-	}
-
-	// Read the local file
-	content, err := os.ReadFile(localPath)
-	if err != nil {
-		return fmt.Errorf("failed to read local file %s: %w", localPath, err)
-	}
-
-	opts := &github.RepositoryContentFileOptions{
-		Message: github.String(message),
-		Content: content,
-		Branch:  github.String(branch),
-	}
-
-	// Check if file exists to get its SHA for update
-	existingContent, _, _, _ := c.client.Repositories.GetContents(c.ctx, c.owner, c.repo, repoPath, &github.RepositoryContentGetOptions{Ref: branch})
-	if existingContent != nil {
-		opts.SHA = github.String(existingContent.GetSHA())
-	}
-
-	_, _, err = c.client.Repositories.CreateFile(c.ctx, c.owner, c.repo, repoPath, opts)
-	if err != nil {
-		return fmt.Errorf("failed to create/update file %s: %w", repoPath, err)
-	}
-
-	return nil
-}
-
-// GetCurrentBranch is not applicable for remote GitHub operations
-// Returns an error indicating this should be done locally
-func (c *Client) GetCurrentBranch() (string, error) {
-	return "", fmt.Errorf("GetCurrentBranch is not available for remote GitHub API client - use local git operations")
 }

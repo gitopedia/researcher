@@ -1,0 +1,165 @@
+# Section Image Types Configuration
+# Defines the types of images that can be generated for article sections
+
+image_types:
+  diagram:
+    name: "Diagram"
+    description: "A visual representation showing relationships, processes, or structures"
+    suitable_for:
+      - explanations of processes
+      - system architectures
+      - relationship hierarchies
+      - cause and effect chains
+      - component interactions
+    prompt_prefix: "A clear, professional diagram illustrating"
+    style_hints:
+      - clean lines
+      - labeled components
+      - directional arrows
+      - hierarchical layout
+
+  chart:
+    name: "Chart"
+    description: "A data visualization showing quantities, comparisons, or trends"
+    suitable_for:
+      - statistical data
+      - comparisons between items
+      - trends over time
+      - proportional relationships
+      - distribution patterns
+    prompt_prefix: "An informative chart visualization showing"
+    style_hints:
+      - data-driven
+      - clear labels
+      - appropriate scale
+      - color-coded categories
+
+  timeline:
+    name: "Timeline"
+    description: "A chronological visualization of events or developments"
+    suitable_for:
+      - historical sequences
+      - development phases
+      - evolution of concepts
+      - biographical events
+      - discovery chronology
+    prompt_prefix: "A visually engaging timeline depicting"
+    style_hints:
+      - chronological flow
+      - milestone markers
+      - date labels
+      - connecting elements
+
+  flowchart:
+    name: "Flowchart"
+    description: "A diagram showing decision points and process flows"
+    suitable_for:
+      - decision processes
+      - algorithmic steps
+      - conditional logic
+      - workflow sequences
+      - troubleshooting guides
+    prompt_prefix: "A professional flowchart illustrating"
+    style_hints:
+      - decision diamonds
+      - process rectangles
+      - directional arrows
+      - clear start/end points
+
+  illustration:
+    name: "Illustration"
+    description: "An artistic visualization of concepts or scenes"
+    suitable_for:
+      - abstract concepts
+      - thought experiments
+      - metaphorical explanations
+      - creative visualizations
+      - scene depictions
+    prompt_prefix: "An artistic illustration depicting"
+    style_hints:
+      - artistic interpretation
+      - conceptual visualization
+      - symbolic elements
+      - atmospheric depth
+
+  schematic:
+    name: "Schematic"
+    description: "A technical diagram showing components and connections"
+    suitable_for:
+      - technical systems
+      - mechanical components
+      - circuit descriptions
+      - architectural layouts
+      - engineering concepts
+    prompt_prefix: "A detailed schematic showing"
+    style_hints:
+      - technical precision
+      - component symbols
+      - connection lines
+      - measurement annotations
+
+# Evaluation criteria for determining section image suitability
+evaluation_criteria:
+  minimum_word_count: 150
+  minimum_char_count: 800
+  
+  # Scoring weights for different factors
+  weights:
+    content_complexity: 0.3
+    visual_potential: 0.3
+    educational_value: 0.25
+    uniqueness: 0.15
+  
+  # Minimum score threshold (0-100) for image generation
+  generation_threshold: 60
+
+# Category-specific image type preferences
+category_preferences:
+  science:
+    preferred_types:
+      - diagram
+      - schematic
+      - illustration
+    physics:
+      preferred_types:
+        - diagram
+        - illustration
+        - schematic
+    biology:
+      preferred_types:
+        - diagram
+        - illustration
+        - schematic
+    chemistry:
+      preferred_types:
+        - diagram
+        - schematic
+        - chart
+
+  technology:
+    preferred_types:
+      - diagram
+      - flowchart
+      - schematic
+    computing:
+      preferred_types:
+        - flowchart
+        - diagram
+        - schematic
+
+  history:
+    preferred_types:
+      - timeline
+      - illustration
+      - chart
+    
+  mathematics:
+    preferred_types:
+      - diagram
+      - illustration
+      - chart
+    geometry:
+      preferred_types:
+        - diagram
+        - illustration
+

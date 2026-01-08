@@ -494,3 +494,8 @@ func stripCodeFences(content string) string {
 	}
 	return strings.TrimSpace(content)
 }
+
+// GetCurrentBranch returns the current git branch name
+func (a *Agent) GetCurrentBranch() (string, error) {
+	return a.gh.GetCurrentBranch()
+}

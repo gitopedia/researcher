@@ -1,4 +1,3 @@
-// Package styles provides configuration loading and resolution for image generation styles and prompt templates.
 package styles
 
 import (
@@ -6,256 +5,382 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-// StyleConfig represents the artistic_styles.yaml configuration
-type StyleConfig struct {
-	Default    map[string][]string `yaml:"default"`
-	Categories map[string]struct {
-		Header        []string `yaml:"header,omitempty"`
-		Diagram       []string `yaml:"diagram,omitempty"`
-		Subcategories map[string]struct {
-			Header  []string `yaml:"header,omitempty"`
-			Diagram []string `yaml:"diagram,omitempty"`
-		} `yaml:"subcategories,omitempty"`
-	} `yaml:"categories"`
+// StylesConfig represents the artistic_styles.yaml structure
+type StylesConfig struct {
+	Default    map[string][]string            `yaml:"default"`
+	Categories map[string]CategoryStyleConfig `yaml:",inline"`
 }
 
-// PromptTemplateConfig represents the image_prompt_templates.yaml configuration
-type PromptTemplateConfig struct {
-	Default    map[string]PromptTemplate `yaml:"default"`
-	Categories map[string]struct {
-		Header        PromptTemplate `yaml:"header,omitempty"`
-		Diagram       PromptTemplate `yaml:"diagram,omitempty"`
-		Subcategories map[string]struct {
-			Header  PromptTemplate `yaml:"header,omitempty"`
-			Diagram PromptTemplate `yaml:"diagram,omitempty"`
-		} `yaml:"subcategories,omitempty"`
-	} `yaml:"categories"`
+// CategoryStyleConfig represents a category's style configuration
+type CategoryStyleConfig struct {
+	Header        []string                       `yaml:"header,omitempty"`
+	Subcategories map[string]SubcategoryStyles   `yaml:",inline"`
 }
 
-// PromptTemplate contains all the configuration for generating an image prompt
-type PromptTemplate struct {
+// SubcategoryStyles represents subcategory-specific styles
+type SubcategoryStyles struct {
+	Header []string `yaml:"header,omitempty"`
+}
+
+// TemplatesConfig represents the image_prompt_templates.yaml structure
+type TemplatesConfig struct {
+	Default    TemplateEntry            `yaml:"default"`
+	Categories map[string]CategoryEntry `yaml:",inline"`
+}
+
+// CategoryEntry represents a category's template configuration
+type CategoryEntry struct {
+	Header        TemplateEntry            `yaml:"header,omitempty"`
+	Subcategories map[string]TemplateEntry `yaml:",inline"`
+}
+
+// TemplateEntry represents a single template configuration
+type TemplateEntry struct {
+	Header            *ImageTemplate `yaml:"header,omitempty"`
+	Template          string         `yaml:"template,omitempty"`
+	Guidance          string         `yaml:"guidance,omitempty"`
+	SuggestedElements []string       `yaml:"suggested_elements,omitempty"`
+	ColorMoods        []string       `yaml:"color_moods,omitempty"`
+}
+
+// ImageTemplate represents a complete image template
+type ImageTemplate struct {
 	Template          string   `yaml:"template,omitempty"`
 	Guidance          string   `yaml:"guidance,omitempty"`
 	SuggestedElements []string `yaml:"suggested_elements,omitempty"`
 	ColorMoods        []string `yaml:"color_moods,omitempty"`
 }
 
-// ResolvedPromptConfig contains all resolved configuration for generating an image prompt
-type ResolvedPromptConfig struct {
+// ResolvedConfig contains the resolved styles and templates for a specific context
+type ResolvedConfig struct {
+	ArtisticStyles    []string
 	Template          string
 	Guidance          string
 	SuggestedElements []string
 	ColorMoods        []string
-	ArtisticStyles    []string
 }
 
-// Manager handles loading and resolving style and prompt template configurations
+// Manager handles loading and resolving style configurations
 type Manager struct {
-	styleConfig  *StyleConfig
-	promptConfig *PromptTemplateConfig
-	configDir    string
-	rng          *rand.Rand
+	stylesPath    string
+	templatesPath string
+	styles        map[string]interface{}
+	templates     map[string]interface{}
 }
 
-// NewManager creates a new style manager that loads configs from the given directory
+// NewManager creates a new style manager with the given config paths
 func NewManager(configDir string) *Manager {
 	return &Manager{
-		configDir: configDir,
-		rng:       rand.New(rand.NewSource(time.Now().UnixNano())),
+		stylesPath:    filepath.Join(configDir, "artistic_styles.yaml"),
+		templatesPath: filepath.Join(configDir, "image_prompt_templates.yaml"),
 	}
 }
 
-// Load loads both configuration files from the config directory
+// Load reads and parses the configuration files
 func (m *Manager) Load() error {
 	// Load artistic styles
-	stylesPath := filepath.Join(m.configDir, "artistic_styles.yaml")
-	stylesData, err := os.ReadFile(stylesPath)
+	stylesData, err := os.ReadFile(m.stylesPath)
 	if err != nil {
 		return fmt.Errorf("failed to read artistic_styles.yaml: %w", err)
 	}
 
-	m.styleConfig = &StyleConfig{}
-	if err := yaml.Unmarshal(stylesData, m.styleConfig); err != nil {
+	m.styles = make(map[string]interface{})
+	if err := yaml.Unmarshal(stylesData, &m.styles); err != nil {
 		return fmt.Errorf("failed to parse artistic_styles.yaml: %w", err)
 	}
 
-	// Load prompt templates
-	promptsPath := filepath.Join(m.configDir, "image_prompt_templates.yaml")
-	promptsData, err := os.ReadFile(promptsPath)
+	// Load templates
+	templatesData, err := os.ReadFile(m.templatesPath)
 	if err != nil {
 		return fmt.Errorf("failed to read image_prompt_templates.yaml: %w", err)
 	}
 
-	m.promptConfig = &PromptTemplateConfig{}
-	if err := yaml.Unmarshal(promptsData, m.promptConfig); err != nil {
+	m.templates = make(map[string]interface{})
+	if err := yaml.Unmarshal(templatesData, &m.templates); err != nil {
 		return fmt.Errorf("failed to parse image_prompt_templates.yaml: %w", err)
 	}
 
 	return nil
 }
 
-// ResolveStyles resolves the available artistic styles for the given image type, category, and subcategory
-// Resolution order:
-// 1. categories.<Category>.subcategories.<Subcategory>.<imageType>
-// 2. categories.<Category>.<imageType>
-// 3. default.<imageType>
-func (m *Manager) ResolveStyles(imageType, category, subcategory string) []string {
-	if m.styleConfig == nil {
-		return []string{"modern illustration"}
+// ResolveAll resolves all configuration for a given context
+func (m *Manager) ResolveAll(imageType, category, subcategory string) *ResolvedConfig {
+	return &ResolvedConfig{
+		ArtisticStyles:    m.resolveStyles(imageType, category, subcategory),
+		Template:          m.resolveTemplate(imageType, category, subcategory),
+		Guidance:          m.resolveGuidance(imageType, category, subcategory),
+		SuggestedElements: m.resolveSuggestedElements(imageType, category, subcategory),
+		ColorMoods:        m.resolveColorMoods(imageType, category, subcategory),
 	}
+}
 
-	// Normalize inputs
-	category = strings.TrimSpace(category)
-	subcategory = strings.TrimSpace(subcategory)
-	imageType = strings.ToLower(strings.TrimSpace(imageType))
-
-	// Try subcategory-specific styles first
-	if category != "" && subcategory != "" {
-		if cat, ok := m.styleConfig.Categories[category]; ok {
-			if subcat, ok := cat.Subcategories[subcategory]; ok {
-				styles := m.getStylesByType(subcat.Header, subcat.Diagram, imageType)
-				if len(styles) > 0 {
-					return styles
-				}
-			}
+// resolveStyles returns the most specific styles available for the context
+func (m *Manager) resolveStyles(imageType, category, subcategory string) []string {
+	// Try subcategory first
+	if subcategory != "" {
+		if styles := m.getStylesAt(category, subcategory, imageType); len(styles) > 0 {
+			return styles
 		}
 	}
 
-	// Fall back to category-level styles
-	if category != "" {
-		if cat, ok := m.styleConfig.Categories[category]; ok {
-			styles := m.getStylesByType(cat.Header, cat.Diagram, imageType)
-			if len(styles) > 0 {
-				return styles
-			}
-		}
-	}
-
-	// Fall back to default styles
-	if styles, ok := m.styleConfig.Default[imageType]; ok && len(styles) > 0 {
+	// Try category
+	if styles := m.getStylesAt(category, "", imageType); len(styles) > 0 {
 		return styles
 	}
 
-	// Ultimate fallback
-	return []string{"modern illustration", "clean design"}
+	// Fall back to default
+	return m.getStylesAt("default", "", imageType)
 }
 
-// getStylesByType returns the appropriate styles slice based on image type
-func (m *Manager) getStylesByType(header, diagram []string, imageType string) []string {
-	switch imageType {
-	case "header":
-		return header
-	case "diagram":
-		return diagram
-	default:
-		return header // Default to header styles
-	}
-}
+// getStylesAt retrieves styles at a specific path in the config
+func (m *Manager) getStylesAt(category, subcategory, imageType string) []string {
+	var node interface{}
 
-// ResolvePromptTemplate resolves the prompt template configuration for the given parameters
-// Resolution follows the same hierarchy as styles, with merging of suggested_elements
-func (m *Manager) ResolvePromptTemplate(imageType, category, subcategory string) PromptTemplate {
-	if m.promptConfig == nil {
-		return PromptTemplate{
-			Template: "An illustration depicting {{.Topic}} in a modern style.",
-			Guidance: "Create a visually appealing image.",
+	if category == "default" {
+		if defaultNode, ok := m.styles["default"]; ok {
+			node = defaultNode
+		}
+	} else {
+		catNode, ok := m.styles[category]
+		if !ok {
+			return nil
+		}
+
+		if subcategory != "" {
+			// Look for subcategory
+			catMap, ok := catNode.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			subNode, ok := catMap[subcategory]
+			if ok {
+				node = subNode
+			} else {
+				node = catNode
+			}
+		} else {
+			node = catNode
 		}
 	}
 
-	// Normalize inputs
-	category = strings.TrimSpace(category)
-	subcategory = strings.TrimSpace(subcategory)
-	imageType = strings.ToLower(strings.TrimSpace(imageType))
-
-	var result PromptTemplate
-
-	// Start with defaults
-	if defTemplate, ok := m.promptConfig.Default[imageType]; ok {
-		result = m.mergeTemplates(result, defTemplate)
+	if node == nil {
+		return nil
 	}
 
-	// Merge category-level config
-	if category != "" {
-		if cat, ok := m.promptConfig.Categories[category]; ok {
-			catTemplate := m.getTemplateByType(cat.Header, cat.Diagram, imageType)
-			result = m.mergeTemplates(result, catTemplate)
+	// Extract styles for the image type
+	nodeMap, ok := node.(map[string]interface{})
+	if !ok {
+		return nil
+	}
 
-			// Merge subcategory-level config
-			if subcategory != "" {
-				if subcat, ok := cat.Subcategories[subcategory]; ok {
-					subcatTemplate := m.getTemplateByType(subcat.Header, subcat.Diagram, imageType)
-					result = m.mergeTemplates(result, subcatTemplate)
+	stylesList, ok := nodeMap[imageType]
+	if !ok {
+		return nil
+	}
+
+	// Convert to []string
+	stylesSlice, ok := stylesList.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	result := make([]string, 0, len(stylesSlice))
+	for _, s := range stylesSlice {
+		if str, ok := s.(string); ok {
+			result = append(result, str)
+		}
+	}
+
+	return result
+}
+
+// resolveTemplate returns the template for the given context
+func (m *Manager) resolveTemplate(imageType, category, subcategory string) string {
+	return m.resolveTemplateField(imageType, category, subcategory, "template")
+}
+
+// resolveGuidance returns the guidance for the given context
+func (m *Manager) resolveGuidance(imageType, category, subcategory string) string {
+	return m.resolveTemplateField(imageType, category, subcategory, "guidance")
+}
+
+// resolveTemplateField resolves a string field from templates config
+func (m *Manager) resolveTemplateField(imageType, category, subcategory, field string) string {
+	// Try subcategory first
+	if subcategory != "" {
+		if val := m.getTemplateFieldAt(category, subcategory, imageType, field); val != "" {
+			return val
+		}
+	}
+
+	// Try category
+	if val := m.getTemplateFieldAt(category, "", imageType, field); val != "" {
+		return val
+	}
+
+	// Fall back to default
+	return m.getTemplateFieldAt("default", "", imageType, field)
+}
+
+// getTemplateFieldAt retrieves a template field at a specific path
+func (m *Manager) getTemplateFieldAt(category, subcategory, imageType, field string) string {
+	var node interface{}
+
+	if category == "default" {
+		if defaultNode, ok := m.templates["default"]; ok {
+			node = defaultNode
+		}
+	} else {
+		catNode, ok := m.templates[category]
+		if !ok {
+			return ""
+		}
+
+		if subcategory != "" {
+			catMap, ok := catNode.(map[string]interface{})
+			if !ok {
+				return ""
+			}
+			subNode, ok := catMap[subcategory]
+			if ok {
+				node = subNode
+			} else {
+				node = catNode
+			}
+		} else {
+			node = catNode
+		}
+	}
+
+	if node == nil {
+		return ""
+	}
+
+	nodeMap, ok := node.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	// Get the image type node (e.g., "header")
+	typeNode, ok := nodeMap[imageType]
+	if !ok {
+		return ""
+	}
+
+	typeMap, ok := typeNode.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	if val, ok := typeMap[field]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+
+	return ""
+}
+
+// resolveSuggestedElements returns suggested elements for the context
+func (m *Manager) resolveSuggestedElements(imageType, category, subcategory string) []string {
+	return m.resolveTemplateSliceField(imageType, category, subcategory, "suggested_elements")
+}
+
+// resolveColorMoods returns color moods for the context
+func (m *Manager) resolveColorMoods(imageType, category, subcategory string) []string {
+	return m.resolveTemplateSliceField(imageType, category, subcategory, "color_moods")
+}
+
+// resolveTemplateSliceField resolves a slice field from templates config
+func (m *Manager) resolveTemplateSliceField(imageType, category, subcategory, field string) []string {
+	// Try subcategory first
+	if subcategory != "" {
+		if val := m.getTemplateSliceFieldAt(category, subcategory, imageType, field); len(val) > 0 {
+			return val
+		}
+	}
+
+	// Try category
+	if val := m.getTemplateSliceFieldAt(category, "", imageType, field); len(val) > 0 {
+		return val
+	}
+
+	// Fall back to default
+	return m.getTemplateSliceFieldAt("default", "", imageType, field)
+}
+
+// getTemplateSliceFieldAt retrieves a slice field at a specific path
+func (m *Manager) getTemplateSliceFieldAt(category, subcategory, imageType, field string) []string {
+	var node interface{}
+
+	if category == "default" {
+		if defaultNode, ok := m.templates["default"]; ok {
+			node = defaultNode
+		}
+	} else {
+		catNode, ok := m.templates[category]
+		if !ok {
+			return nil
+		}
+
+		if subcategory != "" {
+			catMap, ok := catNode.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			subNode, ok := catMap[subcategory]
+			if ok {
+				node = subNode
+			} else {
+				node = catNode
+			}
+		} else {
+			node = catNode
+		}
+	}
+
+	if node == nil {
+		return nil
+	}
+
+	nodeMap, ok := node.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	typeNode, ok := nodeMap[imageType]
+	if !ok {
+		return nil
+	}
+
+	typeMap, ok := typeNode.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	if val, ok := typeMap[field]; ok {
+		if sliceVal, ok := val.([]interface{}); ok {
+			result := make([]string, 0, len(sliceVal))
+			for _, item := range sliceVal {
+				if str, ok := item.(string); ok {
+					result = append(result, str)
 				}
 			}
+			return result
 		}
 	}
 
-	return result
+	return nil
 }
 
-// getTemplateByType returns the appropriate template based on image type
-func (m *Manager) getTemplateByType(header, diagram PromptTemplate, imageType string) PromptTemplate {
-	switch imageType {
-	case "header":
-		return header
-	case "diagram":
-		return diagram
-	default:
-		return header
-	}
-}
-
-// mergeTemplates merges two templates, with 'override' taking precedence for non-empty fields
-// SuggestedElements are combined (not replaced)
-func (m *Manager) mergeTemplates(base, override PromptTemplate) PromptTemplate {
-	result := base
-
-	if override.Template != "" {
-		result.Template = override.Template
-	}
-	if override.Guidance != "" {
-		result.Guidance = override.Guidance
-	}
-	if len(override.ColorMoods) > 0 {
-		result.ColorMoods = override.ColorMoods
-	}
-
-	// Combine suggested elements (subcategory elements are more specific)
-	if len(override.SuggestedElements) > 0 {
-		// Prepend override elements (more specific) to base elements
-		combined := make([]string, 0, len(override.SuggestedElements)+len(base.SuggestedElements))
-		combined = append(combined, override.SuggestedElements...)
-		combined = append(combined, base.SuggestedElements...)
-		result.SuggestedElements = combined
-	}
-
-	return result
-}
-
-// ResolveAll resolves both styles and prompt template, returning a complete configuration
-func (m *Manager) ResolveAll(imageType, category, subcategory string) ResolvedPromptConfig {
-	template := m.ResolvePromptTemplate(imageType, category, subcategory)
-	styles := m.ResolveStyles(imageType, category, subcategory)
-
-	return ResolvedPromptConfig{
-		Template:          template.Template,
-		Guidance:          template.Guidance,
-		SuggestedElements: template.SuggestedElements,
-		ColorMoods:        template.ColorMoods,
-		ArtisticStyles:    styles,
-	}
-}
-
-// SelectRandomStyles randomly selects n styles from the available styles
+// SelectRandomStyles selects n random styles from the available styles
 func (m *Manager) SelectRandomStyles(styles []string, n int) []string {
 	if len(styles) == 0 {
-		return []string{}
+		return nil
 	}
 	if n >= len(styles) {
 		return styles
@@ -264,37 +389,18 @@ func (m *Manager) SelectRandomStyles(styles []string, n int) []string {
 	// Shuffle and take first n
 	shuffled := make([]string, len(styles))
 	copy(shuffled, styles)
-	m.rng.Shuffle(len(shuffled), func(i, j int) {
+	rand.Shuffle(len(shuffled), func(i, j int) {
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	})
 
 	return shuffled[:n]
 }
 
-// SelectRandomColorMood randomly selects one color mood from the available options
+// SelectRandomColorMood selects a random color mood from the available moods
 func (m *Manager) SelectRandomColorMood(moods []string) string {
 	if len(moods) == 0 {
-		return "modern color palette"
+		return "balanced and harmonious"
 	}
-	return moods[m.rng.Intn(len(moods))]
-}
-
-// FormatSuggestedElements formats the suggested elements as a comma-separated string
-func FormatSuggestedElements(elements []string) string {
-	if len(elements) == 0 {
-		return "symbolic visual elements"
-	}
-	return strings.Join(elements, ", ")
-}
-
-// FormatStyles formats the selected styles as a descriptive string
-func FormatStyles(styles []string) string {
-	if len(styles) == 0 {
-		return "modern illustration style"
-	}
-	if len(styles) == 1 {
-		return styles[0] + " style"
-	}
-	return strings.Join(styles[:len(styles)-1], ", ") + " and " + styles[len(styles)-1] + " style"
+	return moods[rand.Intn(len(moods))]
 }
 

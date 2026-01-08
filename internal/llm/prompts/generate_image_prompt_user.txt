@@ -1,5 +1,3 @@
-Generate an image prompt for the following encyclopedia article:
-
 Topic: {{.Topic}}
 Category: {{.Category}}{{if .Subcategory}} > {{.Subcategory}}{{end}}
 
@@ -7,20 +5,25 @@ Article Summary:
 {{.ArticleSummary}}
 
 ---
-EXTRACTED FROM THIS SPECIFIC ARTICLE (in priority order):
+EXTRACTED FROM THIS ARTICLE:
 
-PRIMARY - Named Phenomena (MUST reference at least 2 of these BY NAME):
-{{- range .ExtractedElements.SpecificPhenomena}}
-- {{.}}
-{{- end}}
-
-SECONDARY - Key Concepts (visualize abstractly):
+Key Concepts (visualize abstractly):
 {{- range .ExtractedElements.KeyConcepts}}
 - {{.}}
 {{- end}}
 
-OPTIONAL - Iconic Imagery (only include if directly central to THIS article's topic):
+Named Phenomena (reference these BY NAME in your prompt):
+{{- range .ExtractedElements.SpecificPhenomena}}
+- {{.}}
+{{- end}}
+
+Iconic Imagery and Metaphors (incorporate these visual ideas):
 {{- range .ExtractedElements.IconicImagery}}
+- {{.}}
+{{- end}}
+
+Notable Figures (represent symbolically if relevant):
+{{- range .ExtractedElements.NotableFigures}}
 - {{.}}
 {{- end}}
 
@@ -30,7 +33,7 @@ Mathematical Elements (can be visualized artistically):
 {{- end}}
 
 ---
-STYLE REQUIREMENTS:
+STYLE REQUIREMENTS (from configuration):
 
 Artistic Style(s): {{range $i, $s := .ArtisticStyles}}{{if $i}}, {{end}}{{$s}}{{end}}
 Color/Mood: {{.ColorMood}}
@@ -38,9 +41,9 @@ Color/Mood: {{.ColorMood}}
 ---
 
 Generate a 1920x1080 header image prompt that:
-1. MUST reference at least 2 Named Phenomena BY NAME (these are the priority)
+1. References at least 2-3 of the Named Phenomena or Iconic Imagery BY NAME
 2. Uses the specified artistic style(s) and color mood
-3. Is SPECIFIC to THIS article's topic - not generic category art
-4. Only include Iconic Imagery if it's truly central to the topic (e.g., don't put Schrödinger's cat in every quantum physics image)
+3. Is SPECIFIC to THIS article - not generic category art
 
 Output only the final prompt text, nothing else.
+

@@ -1,0 +1,27 @@
+You are an encyclopedia editor. Your task is to determine the optimal ordering of sections for an article.
+
+You will be given:
+1. The article topic
+2. A list of existing sections in the article
+3. A list of new sections to be added
+
+Determine the best logical order for ALL sections (existing + new) that follows encyclopedia conventions:
+- Introduction/overview content should come first
+- Historical context typically comes early
+- Core concepts and definitions before advanced topics
+- Applications and practical examples after theory
+- Related topics and see-also sections near the end
+- References section should always be last
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "ordered_titles": ["Section Title 1", "Section Title 2", ...],
+  "reasoning": "Brief explanation of the ordering logic"
+}
+
+The "ordered_titles" array must contain ALL section titles (both existing and new) in your recommended order.
+Do NOT include the References section in your ordering - it will be handled separately.
+
+
+
+

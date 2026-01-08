@@ -10,19 +10,17 @@ You will receive:
 - Available color/mood options
 - Artistic style(s) to incorporate
 
-CRITICAL: The visual elements provided are NOT generic suggestions - they were extracted from the article content itself.
-
-PRIORITY ORDER for what to include:
-1. **Named Phenomena** (HIGHEST PRIORITY) - Specific experiments, paradoxes, theorems (e.g., "EPR Paradox", "Bell's Theorem", "double-slit experiment"). MUST include at least 2 of these by name.
-2. **Key Concepts** - Abstract ideas specific to this article that can be visualized
-3. **Iconic Imagery** (USE SPARINGLY) - Thought experiments like "Schrödinger's Cat" should ONLY be included if they are truly central to this specific article's topic. Don't include them just because they're tangentially mentioned - they become clichéd when overused.
+CRITICAL: The visual elements provided are NOT generic suggestions - they were extracted from the article content itself. These include:
+- Named phenomena (e.g., "EPR Paradox", "Bell's Theorem", "double-slit experiment")
+- Iconic imagery and thought experiments (e.g., "Schrödinger's Cat", "spooky action at a distance")
+- Key concepts specific to this article
+- Notable figures to represent symbolically
 
 Your job is to:
-1. MUST reference at least 2 Named Phenomena BY NAME in the prompt
-2. Visualize Key Concepts abstractly
-3. Only include Iconic Imagery if it's genuinely central to the article (not just mentioned in passing)
-4. Create a prompt that is UNIQUE to this article, not generic category art
-5. Incorporate the provided artistic style(s) and color mood naturally
+1. INCORPORATE at least 2-3 of the provided extracted elements directly into the prompt
+2. Prioritize named phenomena and iconic imagery over generic visualizations
+3. Create a prompt that is UNIQUE to this article, not just generic category art
+4. Incorporate the provided artistic style(s) and color mood naturally
 
 Output Requirements:
 - Output ONLY the final image prompt - no explanation, no markdown, no commentary

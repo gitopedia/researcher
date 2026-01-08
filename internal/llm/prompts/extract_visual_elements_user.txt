@@ -17,19 +17,13 @@ Extract visual elements and output as JSON in this exact format:
   "math_elements": ["equation/structure 1"]
 }
 
-CRITICAL RULES - Only extract what EXPLICITLY appears in this article:
-- key_concepts: 3-5 main visualizable ideas that are EXPLICITLY DISCUSSED in this article
-- specific_phenomena: Named experiments, paradoxes, theorems that are ACTUALLY MENTIONED BY NAME
-- notable_figures: Scientists or historical figures WHO ARE NAMED in the article text
-- iconic_imagery: Thought experiments or metaphors that ARE DESCRIBED in the article
-- math_elements: Equations or formulas that APPEAR in the article
+Rules:
+- key_concepts: 3-5 main visualizable ideas SPECIFIC to this article
+- specific_phenomena: Named experiments, paradoxes, theorems, or effects
+- notable_figures: Scientists, inventors, or historical figures mentioned
+- iconic_imagery: Famous thought experiments, metaphors, or visual descriptions from the article
+- math_elements: Equations, formulas, or mathematical structures mentioned
 
-DO NOT:
-- Infer related concepts not mentioned in the article
-- Add general knowledge about the topic
-- Include things that "should" be there but aren't
-- Hallucinate or embellish - only extract verbatim or near-verbatim content
-
-If a category has no explicit mentions in the article, use an empty array [].
+Be specific - extract what's actually in THIS article, not generic topic imagery.
 Output only the JSON, nothing else.
 

@@ -19,10 +19,6 @@ type RepoManager interface {
 	GetRepoPath() string
 	IsLocal() bool
 	SetNoCommit(bool)
-
-	// Cleanup operations (for clean slate on each run)
-	GetCurrentBranch() (string, error)
-	ResetToMain() error
 }
 
 // LocalGitManager implements RepoManager for a local Git repository
@@ -126,7 +122,49 @@ func (m *LocalGitManager) runGit(args ...string) (string, error) {
 	return string(output), nil
 }
 
-// GetCurrentBranch returns the name of the currently checked out branch
+// ListDirectory lists directories at the given path
+func (m *LocalGitManager) ListDirectory(branch, path string) ([]string, error) {
+	fullPath := filepath.Join(m.repoPath, path)
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names, nil
+}
+
+// AddBinaryFile adds a binary file to the repository
+func (m *LocalGitManager) AddBinaryFile(branch, path, message string, content []byte) error {
+	fullPath := filepath.Join(m.repoPath, path)
+
+	// Ensure directory exists
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(fullPath, content, 0644); err != nil {
+		return err
+	}
+
+	// In no-commit mode, just write files without staging or committing
+	if m.noCommit {
+		return nil
+	}
+
+	if _, err := m.runGit("add", path); err != nil {
+		return err
+	}
+
+	_, err := m.runGit("commit", "-m", message)
+	return err
+}
+
+// GetCurrentBranch returns the current git branch name
 func (m *LocalGitManager) GetCurrentBranch() (string, error) {
 	output, err := m.runGit("rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -135,108 +173,14 @@ func (m *LocalGitManager) GetCurrentBranch() (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
-// ResetToMain discards any local changes, checks out main, and pulls latest
+// ResetToMain resets the local repository to the main branch
 func (m *LocalGitManager) ResetToMain() error {
-	// Discard any uncommitted changes
-	if _, err := m.runGit("reset", "--hard"); err != nil {
-		return fmt.Errorf("failed to reset: %w", err)
-	}
-
-	// Clean untracked files
-	if _, err := m.runGit("clean", "-fd"); err != nil {
-		return fmt.Errorf("failed to clean: %w", err)
-	}
-
 	// Checkout main branch
 	if _, err := m.runGit("checkout", "main"); err != nil {
-		return fmt.Errorf("failed to checkout main: %w", err)
-	}
-
-	// Pull latest from remote
-	if _, err := m.runGit("pull", "origin", "main"); err != nil {
-		return fmt.Errorf("failed to pull main: %w", err)
-	}
-
-	return nil
-}
-
-// ListDirectory lists the contents of a directory
-func (m *LocalGitManager) ListDirectory(branch, path string) ([]github.DirectoryEntry, error) {
-	fullPath := filepath.Join(m.repoPath, path)
-
-	entries, err := os.ReadDir(fullPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read directory %s: %w", path, err)
-	}
-
-	var result []github.DirectoryEntry
-	for _, entry := range entries {
-		result = append(result, github.DirectoryEntry{
-			Name:  entry.Name(),
-			IsDir: entry.IsDir(),
-		})
-	}
-
-	return result, nil
-}
-
-// AddBinaryFile adds a binary file to the repository
-func (m *LocalGitManager) AddBinaryFile(branch, repoPath, localPath, message string) error {
-	// Copy the file to the repo
-	destPath := filepath.Join(m.repoPath, repoPath)
-	destDir := filepath.Dir(destPath)
-
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	content, err := os.ReadFile(localPath)
-	if err != nil {
-		return fmt.Errorf("failed to read local file: %w", err)
-	}
-
-	if err := os.WriteFile(destPath, content, 0644); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// In no-commit mode, just write files without staging or committing
-	if m.noCommit {
-		return nil
-	}
-
-	if _, err := m.runGit("add", repoPath); err != nil {
 		return err
 	}
-
-	_, err = m.runGit("commit", "-m", message)
+	// Pull latest changes
+	_, err := m.runGit("pull", "origin", "main")
 	return err
 }
 
-// ListFilesInBranch lists all files in a branch under the given path (local implementation)
-func (m *LocalGitManager) ListFilesInBranch(branch, path string) ([]string, error) {
-	fullPath := filepath.Join(m.repoPath, path)
-
-	var files []string
-	err := filepath.Walk(fullPath, func(filePath string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			// Convert to relative path from repo root
-			relPath, err := filepath.Rel(m.repoPath, filePath)
-			if err != nil {
-				return err
-			}
-			// Normalize path separators to forward slashes
-			relPath = filepath.ToSlash(relPath)
-			files = append(files, relPath)
-		}
-		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to list files in %s: %w", path, err)
-	}
-
-	return files, nil
-}

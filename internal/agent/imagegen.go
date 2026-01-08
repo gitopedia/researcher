@@ -15,221 +15,161 @@ import (
 	"github.com/gitopedia/researcher/internal/comfyui"
 )
 
-// ImageGenConfig holds configuration for image generation
-type ImageGenConfig struct {
-	ComfyUIURL    string
-	HeaderWidth   int
-	HeaderHeight  int
-	OllamaService string // Service name or path for Ollama control
-}
-
-// DefaultImageGenConfig returns default configuration
-func DefaultImageGenConfig() ImageGenConfig {
-	return ImageGenConfig{
-		ComfyUIURL:    getEnvOrDefault("COMFYUI_URL", "http://localhost:8188"),
-		HeaderWidth:   getEnvInt("IMAGE_HEADER_WIDTH", 1920),
-		HeaderHeight:  getEnvInt("IMAGE_HEADER_HEIGHT", 1080),
-		OllamaService: getEnvOrDefault("OLLAMA_SERVICE", "ollama"),
-	}
-}
-
-// PendingImagePrompt represents a pending image generation task
+// PendingImagePrompt represents an image prompt waiting to be generated
 type PendingImagePrompt struct {
-	Slug       string
-	Topic      string
-	PromptPath string
-	Prompt     string
-	OutputPath string
+	Topic       string
+	PromptPath  string
+	PromptText  string
+	OutputPath  string
+	ArticlePath string
+	ImageType   string // "header" or "section"
 }
 
 // GenerateImages runs the image generation process for all pending prompts
-// This manages the Ollama/ComfyUI lifecycle to handle VRAM constraints
+// This should be called after the main research run, with Ollama stopped
 func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
-	config := DefaultImageGenConfig()
-
-	log.Println("=== Image Generation Phase ===")
+	log.Println("[Image Generation] Starting image generation process...")
 
 	// Find all pending image prompts
-	pendingPrompts, err := a.findPendingImagePrompts(branchName)
+	pending, err := a.findPendingImagePrompts(branchName)
 	if err != nil {
 		return fmt.Errorf("failed to find pending prompts: %w", err)
 	}
 
-	if len(pendingPrompts) == 0 {
-		log.Println("No pending image prompts found")
+	if len(pending) == 0 {
+		log.Println("[Image Generation] No pending image prompts found")
 		return nil
 	}
 
-	log.Printf("Found %d pending image prompts", len(pendingPrompts))
+	log.Printf("[Image Generation] Found %d pending prompts", len(pending))
 
-	// Step 1: Shutdown Ollama to free VRAM
-	log.Println("Shutting down Ollama to free VRAM...")
-	if err := shutdownOllama(config.OllamaService); err != nil {
-		slog.Warn("Failed to shutdown Ollama (may not be running)", "error", err)
+	// Stop Ollama to free VRAM
+	if err := a.stopOllama(); err != nil {
+		slog.Warn("Failed to stop Ollama", "error", err)
 	}
 
-	// Step 2: Start ComfyUI
-	log.Println("Starting ComfyUI...")
-	comfyStarted := false
-	if err := startComfyUI(ctx, config.ComfyUIURL); err != nil {
-		slog.Warn("Failed to start ComfyUI", "error", err)
-	} else {
-		comfyStarted = true
-	}
-
-	// Step 3: Generate images
-	var generatedCount, errorCount int
-	if comfyStarted {
-		client := comfyui.NewClient(config.ComfyUIURL)
-
-		for _, pending := range pendingPrompts {
-			log.Printf("Generating image for '%s'...", pending.Topic)
-
-			opts := comfyui.DefaultOptions()
-			opts.Width = config.HeaderWidth
-			opts.Height = config.HeaderHeight
-
-			imageData, err := client.GenerateImage(ctx, pending.Prompt, &opts)
-			if err != nil {
-				slog.Error("Failed to generate image", "topic", pending.Topic, "error", err)
-				errorCount++
-				continue
-			}
-
-			// Save image to the repository
-			if err := a.saveGeneratedImage(branchName, pending, imageData); err != nil {
-				slog.Error("Failed to save image", "topic", pending.Topic, "error", err)
-				errorCount++
-				continue
-			}
-
-			generatedCount++
-			log.Printf("Generated image for '%s' -> %s", pending.Topic, pending.OutputPath)
-		}
-	} else {
-		log.Println("ComfyUI not available, skipping image generation")
-		errorCount = len(pendingPrompts)
-	}
-
-	// Step 4: Shutdown ComfyUI
-	log.Println("Shutting down ComfyUI...")
-	if err := shutdownComfyUI(); err != nil {
-		slog.Warn("Failed to shutdown ComfyUI", "error", err)
-	}
-
-	// Step 5: Restart Ollama
-	log.Println("Restarting Ollama...")
-	if err := restartOllama(config.OllamaService); err != nil {
-		slog.Warn("Failed to restart Ollama", "error", err)
-	}
-
-	log.Printf("Image generation complete: %d generated, %d errors", generatedCount, errorCount)
-	return nil
-}
-
-// findPendingImagePrompts scans the debug folders for pending image prompts
-func (a *Agent) findPendingImagePrompts(branchName string) ([]PendingImagePrompt, error) {
-	var pending []PendingImagePrompt
-
-	// List directories in Compendium/_debug/articles/
-	debugPath := "Compendium/_debug/articles"
-
-	// Try to list the debug directory
-	entries, err := a.gh.ListDirectory(branchName, debugPath)
+	// Start ComfyUI
+	comfyClient, err := a.startComfyUI(ctx)
 	if err != nil {
-		// Directory might not exist yet
-		return pending, nil
+		return fmt.Errorf("failed to start ComfyUI: %w", err)
 	}
+	defer a.stopComfyUI()
 
-	for _, entry := range entries {
-		if !entry.IsDir {
+	// Generate images
+	generatedCount := 0
+	errorCount := 0
+
+	for _, p := range pending {
+		select {
+		case <-ctx.Done():
+			log.Println("[Image Generation] Cancelled")
+			return ctx.Err()
+		default:
+		}
+
+		log.Printf("[Image Generation] Generating image for '%s'...", p.Topic)
+
+		// Use defaults and override size for header images (1920x1080)
+		opts := comfyui.DefaultOptions()
+		opts.Width = 1920
+		opts.Height = 1080
+		imageData, err := comfyClient.GenerateImage(ctx, p.PromptText, &opts)
+		if err != nil {
+			slog.Error("Failed to generate image", "topic", p.Topic, "error", err)
+			errorCount++
 			continue
 		}
 
-		slug := entry.Name
-		promptPath := fmt.Sprintf("%s/%s/header_image_prompt.txt", debugPath, slug)
-		outputPath := fmt.Sprintf("Compendium/_incoming/%s_header.png", slug)
+		if err := a.saveGeneratedImage(branchName, p, imageData); err != nil {
+			slog.Error("Failed to save image", "topic", p.Topic, "error", err)
+			errorCount++
+			continue
+		}
 
-		// Check if prompt file exists
+		generatedCount++
+		log.Printf("[Image Generation] Generated image for '%s' -> %s", p.Topic, p.OutputPath)
+
+		// Insert header image reference into the markdown file
+		if p.ImageType == "header" {
+			if err := a.insertHeaderImageInMarkdown(branchName, p.ArticlePath, p.OutputPath); err != nil {
+				slog.Error("Failed to insert header image into markdown", "article", p.Topic, "error", err)
+				// Continue, as image is still generated and saved
+			}
+		}
+	}
+
+	log.Printf("[Image Generation] Completed: %d generated, %d errors", generatedCount, errorCount)
+
+	// Restart Ollama
+	if err := a.startOllama(); err != nil {
+		slog.Warn("Failed to restart Ollama", "error", err)
+	}
+
+	return nil
+}
+
+// findPendingImagePrompts finds all image prompts that haven't been generated yet
+func (a *Agent) findPendingImagePrompts(branchName string) ([]PendingImagePrompt, error) {
+	var pending []PendingImagePrompt
+
+	// List debug articles directory
+	debugPath := "Compendium/_debug/articles"
+	articles, err := a.gh.ListDirectory(branchName, debugPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list debug articles: %w", err)
+	}
+
+	for _, articleDir := range articles {
+		// Check for header_image_prompt.txt
+		promptPath := filepath.Join(debugPath, articleDir, "header_image_prompt.txt")
 		promptContent, _, err := a.gh.GetFile(branchName, promptPath)
 		if err != nil {
 			continue // No prompt file
 		}
 
+		// Extract the actual prompt (after metadata comments)
+		promptText := extractPromptText(promptContent)
+		if promptText == "" {
+			continue
+		}
+
 		// Check if image already exists
+		articlePath := filepath.Join("Compendium/_incoming", articleDir+".md")
+		outputPath := filepath.Join("Compendium/_incoming", articleDir+"_header.png")
+
 		_, _, err = a.gh.GetFile(branchName, outputPath)
 		if err == nil {
-			// Image already exists, skip
+			// Image already exists
 			continue
-		}
-
-		// Extract the actual prompt (skip header comments)
-		prompt := extractPromptFromFile(promptContent)
-		if prompt == "" {
-			slog.Warn("Empty prompt file", "path", promptPath)
-			continue
-		}
-
-		// Extract topic from prompt file header
-		topic := extractTopicFromPromptFile(promptContent)
-		if topic == "" {
-			topic = slug
 		}
 
 		pending = append(pending, PendingImagePrompt{
-			Slug:       slug,
-			Topic:      topic,
-			PromptPath: promptPath,
-			Prompt:     prompt,
-			OutputPath: outputPath,
+			Topic:       articleDir,
+			PromptPath:  promptPath,
+			PromptText:  promptText,
+			OutputPath:  outputPath,
+			ArticlePath: articlePath,
+			ImageType:   "header",
 		})
 	}
 
 	return pending, nil
 }
 
-// saveGeneratedImage saves the generated image to the repository
-func (a *Agent) saveGeneratedImage(branchName string, pending PendingImagePrompt, imageData []byte) error {
-	// Create or update the image file
-	// Note: This requires binary file support in the repository manager
-	// For now, we'll save it locally and commit
-
-	// Create a temporary file
-	tmpDir := os.TempDir()
-	tmpPath := filepath.Join(tmpDir, fmt.Sprintf("%s_header.png", pending.Slug))
-
-	if err := os.WriteFile(tmpPath, imageData, 0644); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-	defer os.Remove(tmpPath)
-
-	// Use git commands to add the binary file
-	// This is a workaround since the GitHub API client may not handle binary files well
-	if err := a.gh.AddBinaryFile(branchName, pending.OutputPath, tmpPath, fmt.Sprintf("Add header image for %s", pending.Topic)); err != nil {
-		return fmt.Errorf("failed to add image to repository: %w", err)
-	}
-
-	return nil
-}
-
-// extractPromptFromFile extracts the actual prompt text from a prompt file
-// (skipping header comments that start with #)
-func extractPromptFromFile(content string) string {
+// extractPromptText extracts the actual prompt from the prompt file (skipping metadata comments)
+func extractPromptText(content string) string {
 	lines := strings.Split(content, "\n")
 	var promptLines []string
 	inPrompt := false
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// Skip empty lines at the start
-		if !inPrompt && trimmed == "" {
-			continue
-		}
-		// Skip header comments
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		// We've reached the actual prompt
+		if trimmed == "" && !inPrompt {
+			continue
+		}
 		inPrompt = true
 		promptLines = append(promptLines, line)
 	}
@@ -237,160 +177,187 @@ func extractPromptFromFile(content string) string {
 	return strings.TrimSpace(strings.Join(promptLines, "\n"))
 }
 
-// extractTopicFromPromptFile extracts the topic from the prompt file header
-func extractTopicFromPromptFile(content string) string {
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "# Header Image Prompt for: ") {
-			return strings.TrimPrefix(trimmed, "# Header Image Prompt for: ")
-		}
-	}
-	return ""
+// saveGeneratedImage saves the generated image to the repository
+func (a *Agent) saveGeneratedImage(branchName string, p PendingImagePrompt, imageData []byte) error {
+	message := fmt.Sprintf("Add header image for %s", p.Topic)
+	return a.gh.AddBinaryFile(branchName, p.OutputPath, message, imageData)
 }
 
-// shutdownOllama stops the Ollama service to free VRAM
-func shutdownOllama(service string) error {
-	var cmd *exec.Cmd
-
-	switch runtime.GOOS {
-	case "windows":
-		// On Windows, try to stop via taskkill
-		cmd = exec.Command("taskkill", "/F", "/IM", "ollama.exe")
-	case "darwin":
-		// On macOS, try launchctl or pkill
-		cmd = exec.Command("pkill", "-f", "ollama")
-	default:
-		// On Linux, try systemctl or pkill
-		cmd = exec.Command("systemctl", "stop", service)
-		if err := cmd.Run(); err != nil {
-			// Fall back to pkill
-			cmd = exec.Command("pkill", "-f", "ollama")
-		}
+// insertHeaderImageInMarkdown inserts the header image reference into the article markdown
+func (a *Agent) insertHeaderImageInMarkdown(branchName, articlePath, imagePath string) error {
+	content, sha, err := a.gh.GetFile(branchName, articlePath)
+	if err != nil {
+		return fmt.Errorf("failed to read article file: %w", err)
 	}
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stop ollama: %w", err)
-	}
-
-	// Wait a moment for VRAM to be freed
-	time.Sleep(2 * time.Second)
-	return nil
-}
-
-// startComfyUI starts the ComfyUI server and waits for it to be ready
-func startComfyUI(ctx context.Context, baseURL string) error {
-	client := comfyui.NewClient(baseURL)
-
-	// First check if it's already running
-	if client.IsHealthy(ctx) {
-		log.Println("ComfyUI is already running")
+	// Check if image is already present
+	imageFilename := filepath.Base(imagePath)
+	if strings.Contains(content, fmt.Sprintf("![Header](%s)", imageFilename)) {
+		log.Printf("[Header Image] Already present in %s, skipping insertion", articlePath)
 		return nil
 	}
 
-	// Try to start ComfyUI
-	comfyPath := os.Getenv("COMFYUI_PATH")
-	if comfyPath == "" {
-		// Try common locations
-		switch runtime.GOOS {
-		case "windows":
-			comfyPath = filepath.Join(os.Getenv("USERPROFILE"), "ComfyUI", "main.py")
-		default:
-			comfyPath = filepath.Join(os.Getenv("HOME"), "ComfyUI", "main.py")
-		}
-	}
+	// Find the end of the frontmatter (second "---")
+	lines := strings.Split(content, "\n")
+	frontmatterEnd := -1
+	dashCount := 0
 
-	if _, err := os.Stat(comfyPath); os.IsNotExist(err) {
-		return fmt.Errorf("ComfyUI not found at %s, set COMFYUI_PATH environment variable", comfyPath)
-	}
-
-	// Start ComfyUI in background
-	pythonCmd := getEnvOrDefault("PYTHON_CMD", "python")
-	cmd := exec.Command(pythonCmd, comfyPath, "--listen", "0.0.0.0")
-	cmd.Dir = filepath.Dir(comfyPath)
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start ComfyUI: %w", err)
-	}
-
-	log.Printf("Started ComfyUI (PID: %d), waiting for it to be ready...", cmd.Process.Pid)
-
-	// Wait for ComfyUI to become healthy
-	timeout := time.After(2 * time.Minute)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeout:
-			return fmt.Errorf("timeout waiting for ComfyUI to start")
-		case <-ticker.C:
-			if client.IsHealthy(ctx) {
-				log.Println("ComfyUI is ready")
-				return nil
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "---" {
+			dashCount++
+			if dashCount == 2 {
+				frontmatterEnd = i
+				break
 			}
 		}
 	}
+
+	if frontmatterEnd == -1 {
+		return fmt.Errorf("could not find frontmatter end in %s", articlePath)
+	}
+
+	// Build new content with image inserted after frontmatter
+	var newContentBuilder strings.Builder
+	for i, line := range lines {
+		newContentBuilder.WriteString(line)
+		newContentBuilder.WriteString("\n")
+		if i == frontmatterEnd {
+			// Insert image reference after the frontmatter
+			newContentBuilder.WriteString(fmt.Sprintf("\n![Header](%s)\n", imageFilename))
+		}
+	}
+
+	newContent := strings.TrimSuffix(newContentBuilder.String(), "\n")
+	return a.gh.UpdateFile(branchName, articlePath, fmt.Sprintf("Add header image to %s", filepath.Base(articlePath)), newContent, sha)
 }
 
-// shutdownComfyUI stops the ComfyUI server
-func shutdownComfyUI() error {
-	var cmd *exec.Cmd
+// BackfillImagePrompts generates image prompts for existing articles that don't have them
+func (a *Agent) BackfillImagePrompts(ctx context.Context, branchName string) error {
+	log.Println("[Backfill] Starting image prompt backfill...")
 
-	switch runtime.GOOS {
-	case "windows":
-		// On Windows, find and kill the Python process running ComfyUI
-		cmd = exec.Command("taskkill", "/F", "/IM", "python.exe", "/FI", "WINDOWTITLE eq ComfyUI*")
-		if err := cmd.Run(); err != nil {
-			// Try a more aggressive approach
-			cmd = exec.Command("powershell", "-Command",
-				"Get-Process python | Where-Object {$_.MainWindowTitle -like '*ComfyUI*'} | Stop-Process -Force")
+	// List incoming articles
+	incomingPath := "Compendium/_incoming"
+	files, err := a.gh.ListDirectory(branchName, incomingPath)
+	if err != nil {
+		return fmt.Errorf("failed to list incoming articles: %w", err)
+	}
+
+	backfilledCount := 0
+	for _, file := range files {
+		if !strings.HasSuffix(file, ".md") {
+			continue
 		}
-	default:
-		// On Unix-like systems
-		cmd = exec.Command("pkill", "-f", "ComfyUI")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		articleName := strings.TrimSuffix(file, ".md")
+
+		// Check if prompt already exists
+		promptPath := filepath.Join("Compendium/_debug/articles", articleName, "header_image_prompt.txt")
+		if _, _, err := a.gh.GetFile(branchName, promptPath); err == nil {
+			log.Printf("[Backfill] Prompt already exists for %s, skipping", articleName)
+			continue
+		}
+
+		// Get article content to determine category
+		articlePath := filepath.Join(incomingPath, file)
+		content, _, err := a.gh.GetFile(branchName, articlePath)
+		if err != nil {
+			slog.Warn("Failed to read article", "file", file, "error", err)
+			continue
+		}
+
+		// Extract category from frontmatter
+		category, subcategory := extractCategoryFromFrontmatter(content)
+
+		log.Printf("[Backfill] Generating prompt for %s (category: %s/%s)...", articleName, category, subcategory)
+
+		if err := a.generateHeaderImagePrompt(ctx, articleName, branchName, category, subcategory); err != nil {
+			slog.Error("Failed to generate prompt", "article", articleName, "error", err)
+			continue
+		}
+
+		backfilledCount++
+	}
+
+	log.Printf("[Backfill] Completed: %d prompts generated", backfilledCount)
+	return nil
+}
+
+// extractCategoryFromFrontmatter extracts category info from article frontmatter
+func extractCategoryFromFrontmatter(content string) (category, subcategory string) {
+	lines := strings.Split(content, "\n")
+	inFrontmatter := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if !inFrontmatter {
+				inFrontmatter = true
+				continue
+			}
+			break
+		}
+		if !inFrontmatter {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "category:") {
+			category = strings.TrimSpace(strings.TrimPrefix(trimmed, "category:"))
+			category = strings.Trim(category, "\"'")
+		}
+		if strings.HasPrefix(trimmed, "subcategory:") {
+			subcategory = strings.TrimSpace(strings.TrimPrefix(trimmed, "subcategory:"))
+			subcategory = strings.Trim(subcategory, "\"'")
+		}
+	}
+
+	// Default category if not found
+	if category == "" {
+		category = "science"
+	}
+
+	return category, subcategory
+}
+
+// stopOllama stops the Ollama service to free VRAM
+func (a *Agent) stopOllama() error {
+	log.Println("[VRAM] Stopping Ollama...")
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("taskkill", "/F", "/IM", "ollama.exe")
+	} else {
+		cmd = exec.Command("pkill", "-f", "ollama")
 	}
 
 	if err := cmd.Run(); err != nil {
-		// Not fatal - ComfyUI might not have been running
-		return fmt.Errorf("failed to stop ComfyUI: %w", err)
+		// Not an error if it wasn't running
+		log.Println("[VRAM] Ollama may not have been running")
 	}
 
+	// Wait for VRAM to be freed
 	time.Sleep(2 * time.Second)
 	return nil
 }
 
-// restartOllama restarts the Ollama service
-func restartOllama(service string) error {
-	var cmd *exec.Cmd
+// startOllama starts the Ollama service
+func (a *Agent) startOllama() error {
+	log.Println("[VRAM] Starting Ollama...")
 
-	switch runtime.GOOS {
-	case "windows":
-		// On Windows, start Ollama
-		ollamaPath := getEnvOrDefault("OLLAMA_PATH", "ollama")
-		cmd = exec.Command(ollamaPath, "serve")
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("failed to start ollama: %w", err)
-		}
-		log.Printf("Started Ollama (PID: %d)", cmd.Process.Pid)
-	case "darwin":
-		// On macOS, start via open or brew services
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
 		cmd = exec.Command("ollama", "serve")
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("failed to start ollama: %w", err)
-		}
-	default:
-		// On Linux, use systemctl
-		cmd = exec.Command("systemctl", "start", service)
-		if err := cmd.Run(); err != nil {
-			// Fall back to direct start
-			cmd = exec.Command("ollama", "serve")
-			if err := cmd.Start(); err != nil {
-				return fmt.Errorf("failed to start ollama: %w", err)
-			}
-		}
+	} else {
+		cmd = exec.Command("ollama", "serve")
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start Ollama: %w", err)
 	}
 
 	// Wait for Ollama to be ready
@@ -398,255 +365,81 @@ func restartOllama(service string) error {
 	return nil
 }
 
-// GenerateImagesForBranch is the main entry point for image generation
-// It can be called directly via CLI flag or as part of the finalization step
-func (a *Agent) GenerateImagesForBranch(ctx context.Context, branchName string) error {
-	return a.GenerateImages(ctx, branchName)
+// comfyProcess stores the ComfyUI process if we started it
+var comfyProcess *exec.Cmd
+
+// startComfyUI starts the ComfyUI service and returns a client
+func (a *Agent) startComfyUI(ctx context.Context) (*comfyui.Client, error) {
+	log.Println("[VRAM] Starting ComfyUI...")
+
+	// ComfyUI URL from environment or default
+	comfyURL := os.Getenv("COMFYUI_URL")
+	if comfyURL == "" {
+		comfyURL = "http://localhost:8188"
+	}
+
+	client := comfyui.NewClient(comfyURL)
+
+	// Check if ComfyUI is already running
+	if client.IsHealthy(ctx) {
+		log.Println("[ComfyUI] Already running")
+		return client, nil
+	}
+
+	// Try to start ComfyUI if a command is configured
+	startCmd := os.Getenv("COMFYUI_START_CMD")
+	workDir := os.Getenv("COMFYUI_WORK_DIR")
+
+	if startCmd != "" {
+		log.Printf("[ComfyUI] Starting with command: %s", startCmd)
+
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/C", startCmd)
+		} else {
+			cmd = exec.Command("sh", "-c", startCmd)
+		}
+
+		if workDir != "" {
+			cmd.Dir = workDir
+		}
+
+		// Redirect output to logs
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("failed to start ComfyUI: %w", err)
+		}
+
+		comfyProcess = cmd
+		log.Printf("[ComfyUI] Process started (PID: %d)", cmd.Process.Pid)
+	} else {
+		log.Println("[ComfyUI] No start command configured - please ensure ComfyUI is running at", comfyURL)
+	}
+
+	// Wait for ComfyUI to be ready
+	for i := 0; i < 60; i++ {
+		if client.IsHealthy(ctx) {
+			log.Println("[ComfyUI] Ready")
+			return client, nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	return nil, fmt.Errorf("ComfyUI did not become ready within timeout")
 }
 
-// RunImageGenerationOnly runs only the image generation phase
-// This is used when the --generate-images flag is passed
-func (a *Agent) RunImageGenerationOnly(ctx context.Context) error {
-	log.Println("Running image generation only mode...")
+// stopComfyUI stops the ComfyUI service
+func (a *Agent) stopComfyUI() {
+	log.Println("[VRAM] Stopping ComfyUI...")
 
-	// Get the current branch
-	currentBranch, err := a.gh.GetCurrentBranch()
-	if err != nil {
-		return fmt.Errorf("failed to get current branch: %w", err)
+	if comfyProcess != nil && comfyProcess.Process != nil {
+		log.Printf("[ComfyUI] Killing process (PID: %d)", comfyProcess.Process.Pid)
+		if err := comfyProcess.Process.Kill(); err != nil {
+			slog.Warn("Failed to kill ComfyUI process", "error", err)
+		}
+		comfyProcess = nil
 	}
-
-	if currentBranch == "main" {
-		return fmt.Errorf("cannot run image generation on main branch, switch to a research branch first")
-	}
-
-	return a.GenerateImagesForBranch(ctx, currentBranch)
-}
-
-// BackfillImagePrompts generates image prompts for existing articles that don't have them
-// This scans articles in Compendium/_incoming/ and creates prompts for any that are missing
-func (a *Agent) BackfillImagePrompts(ctx context.Context, branchName string) error {
-	log.Println("=== Backfilling Image Prompts for Existing Articles ===")
-
-	// Find all markdown files in Compendium/_incoming/
-	articles, err := a.findArticlesNeedingPrompts(branchName)
-	if err != nil {
-		return fmt.Errorf("failed to find articles: %w", err)
-	}
-
-	if len(articles) == 0 {
-		log.Println("No articles need image prompts")
-		return nil
-	}
-
-	log.Printf("Found %d articles needing image prompts", len(articles))
-
-	var generated, failed int
-	for _, article := range articles {
-		log.Printf("Generating prompt for '%s'...", article.Title)
-
-		// Extract category from tags or use default
-		category, subcategory := extractCategoryFromTags(article.Tags)
-
-		if err := a.generateHeaderImagePrompt(ctx, article.Title, branchName, category, subcategory); err != nil {
-			slog.Error("Failed to generate prompt", "article", article.Title, "error", err)
-			failed++
-			continue
-		}
-
-		generated++
-		log.Printf("Generated prompt for '%s' (%s > %s)", article.Title, category, subcategory)
-	}
-
-	log.Printf("Backfill complete: %d generated, %d failed", generated, failed)
-	return nil
-}
-
-// ArticleInfo contains basic info about an article for backfill processing
-type ArticleInfo struct {
-	Slug  string
-	Title string
-	Tags  []string
-	Path  string
-}
-
-// findArticlesNeedingPrompts finds articles in _incoming that don't have image prompts
-func (a *Agent) findArticlesNeedingPrompts(branchName string) ([]ArticleInfo, error) {
-	var articles []ArticleInfo
-
-	// List files in Compendium/_incoming/
-	incomingPath := "Compendium/_incoming"
-	files, err := a.gh.ListFilesInBranch(branchName, incomingPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list incoming files: %w", err)
-	}
-
-	for _, file := range files {
-		// Only process markdown files (not directories like sources/)
-		if !strings.HasSuffix(file, ".md") {
-			continue
-		}
-
-		// Extract slug from filename
-		filename := strings.TrimPrefix(file, incomingPath+"/")
-		if strings.Contains(filename, "/") {
-			continue // Skip files in subdirectories
-		}
-		slug := strings.TrimSuffix(filename, ".md")
-
-		// Check if prompt already exists
-		promptPath := fmt.Sprintf("Compendium/_debug/articles/%s/header_image_prompt.txt", slug)
-		_, _, err := a.gh.GetFile(branchName, promptPath)
-		if err == nil {
-			// Prompt already exists, skip
-			log.Printf("Skipping '%s' - prompt already exists", slug)
-			continue
-		}
-
-		// Load article to get title and tags
-		content, _, err := a.gh.GetFile(branchName, file)
-		if err != nil {
-			slog.Warn("Failed to read article", "file", file, "error", err)
-			continue
-		}
-
-		title, tags := parseArticleFrontmatter(content)
-		if title == "" {
-			title = slug // Fallback to slug
-		}
-
-		articles = append(articles, ArticleInfo{
-			Slug:  slug,
-			Title: title,
-			Tags:  tags,
-			Path:  file,
-		})
-	}
-
-	return articles, nil
-}
-
-// parseArticleFrontmatter extracts title and tags from article frontmatter
-func parseArticleFrontmatter(content string) (string, []string) {
-	lines := strings.Split(content, "\n")
-	inFrontmatter := false
-	var title string
-	var tags []string
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		if trimmed == "---" {
-			if !inFrontmatter {
-				inFrontmatter = true
-				continue
-			} else {
-				break // End of frontmatter
-			}
-		}
-
-		if !inFrontmatter {
-			continue
-		}
-
-		// Parse title
-		if strings.HasPrefix(trimmed, "title:") {
-			title = strings.TrimPrefix(trimmed, "title:")
-			title = strings.TrimSpace(title)
-			title = strings.Trim(title, "\"'")
-		}
-
-		// Parse tags
-		if strings.HasPrefix(trimmed, "tags:") {
-			tagStr := strings.TrimPrefix(trimmed, "tags:")
-			tagStr = strings.TrimSpace(tagStr)
-			// Parse JSON-like array: ["tag1", "tag2"]
-			tagStr = strings.Trim(tagStr, "[]")
-			for _, tag := range strings.Split(tagStr, ",") {
-				tag = strings.TrimSpace(tag)
-				tag = strings.Trim(tag, "\"'")
-				if tag != "" {
-					tags = append(tags, tag)
-				}
-			}
-		}
-	}
-
-	return title, tags
-}
-
-// extractCategoryFromTags attempts to extract category/subcategory from article tags
-func extractCategoryFromTags(tags []string) (string, string) {
-	// Map common tag prefixes to categories
-	categoryMap := map[string]string{
-		"quantum":     "Science",
-		"physics":     "Science",
-		"biology":     "Science",
-		"chemistry":   "Science",
-		"astronomy":   "Science",
-		"mathematics": "Science",
-		"history":     "History",
-		"ancient":     "History",
-		"medieval":    "History",
-		"modern":      "History",
-		"person":      "People",
-		"people":      "People",
-		"art":         "Arts",
-		"music":       "Arts",
-		"literature":  "Arts",
-		"technology":  "Technology",
-		"engineering": "Technology",
-		"philosophy":  "Philosophy",
-		"culture":     "Culture",
-		"religion":    "Culture",
-		"geography":   "Geography",
-	}
-
-	subcategoryMap := map[string]string{
-		"quantum-mechanics":   "Physics",
-		"quantum-physics":     "Physics",
-		"quantum-entanglement": "Physics",
-		"wave-function":       "Physics",
-		"superposition":       "Physics",
-		"thermodynamics":      "Physics",
-		"electromagnetism":    "Physics",
-		"biology":             "Biology",
-		"genetics":            "Biology",
-		"chemistry":           "Chemistry",
-		"organic-chemistry":   "Chemistry",
-		"astronomy":           "Astronomy",
-		"cosmology":           "Astronomy",
-	}
-
-	category := "Science" // Default
-	subcategory := ""
-
-	for _, tag := range tags {
-		// Remove topic: prefix if present
-		tag = strings.TrimPrefix(tag, "topic:")
-		tagLower := strings.ToLower(tag)
-
-		// Check for subcategory first (more specific)
-		if sub, ok := subcategoryMap[tagLower]; ok {
-			subcategory = sub
-		}
-
-		// Check for category
-		for prefix, cat := range categoryMap {
-			if strings.Contains(tagLower, prefix) {
-				category = cat
-				break
-			}
-		}
-	}
-
-	// If we identified a subcategory, make sure we have the right parent category
-	if subcategory != "" {
-		switch subcategory {
-		case "Physics", "Biology", "Chemistry", "Astronomy":
-			category = "Science"
-		}
-	}
-
-	return category, subcategory
 }
 

@@ -90,12 +90,14 @@ func (m *MockGitHub) UpdateIssueBody(issueNumber int, body string) error { retur
 func (m *MockGitHub) IsLocal() bool                                      { return false }
 func (m *MockGitHub) GetRepoPath() string                                { return "" }
 func (m *MockGitHub) SetNoCommit(bool)                                   {}
-func (m *MockGitHub) GetCurrentBranch() (string, error)                  { return "main", nil }
-func (m *MockGitHub) ResetToMain() error                                 { return nil }
-func (m *MockGitHub) ListDirectory(branch, path string) ([]github.DirectoryEntry, error) {
-	return []github.DirectoryEntry{}, nil
+func (m *MockGitHub) ListDirectory(branch, path string) ([]string, error) {
+	return []string{}, nil
 }
-func (m *MockGitHub) AddBinaryFile(branch, repoPath, localPath, message string) error { return nil }
+func (m *MockGitHub) AddBinaryFile(branch, path, message string, content []byte) error {
+	return nil
+}
+func (m *MockGitHub) GetCurrentBranch() (string, error) { return "main", nil }
+func (m *MockGitHub) ResetToMain() error                { return nil }
 
 type MockSearch struct{}
 
@@ -104,7 +106,7 @@ func (m *MockSearch) Search(q string) ([]search.Result, error) {
 }
 
 func (m *MockSearch) SearchPage(q string, page int) ([]search.Result, error) {
-	return []search.Result{{Title: "Res Page " + string(rune(page)), Body: "Content", Href: "http://example.com/test"}}, nil
+	return []search.Result{{Title: "Res", Body: "Content", Href: "http://example.com/test"}}, nil
 }
 
 func (m *MockSearch) FetchContent(url string) (string, error) {
@@ -210,52 +212,61 @@ func (m *MockLLM) IntegrateContent(ctx context.Context, topic, existingArticle, 
 	return existingArticle + "\n\n" + newContent, nil
 }
 
-// Article improvement methods
 func (m *MockLLM) IsEncyclopediaSource(ctx context.Context, domain, url, title string) (*llm.EncyclopediaCheckResult, error) {
-	return &llm.EncyclopediaCheckResult{IsEncyclopedia: false, Reason: "Mock: not encyclopedia"}, nil
+	return &llm.EncyclopediaCheckResult{IsEncyclopedia: false, Reason: "Mock not encyclopedia"}, nil
 }
 
-func (m *MockLLM) ExtractSections(ctx context.Context, article string) ([]llm.ArticleSection, error) {
+func (m *MockLLM) ExtractSections(ctx context.Context, articleContent string) ([]llm.ArticleSection, error) {
 	return []llm.ArticleSection{
-		{Level: 2, Title: "Introduction", HasContent: true, Content: "Mock intro content"},
-		{Level: 2, Title: "History", HasContent: true, Content: "Mock history content"},
+		{Title: "Introduction", Level: 1},
+		{Title: "Overview", Level: 2},
 	}, nil
 }
 
-func (m *MockLLM) CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*llm.SectionComparisonResult, error) {
-	return &llm.SectionComparisonResult{
-		HasNewSection: true,
-		SectionsToAdd: []llm.SectionToAdd{
-			{Title: "New Section", Content: "New content", InsertAfter: "Introduction", Reason: "Mock addition"},
-		},
+func (m *MockLLM) SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []llm.ArticleSection) (*llm.NewSectionSuggestion, error) {
+	return &llm.NewSectionSuggestion{
+		SectionTitle: "Mock Section",
+		InsertAfter:  "Overview",
+		Rationale:    "Mock rationale",
+		SearchQuery:  "mock search query",
 	}, nil
 }
 
-func (m *MockLLM) MergeSection(ctx context.Context, topic, sectionTitle, currentSection, newContent string) (string, error) {
-	return currentSection + "\n\n" + newContent, nil
-}
-
-func (m *MockLLM) ScoreImprovement(ctx context.Context, topic, sectionTitle, originalSection, revisedSection string) (*llm.ImprovementScore, error) {
-	return &llm.ImprovementScore{
-		IsImproved:     true,
-		Score:          8,
-		Improvements:   []string{"Added more detail"},
-		Recommendation: "accept",
+func (m *MockLLM) CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*llm.SectionComparison, error) {
+	return &llm.SectionComparison{
+		HasNewSection: false,
+		Reason:        "Mock: no new sections",
 	}, nil
 }
 
-func (m *MockLLM) SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []llm.ArticleSection) (*llm.SuggestSectionResult, error) {
-	return &llm.SuggestSectionResult{
-		SectionTitle: "Applications",
-		InsertAfter:  "History",
-		SearchQuery:  category + " " + subcategory + " " + topic + " applications research",
-		Rationale:    "Mock: Adding applications section",
+func (m *MockLLM) OrderSections(ctx context.Context, req llm.SectionOrderRequest) (*llm.SectionOrderResult, error) {
+	return &llm.SectionOrderResult{
+		OrderedTitles: []string{"Introduction", "Overview"},
 	}, nil
 }
 
-func (m *MockLLM) GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, contentSummary string) (*llm.SearchQueryResult, error) {
+func (m *MockLLM) GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, sectionContent string) (*llm.SearchQueryResult, error) {
 	return &llm.SearchQueryResult{
-		SearchQuery: category + " " + subcategory + " " + topic + " " + sectionTitle + " detailed information",
+		SearchQuery: "mock search query for " + topic,
+	}, nil
+}
+
+func (m *MockLLM) MergeSection(ctx context.Context, topic, sectionTitle, currentContent, newContent string) (string, error) {
+	return currentContent + "\n\n" + newContent, nil
+}
+
+func (m *MockLLM) ScoreImprovement(ctx context.Context, topic, sectionTitle, originalContent, improvedContent string) (*llm.ImprovementScore, error) {
+	return &llm.ImprovementScore{
+		Score:          7,
+		Recommendation: "accept",
+		IsImproved:     true,
+	}, nil
+}
+
+func (m *MockLLM) ExtractVisualElements(ctx context.Context, req llm.VisualElementsRequest) (*llm.VisualElements, error) {
+	return &llm.VisualElements{
+		KeyConcepts:       []string{"concept1", "concept2"},
+		SpecificPhenomena: []string{"phenomenon1"},
 	}, nil
 }
 
@@ -266,13 +277,18 @@ func (m *MockLLM) GenerateImagePrompt(ctx context.Context, req llm.ImagePromptRe
 	}, nil
 }
 
-func (m *MockLLM) ExtractVisualElements(ctx context.Context, req llm.VisualElementsRequest) (*llm.VisualElements, error) {
-	return &llm.VisualElements{
-		KeyConcepts:       []string{"mock concept 1", "mock concept 2"},
-		SpecificPhenomena: []string{"mock phenomenon"},
-		NotableFigures:    []string{"mock scientist"},
-		IconicImagery:     []string{"mock imagery"},
-		MathElements:      []string{"mock equation"},
+func (m *MockLLM) EvaluateSectionImage(ctx context.Context, req llm.SectionImageEvaluationRequest) (*llm.SectionImageEvaluationResult, error) {
+	return &llm.SectionImageEvaluationResult{
+		Scores:           map[string]int{"diagram": 50},
+		RecommendedType:  "diagram",
+		RecommendedScore: 50,
+	}, nil
+}
+
+func (m *MockLLM) GenerateSectionImagePrompt(ctx context.Context, req llm.SectionImagePromptRequest) (*llm.SectionImagePromptResult, error) {
+	return &llm.SectionImagePromptResult{
+		Prompt: "A mock section image prompt",
+		Model:  "mock-model",
 	}, nil
 }
 

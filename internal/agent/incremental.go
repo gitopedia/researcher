@@ -1355,20 +1355,44 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 
 	actionLog.WriteString(fmt.Sprintf("- **Found %d valuable sections to add**\n", len(comparison.SectionsToAdd)))
 
-	// Load current article for modifications
-	updatedContent := articleContent
+	// Build map of new section content
+	newSectionContent := make(map[string]string)
 	var addedSections []string
-
-	// Add ALL valuable sections one by one
-	for i, section := range comparison.SectionsToAdd {
-		actionLog.WriteString(fmt.Sprintf("\n#### Section %d: %s\n", i+1, section.Title))
-		actionLog.WriteString(fmt.Sprintf("- Insert after: %s\n", section.InsertAfter))
-		actionLog.WriteString(fmt.Sprintf("- Reason: %s\n", section.Reason))
-
-		// Insert the section
-		updatedContent = insertSection(updatedContent, section.InsertAfter, section.Title, section.Content)
+	for _, section := range comparison.SectionsToAdd {
+		newSectionContent[section.Title] = section.Content
 		addedSections = append(addedSections, section.Title)
-		log.Printf("[Mode A] Queued section '%s' for addition", section.Title)
+		actionLog.WriteString(fmt.Sprintf("\n#### New Section: %s\n", section.Title))
+		actionLog.WriteString(fmt.Sprintf("- Reason: %s\n", section.Reason))
+	}
+
+	// Ask LLM to determine optimal section order
+	log.Printf("[Mode A] Asking LLM to determine optimal section order")
+	actionLog.WriteString("\n### Section Ordering\n\n")
+
+	orderReq := llm.SectionOrderRequest{
+		Topic:            topic,
+		ExistingSections: existingSections,
+		NewSections:      comparison.SectionsToAdd,
+	}
+	orderResult, err := a.llm.OrderSections(ctx, orderReq)
+
+	var updatedContent string
+	if err != nil {
+		// Fallback to sequential insertion if ordering fails
+		log.Printf("[Mode A] Section ordering failed, falling back to sequential insertion: %v", err)
+		actionLog.WriteString(fmt.Sprintf("- **Warning:** Section ordering failed (%v), using fallback\n", err))
+
+		updatedContent = articleContent
+		for _, section := range comparison.SectionsToAdd {
+			updatedContent = insertSection(updatedContent, section.InsertAfter, section.Title, section.Content)
+		}
+	} else {
+		// Use LLM-determined order to reconstruct article
+		actionLog.WriteString(fmt.Sprintf("- **Ordered sections:** %s\n", strings.Join(orderResult.OrderedTitles, " → ")))
+		actionLog.WriteString(fmt.Sprintf("- **Reasoning:** %s\n", orderResult.Reasoning))
+		log.Printf("[Mode A] LLM ordered %d sections: %v", len(orderResult.OrderedTitles), orderResult.OrderedTitles)
+
+		updatedContent = reorderArticleSections(articleContent, orderResult.OrderedTitles, newSectionContent)
 	}
 
 	// Update iteration count
@@ -1591,6 +1615,108 @@ func formatSectionsForLLM(sections []llm.ArticleSection) string {
 		sb.WriteString(fmt.Sprintf("%s %s\n", prefix, s.Title))
 	}
 	return sb.String()
+}
+
+// reorderArticleSections reconstructs an article with sections in the specified order
+// orderedTitles contains all section titles (existing + new) in the desired order
+// newSections maps new section titles to their content
+func reorderArticleSections(article string, orderedTitles []string, newSections map[string]string) string {
+	lines := strings.Split(article, "\n")
+	var result strings.Builder
+
+	// 1. Extract and write frontmatter
+	inFrontmatter := false
+	frontmatterEnd := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if !inFrontmatter {
+				inFrontmatter = true
+				result.WriteString(line + "\n")
+			} else {
+				result.WriteString(line + "\n")
+				frontmatterEnd = i + 1
+				break
+			}
+		} else if inFrontmatter {
+			result.WriteString(line + "\n")
+		}
+	}
+
+	// 2. Extract intro content (content between frontmatter and first heading)
+	var introContent strings.Builder
+	for i := frontmatterEnd; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "#") {
+			break
+		}
+		introContent.WriteString(lines[i] + "\n")
+	}
+	intro := strings.TrimSpace(introContent.String())
+	if intro != "" {
+		result.WriteString("\n" + intro + "\n")
+	}
+
+	// 3. Build a map of existing section titles to their content
+	existingSections := make(map[string]string)
+	var currentTitle string
+	var currentContent strings.Builder
+	inSection := false
+
+	for i := frontmatterEnd; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+
+		if strings.HasPrefix(trimmed, "#") {
+			title := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+
+			// Save previous section if we were in one
+			if inSection && currentTitle != "" {
+				existingSections[currentTitle] = strings.TrimSpace(currentContent.String())
+			}
+
+			// Start new section
+			currentTitle = title
+			currentContent.Reset()
+			currentContent.WriteString(lines[i] + "\n")
+			inSection = true
+		} else if inSection {
+			currentContent.WriteString(lines[i] + "\n")
+		}
+	}
+	// Save last section
+	if inSection && currentTitle != "" {
+		existingSections[currentTitle] = strings.TrimSpace(currentContent.String())
+	}
+
+	// 4. Write sections in the ordered sequence
+	var referencesContent string
+	for _, title := range orderedTitles {
+		if title == "References" {
+			// Save References for the end
+			if content, ok := existingSections[title]; ok {
+				referencesContent = content
+			}
+			continue
+		}
+
+		// Check if it's a new section
+		if content, ok := newSections[title]; ok {
+			result.WriteString("\n## " + title + "\n\n")
+			result.WriteString(content + "\n")
+		} else if content, ok := existingSections[title]; ok {
+			// Existing section - write as-is (includes heading)
+			result.WriteString("\n" + content + "\n")
+		}
+	}
+
+	// 5. Add References section at the end (if it exists)
+	if referencesContent != "" {
+		result.WriteString("\n" + referencesContent + "\n")
+	} else if content, ok := existingSections["References"]; ok {
+		result.WriteString("\n" + content + "\n")
+	}
+
+	return strings.TrimRight(result.String(), "\n")
 }
 
 // extractSectionContent extracts a section's content from the article
