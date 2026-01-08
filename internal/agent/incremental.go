@@ -924,6 +924,20 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 			} else {
 				log.Printf("Generated header image prompt for '%s'", article.Name)
 			}
+
+			// Process sections for image generation if enabled
+			if getEnvBool("GENERATE_SECTION_IMAGES", true) {
+				articleSlug := strings.ToLower(strings.ReplaceAll(cleanTopic(article.Name), " ", "-"))
+				articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", articleSlug)
+				articleContent, _, err := a.gh.GetFile(branchName, articlePath)
+				if err != nil {
+					slog.Warn("Failed to read article for section images", "article", article.Name, "error", err)
+				} else {
+					if err := a.ProcessArticleSections(ctx, branchName, articleSlug, articleContent, category, subcategory); err != nil {
+						slog.Warn("Failed to process section images", "article", article.Name, "error", err)
+					}
+				}
+			}
 		} else if len(completedArticles) > 0 {
 			// All articles complete, improve existing
 			article := completedArticles[rand.Intn(len(completedArticles))]

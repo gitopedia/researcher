@@ -67,12 +67,18 @@ func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
 		default:
 		}
 
-		log.Printf("[Image Generation] Generating image for '%s'...", p.Topic)
+		log.Printf("[Image Generation] Generating image for '%s' (type: %s)...", p.Topic, p.ImageType)
 
-		// Use defaults and override size for header images (1920x1080)
+		// Use defaults and override size based on image type
 		opts := comfyui.DefaultOptions()
-		opts.Width = 1920
-		opts.Height = 1080
+		if p.ImageType == "header" {
+			opts.Width = 1920
+			opts.Height = 1080
+		} else {
+			// Section images are smaller (1024x768 landscape)
+			opts.Width = 1024
+			opts.Height = 768
+		}
 		imageData, err := comfyClient.GenerateImage(ctx, p.PromptText, &opts)
 		if err != nil {
 			slog.Error("Failed to generate image", "topic", p.Topic, "error", err)
@@ -121,36 +127,75 @@ func (a *Agent) findPendingImagePrompts(branchName string) ([]PendingImagePrompt
 
 	for _, articleDir := range articles {
 		// Check for header_image_prompt.txt
-		promptPath := filepath.Join(debugPath, articleDir, "header_image_prompt.txt")
-		promptContent, _, err := a.gh.GetFile(branchName, promptPath)
-		if err != nil {
-			continue // No prompt file
-		}
-
-		// Extract the actual prompt (after metadata comments)
-		promptText := extractPromptText(promptContent)
-		if promptText == "" {
-			continue
-		}
-
-		// Check if image already exists
-		articlePath := filepath.Join("Compendium/_incoming", articleDir+".md")
-		outputPath := filepath.Join("Compendium/_incoming", articleDir+"_header.png")
-
-		_, _, err = a.gh.GetFile(branchName, outputPath)
+		headerPromptPath := filepath.Join(debugPath, articleDir, "header_image_prompt.txt")
+		headerPromptContent, _, err := a.gh.GetFile(branchName, headerPromptPath)
 		if err == nil {
-			// Image already exists
+			// Extract the actual prompt (after metadata comments)
+			promptText := extractPromptText(headerPromptContent)
+			if promptText != "" {
+				// Check if image already exists
+				articlePath := filepath.Join("Compendium/_incoming", articleDir+".md")
+				outputPath := filepath.Join("Compendium/_incoming", articleDir+"_header.png")
+
+				_, _, err = a.gh.GetFile(branchName, outputPath)
+				if err != nil {
+					// Image doesn't exist, add to pending
+					pending = append(pending, PendingImagePrompt{
+						Topic:       articleDir,
+						PromptPath:  headerPromptPath,
+						PromptText:  promptText,
+						OutputPath:  outputPath,
+						ArticlePath: articlePath,
+						ImageType:   "header",
+					})
+				}
+			}
+		}
+
+		// Check for section image prompts (section_*_image_prompt.txt)
+		articleDebugPath := filepath.Join(debugPath, articleDir)
+		files, err := a.gh.ListDirectory(branchName, articleDebugPath)
+		if err != nil {
 			continue
 		}
 
-		pending = append(pending, PendingImagePrompt{
-			Topic:       articleDir,
-			PromptPath:  promptPath,
-			PromptText:  promptText,
-			OutputPath:  outputPath,
-			ArticlePath: articlePath,
-			ImageType:   "header",
-		})
+		for _, file := range files {
+			if !strings.HasPrefix(file, "section_") || !strings.HasSuffix(file, "_image_prompt.txt") {
+				continue
+			}
+
+			sectionPromptPath := filepath.Join(articleDebugPath, file)
+			sectionPromptContent, _, err := a.gh.GetFile(branchName, sectionPromptPath)
+			if err != nil {
+				continue
+			}
+
+			promptText := extractPromptText(sectionPromptContent)
+			if promptText == "" {
+				continue
+			}
+
+			// Extract section name from filename (section_<name>_image_prompt.txt)
+			sectionSlug := strings.TrimPrefix(file, "section_")
+			sectionSlug = strings.TrimSuffix(sectionSlug, "_image_prompt.txt")
+
+			// Check if image already exists
+			articlePath := filepath.Join("Compendium/_incoming", articleDir+".md")
+			outputPath := filepath.Join("Compendium/_incoming", articleDir+"_section_"+sectionSlug+".png")
+
+			_, _, err = a.gh.GetFile(branchName, outputPath)
+			if err != nil {
+				// Image doesn't exist, add to pending
+				pending = append(pending, PendingImagePrompt{
+					Topic:       articleDir + " - " + sectionSlug,
+					PromptPath:  sectionPromptPath,
+					PromptText:  promptText,
+					OutputPath:  outputPath,
+					ArticlePath: articlePath,
+					ImageType:   "section",
+				})
+			}
+		}
 	}
 
 	return pending, nil
