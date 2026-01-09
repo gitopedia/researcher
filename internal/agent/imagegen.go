@@ -369,20 +369,42 @@ func extractCategoryFromFrontmatter(content string) (category, subcategory strin
 	return category, subcategory
 }
 
+// runDockerComposeCmd runs a docker-compose command in the configured directory
+func (a *Agent) runDockerComposeCmd(cmdStr string) error {
+	if cmdStr == "" {
+		return nil
+	}
+
+	workDir := os.Getenv("DOCKER_COMPOSE_DIR")
+	if workDir == "" {
+		workDir = "infra"
+	}
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", cmdStr)
+	} else {
+		cmd = exec.Command("sh", "-c", cmdStr)
+	}
+	cmd.Dir = workDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
 // stopOllama stops the Ollama service to free VRAM
 func (a *Agent) stopOllama() error {
 	log.Println("[VRAM] Stopping Ollama...")
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("taskkill", "/F", "/IM", "ollama.exe")
-	} else {
-		cmd = exec.Command("pkill", "-f", "ollama")
+	stopCmd := os.Getenv("OLLAMA_STOP_CMD")
+	if stopCmd == "" {
+		stopCmd = "docker compose stop ollama"
 	}
 
-	if err := cmd.Run(); err != nil {
+	if err := a.runDockerComposeCmd(stopCmd); err != nil {
 		// Not an error if it wasn't running
-		log.Println("[VRAM] Ollama may not have been running")
+		log.Println("[VRAM] Ollama stop command completed (may not have been running)")
 	}
 
 	// Wait for VRAM to be freed
@@ -394,14 +416,12 @@ func (a *Agent) stopOllama() error {
 func (a *Agent) startOllama() error {
 	log.Println("[VRAM] Starting Ollama...")
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("ollama", "serve")
-	} else {
-		cmd = exec.Command("ollama", "serve")
+	startCmd := os.Getenv("OLLAMA_START_CMD")
+	if startCmd == "" {
+		startCmd = "docker compose start ollama"
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := a.runDockerComposeCmd(startCmd); err != nil {
 		return fmt.Errorf("failed to start Ollama: %w", err)
 	}
 
@@ -409,9 +429,6 @@ func (a *Agent) startOllama() error {
 	time.Sleep(5 * time.Second)
 	return nil
 }
-
-// comfyProcess stores the ComfyUI process if we started it
-var comfyProcess *exec.Cmd
 
 // startComfyUI starts the ComfyUI service and returns a client
 func (a *Agent) startComfyUI(ctx context.Context) (*comfyui.Client, error) {
@@ -431,40 +448,20 @@ func (a *Agent) startComfyUI(ctx context.Context) (*comfyui.Client, error) {
 		return client, nil
 	}
 
-	// Try to start ComfyUI if a command is configured
+	// Try to start ComfyUI using configured command
 	startCmd := os.Getenv("COMFYUI_START_CMD")
-	workDir := os.Getenv("COMFYUI_WORK_DIR")
-
-	if startCmd != "" {
-		log.Printf("[ComfyUI] Starting with command: %s", startCmd)
-
-		var cmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/C", startCmd)
-		} else {
-			cmd = exec.Command("sh", "-c", startCmd)
-		}
-
-		if workDir != "" {
-			cmd.Dir = workDir
-		}
-
-		// Redirect output to logs
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		if err := cmd.Start(); err != nil {
-			return nil, fmt.Errorf("failed to start ComfyUI: %w", err)
-		}
-
-		comfyProcess = cmd
-		log.Printf("[ComfyUI] Process started (PID: %d)", cmd.Process.Pid)
-	} else {
-		log.Println("[ComfyUI] No start command configured - please ensure ComfyUI is running at", comfyURL)
+	if startCmd == "" {
+		startCmd = "docker compose up -d comfyui"
 	}
 
-	// Wait for ComfyUI to be ready
-	for i := 0; i < 60; i++ {
+	log.Printf("[ComfyUI] Starting with command: %s", startCmd)
+	if err := a.runDockerComposeCmd(startCmd); err != nil {
+		return nil, fmt.Errorf("failed to start ComfyUI: %w", err)
+	}
+
+	// Wait for ComfyUI to be ready (up to 3 minutes for model loading)
+	log.Println("[ComfyUI] Waiting for ComfyUI to be ready...")
+	for i := 0; i < 90; i++ {
 		if client.IsHealthy(ctx) {
 			log.Println("[ComfyUI] Ready")
 			return client, nil
@@ -479,12 +476,13 @@ func (a *Agent) startComfyUI(ctx context.Context) (*comfyui.Client, error) {
 func (a *Agent) stopComfyUI() {
 	log.Println("[VRAM] Stopping ComfyUI...")
 
-	if comfyProcess != nil && comfyProcess.Process != nil {
-		log.Printf("[ComfyUI] Killing process (PID: %d)", comfyProcess.Process.Pid)
-		if err := comfyProcess.Process.Kill(); err != nil {
-			slog.Warn("Failed to kill ComfyUI process", "error", err)
-		}
-		comfyProcess = nil
+	stopCmd := os.Getenv("COMFYUI_STOP_CMD")
+	if stopCmd == "" {
+		stopCmd = "docker compose stop comfyui"
+	}
+
+	if err := a.runDockerComposeCmd(stopCmd); err != nil {
+		slog.Warn("Failed to stop ComfyUI", "error", err)
 	}
 }
 
