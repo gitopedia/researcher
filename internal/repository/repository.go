@@ -183,4 +183,3 @@ func (m *LocalGitManager) ResetToMain() error {
 	_, err := m.runGit("pull", "origin", "main")
 	return err
 }
-
