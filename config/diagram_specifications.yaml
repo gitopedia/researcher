@@ -1,0 +1,563 @@
+# Diagram Specifications Configuration
+# Detailed structural requirements for each diagram type
+# These specifications force the LLM to produce precise, structured prompts
+# that leave nothing to the image generator's interpretation
+#
+# IMPORTANT: Text rendering in AI image generation is unreliable.
+# Prompts should emphasize visual/symbolic elements over text labels.
+# Text labels will be added programmatically in post-processing.
+
+diagram:
+  name: "Relational Diagram"
+  description: "Visual representation showing relationships, processes, or structures between concepts"
+  
+  # Required elements the LLM must specify
+  required_elements:
+    layout:
+      description: "The overall spatial arrangement of elements"
+      options:
+        - hierarchical: "Top-to-bottom or left-to-right tree structure"
+        - radial: "Central concept with elements radiating outward in rings"
+        - network: "Interconnected web of nodes without strict hierarchy"
+        - layered: "Horizontal layers/tiers with vertical connections"
+        - clustered: "Grouped clusters with inter-group connections"
+      instruction: "Choose ONE layout type and specify orientation if applicable"
+    
+    nodes:
+      description: "The labeled elements/concepts in the diagram"
+      instruction: |
+        List 3-8 nodes with:
+        - Exact label text (MAXIMUM 2 WORDS - AI image models misspell longer text)
+        - Use simple, common words; prefer abbreviations for technical terms
+        - Shape (rectangle, rounded-rectangle, circle, hexagon, diamond, ellipse)
+        - Relative size (small, medium, large)
+        - Fill color or color category (primary, secondary, accent, neutral)
+        - Position hint (center, top, bottom, left, right, inner-ring, outer-ring)
+    
+    connections:
+      description: "Lines/arrows showing relationships between nodes"
+      instruction: |
+        For each connection specify:
+        - Source node (by label)
+        - Target node (by label)
+        - Arrow type (none, single, double, bidirectional)
+        - Line style (solid, dashed, dotted)
+        - Line weight (thin, medium, thick)
+        - Optional: connection label (MAX 1-2 SIMPLE words, avoid if possible)
+    
+    groupings:
+      description: "Visual clusters or bounded regions"
+      instruction: |
+        If elements should be visually grouped:
+        - Group name/label
+        - Which nodes belong to this group
+        - Background color (subtle, use light tints)
+        - Border style (none, solid, dashed)
+    
+    visual_style:
+      description: "Overall visual treatment"
+      instruction: |
+        Specify:
+        - Color palette (monochromatic, complementary, analogous, or specific colors)
+        - Background (solid color, subtle gradient, none/transparent)
+        - Typography style (sans-serif, serif, technical/monospace)
+        - Overall aesthetic (clean/minimal, technical/blueprint, organic/flowing)
+
+  output_template: |
+    Create a {{layout}} diagram:
+    
+    LAYOUT: {{layout_type}} arrangement, {{orientation}}
+    
+    NODES:
+    {{#each nodes}}
+    - "{{label}}" | {{shape}} | {{size}} | {{color}} | Position: {{position}}
+    {{/each}}
+    
+    CONNECTIONS:
+    {{#each connections}}
+    - {{source}} → {{target}} | {{arrow_type}} | {{line_style}} {{line_weight}} | {{label}}
+    {{/each}}
+    
+    GROUPINGS:
+    {{#each groupings}}
+    - Group "{{name}}": contains [{{nodes}}] | {{background}} background | {{border}} border
+    {{/each}}
+    
+    STYLE:
+    - Palette: {{palette}}
+    - Background: {{background}}
+    - Typography: {{typography}}
+    - Aesthetic: {{aesthetic}}
+
+chart:
+  name: "Data Chart"
+  description: "Data visualization showing quantities, comparisons, or trends"
+  
+  required_elements:
+    chart_type:
+      description: "The specific type of chart to create"
+      options:
+        - bar: "Vertical or horizontal bars for categorical comparison"
+        - line: "Connected points showing trends over continuous axis"
+        - pie: "Circular segments showing proportions of a whole"
+        - area: "Filled region under a line showing cumulative values"
+        - scatter: "Points plotted on x-y axes showing correlation"
+        - stacked-bar: "Bars divided into segments showing composition"
+        - donut: "Pie chart with hollow center"
+      instruction: "Choose ONE chart type appropriate for the data"
+    
+    data_representation:
+      description: "How the data should be visualized"
+      instruction: |
+        Specify:
+        - Number of data series (1-5)
+        - For each series: name, approximate values/proportions, color
+        - Value labels (show/hide, position: inside, outside, tooltip)
+        - Whether to show exact numbers or general proportions
+    
+    axes:
+      description: "Axis configuration (for bar, line, area, scatter)"
+      instruction: |
+        For X-axis:
+        - Label text
+        - Category names OR range (min-max)
+        - Tick mark style
+        For Y-axis:
+        - Label text
+        - Value range (min-max)
+        - Grid lines (show/hide)
+    
+    legend:
+      description: "Legend configuration"
+      instruction: |
+        Specify:
+        - Position (top, bottom, left, right, none)
+        - Items to include
+        - Style (boxed, inline, icon-only)
+    
+    visual_style:
+      description: "Overall visual treatment"
+      instruction: |
+        Specify:
+        - Color scheme (categorical palette for series)
+        - Background (white, light gray, dark, transparent)
+        - Grid style (subtle, prominent, none)
+        - Typography (clean sans-serif recommended)
+
+  output_template: |
+    Create a {{chart_type}} chart:
+    
+    CHART TYPE: {{chart_type}}, {{orientation}}
+    
+    DATA:
+    {{#each series}}
+    - Series "{{name}}": {{values}} | Color: {{color}}
+    {{/each}}
+    
+    AXES:
+    - X-axis: "{{x_label}}" | {{x_categories_or_range}}
+    - Y-axis: "{{y_label}}" | Range: {{y_min}} to {{y_max}} | Grid: {{grid}}
+    
+    LEGEND: {{position}} | Items: {{items}}
+    
+    LABELS: {{value_labels_position}}
+    
+    STYLE:
+    - Colors: {{palette}}
+    - Background: {{background}}
+    - Typography: {{typography}}
+
+timeline:
+  name: "Timeline"
+  description: "Chronological visualization of events or developments"
+  
+  required_elements:
+    orientation:
+      description: "Direction of time flow"
+      options:
+        - horizontal: "Left to right (or right to left)"
+        - vertical: "Top to bottom (or bottom to top)"
+      instruction: "Choose orientation and specify if reversed"
+    
+    time_scale:
+      description: "The time period and granularity"
+      instruction: |
+        Specify:
+        - Start point (date, year, era, or relative term)
+        - End point
+        - Scale granularity (days, months, years, decades, centuries, eras)
+        - Whether to show scale markers
+    
+    events:
+      description: "The events/milestones to display"
+      instruction: |
+        List 4-12 events with:
+        - Event label (keep under 5 words)
+        - Time position (date, year, or relative position)
+        - Importance level (major, minor) - affects visual prominence
+        - Optional: brief descriptor (under 10 words)
+        - Side placement (above/below for horizontal, left/right for vertical)
+    
+    visual_markers:
+      description: "How events are marked on the timeline"
+      instruction: |
+        Specify:
+        - Marker shape (circle, diamond, square, star, flag)
+        - Marker size variation (uniform, size-by-importance)
+        - Connection to timeline (line, none)
+        - Color coding (by category, by importance, uniform)
+    
+    periods:
+      description: "Time spans/eras to highlight"
+      instruction: |
+        If applicable, specify periods:
+        - Period name
+        - Start and end points
+        - Background color (light tint)
+        - Border style
+    
+    visual_style:
+      description: "Overall visual treatment"
+      instruction: |
+        Specify:
+        - Main timeline style (solid line, dotted, thick bar)
+        - Color palette
+        - Typography (dates vs labels)
+        - Background treatment
+
+  output_template: |
+    Create a {{orientation}} timeline:
+    
+    ORIENTATION: {{orientation}}, time flows {{direction}}
+    
+    TIME SCALE: {{start}} to {{end}} | Granularity: {{granularity}}
+    
+    EVENTS:
+    {{#each events}}
+    - "{{label}}" | {{time}} | {{importance}} | {{side}} | {{descriptor}}
+    {{/each}}
+    
+    PERIODS:
+    {{#each periods}}
+    - "{{name}}" | {{start}} to {{end}} | {{color}} background
+    {{/each}}
+    
+    MARKERS: {{shape}} | {{size_variation}} | {{color_coding}}
+    
+    STYLE:
+    - Timeline: {{line_style}}
+    - Palette: {{palette}}
+    - Typography: {{typography}}
+    - Background: {{background}}
+
+flowchart:
+  name: "Flowchart"
+  description: "Diagram showing decision points and process flows"
+  
+  required_elements:
+    flow_direction:
+      description: "Primary direction of process flow"
+      options:
+        - top-to-bottom: "Vertical flow downward"
+        - left-to-right: "Horizontal flow rightward"
+        - bottom-to-top: "Vertical flow upward"
+        - right-to-left: "Horizontal flow leftward"
+      instruction: "Choose primary flow direction"
+    
+    start_end:
+      description: "Starting and ending points"
+      instruction: |
+        Specify:
+        - Start node label (use rounded rectangle or oval)
+        - End node(s) label(s) - there may be multiple endpoints
+        - Use standard flowchart convention (rounded shapes for start/end)
+    
+    process_steps:
+      description: "Action/process boxes"
+      instruction: |
+        List process steps with:
+        - Step label (verb phrase, under 5 words)
+        - Shape (rectangle for processes)
+        - Color category (primary, secondary, neutral)
+        - Position in flow sequence
+    
+    decision_points:
+      description: "Branching decision nodes"
+      instruction: |
+        List decisions with:
+        - Decision question (yes/no or multiple choice)
+        - Shape (diamond - standard)
+        - Branch labels (Yes/No, or specific options)
+        - Which nodes each branch leads to
+    
+    connections:
+      description: "Flow arrows between nodes"
+      instruction: |
+        For each connection:
+        - Source node
+        - Target node
+        - Arrow label (if conditional branch)
+        - Line style (solid for main flow, dashed for alternate)
+    
+    swimlanes:
+      description: "Optional parallel tracks for different actors/systems"
+      instruction: |
+        If applicable:
+        - Lane labels (actor/system names)
+        - Which nodes belong to each lane
+        - Lane orientation (horizontal bands or vertical columns)
+    
+    visual_style:
+      description: "Overall visual treatment"
+      instruction: |
+        Specify:
+        - Shape colors by type (processes, decisions, start/end)
+        - Arrow style (curved, straight, orthogonal)
+        - Background (light, grid, none)
+        - Typography (clean, readable)
+
+  output_template: |
+    Create a {{flow_direction}} flowchart:
+    
+    FLOW: {{direction}} | {{swimlanes_if_any}}
+    
+    START: "{{start_label}}" | Rounded rectangle | {{start_color}}
+    
+    PROCESSES:
+    {{#each processes}}
+    - "{{label}}" | Rectangle | {{color}} | Sequence: {{position}}
+    {{/each}}
+    
+    DECISIONS:
+    {{#each decisions}}
+    - "{{question}}" | Diamond | Branches: {{branches}}
+    {{/each}}
+    
+    END: "{{end_label}}" | Rounded rectangle | {{end_color}}
+    
+    CONNECTIONS:
+    {{#each connections}}
+    - {{source}} → {{target}} | {{label}} | {{style}}
+    {{/each}}
+    
+    STYLE:
+    - Process color: {{process_color}}
+    - Decision color: {{decision_color}}
+    - Arrows: {{arrow_style}}
+    - Background: {{background}}
+
+illustration:
+  name: "Conceptual Illustration"
+  description: "Artistic visualization of concepts, scenes, or abstract ideas"
+  
+  required_elements:
+    composition:
+      description: "Overall layout and focal structure"
+      options:
+        - centered: "Single focal point in center"
+        - rule-of-thirds: "Key elements at intersection points"
+        - symmetrical: "Balanced mirrored composition"
+        - layered: "Foreground, midground, background layers"
+        - panoramic: "Wide scene with distributed elements"
+      instruction: "Choose composition type and describe focal point placement"
+    
+    primary_subject:
+      description: "The main visual element"
+      instruction: |
+        Describe:
+        - What is the central subject/concept
+        - Visual form it should take (literal, symbolic, abstract)
+        - Size relative to frame (dominant, moderate, subtle)
+        - Position in composition
+    
+    supporting_elements:
+      description: "Secondary visual elements"
+      instruction: |
+        List 2-6 supporting elements:
+        - Element description
+        - Relationship to primary subject
+        - Position (foreground, midground, background)
+        - Scale relative to primary
+        - Visual treatment (detailed, simplified, silhouette)
+    
+    atmosphere:
+      description: "Mood and environmental treatment"
+      instruction: |
+        Specify:
+        - Lighting (bright, dim, dramatic, soft, directional)
+        - Mood (serious, playful, mysterious, hopeful, tense)
+        - Depth (flat, shallow depth, deep perspective)
+        - Environmental effects (none, particles, glow, mist, shadows)
+    
+    color_treatment:
+      description: "Color palette and application"
+      instruction: |
+        Specify:
+        - Dominant color(s)
+        - Accent color(s)
+        - Saturation level (vibrant, muted, desaturated)
+        - Value range (high contrast, low contrast, balanced)
+        - Any color symbolism to incorporate
+    
+    style_reference:
+      description: "Artistic style and rendering"
+      instruction: |
+        Specify:
+        - Rendering style (flat, gradient, textured, painterly)
+        - Line treatment (clean vectors, hand-drawn, no outlines)
+        - Level of detail (minimal, moderate, intricate)
+        - Art movement reference if applicable (bauhaus, art deco, etc.)
+
+  output_template: |
+    Create a conceptual illustration:
+    
+    COMPOSITION: {{composition_type}}
+    - Focal point: {{focal_description}}
+    
+    PRIMARY SUBJECT:
+    - Subject: {{subject_description}}
+    - Form: {{visual_form}}
+    - Size: {{relative_size}} | Position: {{position}}
+    
+    SUPPORTING ELEMENTS:
+    {{#each elements}}
+    - {{description}} | {{position}} | {{scale}} | {{treatment}}
+    {{/each}}
+    
+    ATMOSPHERE:
+    - Lighting: {{lighting}}
+    - Mood: {{mood}}
+    - Depth: {{depth}}
+    - Effects: {{effects}}
+    
+    COLOR:
+    - Dominant: {{dominant_colors}}
+    - Accent: {{accent_colors}}
+    - Saturation: {{saturation}} | Contrast: {{contrast}}
+    
+    STYLE:
+    - Rendering: {{rendering_style}}
+    - Lines: {{line_treatment}}
+    - Detail level: {{detail_level}}
+    - Reference: {{style_reference}}
+
+schematic:
+  name: "Technical Schematic"
+  description: "Technical diagram showing components, connections, and system architecture"
+  
+  required_elements:
+    schematic_type:
+      description: "The type of technical diagram"
+      options:
+        - block-diagram: "High-level system blocks with connections"
+        - circuit-style: "Component symbols with connection lines"
+        - architecture: "Layered or modular system architecture"
+        - exploded-view: "Components separated to show assembly"
+        - cutaway: "Cross-section showing internal structure"
+      instruction: "Choose schematic type appropriate for the content"
+    
+    components:
+      description: "The technical elements/parts"
+      instruction: |
+        List components with:
+        - Component name/label
+        - Symbol type (box, circle, standard symbol, custom icon)
+        - Size category (large/main, medium/subsystem, small/detail)
+        - Technical notation if applicable
+        - Position in system (input, processing, output, peripheral)
+    
+    connections:
+      description: "Lines showing relationships between components"
+      instruction: |
+        For each connection:
+        - Source component
+        - Target component
+        - Connection type (data flow, power, signal, physical)
+        - Line style (solid, dashed, thick, color-coded)
+        - Direction indicator (arrow, none, bidirectional)
+        - Optional: label or value annotation
+    
+    ports_interfaces:
+      description: "Input/output points and interfaces"
+      instruction: |
+        If applicable:
+        - Input ports (labels, positions)
+        - Output ports (labels, positions)
+        - Interface symbols
+        - Protocol/standard indicators
+    
+    annotations:
+      description: "Technical labels and callouts"
+      instruction: |
+        Specify:
+        - Component labels (inside, outside, numbered)
+        - Value annotations (measurements, specifications)
+        - Reference designators if applicable
+        - Legend/key requirements
+    
+    visual_style:
+      description: "Technical drawing style"
+      instruction: |
+        Specify:
+        - Line weights (hairline, thin, medium, thick)
+        - Color coding scheme (by function, by subsystem, monochrome)
+        - Background (white, light gray, blueprint blue)
+        - Typography (technical/monospace recommended)
+        - Grid or alignment guides (show/hide)
+
+  output_template: |
+    Create a {{schematic_type}} schematic:
+    
+    TYPE: {{schematic_type}}
+    
+    COMPONENTS:
+    {{#each components}}
+    - "{{name}}" | {{symbol}} | {{size}} | {{notation}} | Position: {{position}}
+    {{/each}}
+    
+    CONNECTIONS:
+    {{#each connections}}
+    - {{source}} → {{target}} | {{type}} | {{style}} | {{label}}
+    {{/each}}
+    
+    PORTS/INTERFACES:
+    - Inputs: {{inputs}}
+    - Outputs: {{outputs}}
+    
+    ANNOTATIONS:
+    - Labels: {{label_style}}
+    - Values: {{values}}
+    - Legend: {{legend_items}}
+    
+    STYLE:
+    - Line weights: {{line_weights}}
+    - Colors: {{color_scheme}}
+    - Background: {{background}}
+    - Typography: {{typography}}
+    - Grid: {{grid}}
+
+# Global formatting instructions for all diagram types
+global_instructions:
+  precision_requirements: |
+    The image generator cannot invent details. Every visual element must be explicitly specified.
+    Do not use vague terms like "several", "various", "etc.", or "appropriate".
+    Use exact counts, specific names, and concrete descriptions.
+  
+  label_guidelines: |
+    - Keep all labels concise (under 5 words)
+    - Use title case for node labels
+    - Use sentence case for connection labels
+    - Avoid abbreviations unless universally understood
+  
+  color_specification: |
+    Specify colors as:
+    - Named colors (blue, red, green) for simplicity
+    - Color relationships (primary, secondary, accent, neutral)
+    - Or specific hex codes for precision (#3B82F6)
+  
+  spatial_precision: |
+    Use precise position terms:
+    - Cardinal positions: top, bottom, left, right, center
+    - Relative positions: above X, below Y, between A and B
+    - Ring positions: inner, outer, middle
+    - Quadrants: top-left, top-right, bottom-left, bottom-right

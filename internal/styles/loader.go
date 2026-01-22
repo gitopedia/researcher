@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,8 +18,8 @@ type StylesConfig struct {
 
 // CategoryStyleConfig represents a category's style configuration
 type CategoryStyleConfig struct {
-	Header        []string                       `yaml:"header,omitempty"`
-	Subcategories map[string]SubcategoryStyles   `yaml:",inline"`
+	Header        []string                     `yaml:"header,omitempty"`
+	Subcategories map[string]SubcategoryStyles `yaml:",inline"`
 }
 
 // SubcategoryStyles represents subcategory-specific styles
@@ -55,6 +56,29 @@ type ImageTemplate struct {
 	ColorMoods        []string `yaml:"color_moods,omitempty"`
 }
 
+// DiagramSpecification represents the specification for a diagram type
+type DiagramSpecification struct {
+	Name             string                       `yaml:"name"`
+	Description      string                       `yaml:"description"`
+	RequiredElements map[string]RequiredElement   `yaml:"required_elements"`
+	OutputTemplate   string                       `yaml:"output_template"`
+}
+
+// RequiredElement represents a required element in a diagram specification
+type RequiredElement struct {
+	Description string            `yaml:"description"`
+	Options     map[string]string `yaml:"options,omitempty"`
+	Instruction string            `yaml:"instruction"`
+}
+
+// GlobalInstructions contains global formatting instructions for all diagram types
+type GlobalInstructions struct {
+	PrecisionRequirements string `yaml:"precision_requirements"`
+	LabelGuidelines       string `yaml:"label_guidelines"`
+	ColorSpecification    string `yaml:"color_specification"`
+	SpatialPrecision      string `yaml:"spatial_precision"`
+}
+
 // ResolvedConfig contains the resolved styles and templates for a specific context
 type ResolvedConfig struct {
 	ArtisticStyles    []string
@@ -66,17 +90,21 @@ type ResolvedConfig struct {
 
 // Manager handles loading and resolving style configurations
 type Manager struct {
-	stylesPath    string
-	templatesPath string
-	styles        map[string]interface{}
-	templates     map[string]interface{}
+	stylesPath       string
+	templatesPath    string
+	diagramSpecsPath string
+	styles           map[string]interface{}
+	templates        map[string]interface{}
+	diagramSpecs     map[string]interface{}
+	globalInstr      *GlobalInstructions
 }
 
 // NewManager creates a new style manager with the given config paths
 func NewManager(configDir string) *Manager {
 	return &Manager{
-		stylesPath:    filepath.Join(configDir, "artistic_styles.yaml"),
-		templatesPath: filepath.Join(configDir, "image_prompt_templates.yaml"),
+		stylesPath:       filepath.Join(configDir, "artistic_styles.yaml"),
+		templatesPath:    filepath.Join(configDir, "image_prompt_templates.yaml"),
+		diagramSpecsPath: filepath.Join(configDir, "diagram_specifications.yaml"),
 	}
 }
 
@@ -104,7 +132,202 @@ func (m *Manager) Load() error {
 		return fmt.Errorf("failed to parse image_prompt_templates.yaml: %w", err)
 	}
 
+	// Load diagram specifications
+	diagramSpecsData, err := os.ReadFile(m.diagramSpecsPath)
+	if err != nil {
+		return fmt.Errorf("failed to read diagram_specifications.yaml: %w", err)
+	}
+
+	m.diagramSpecs = make(map[string]interface{})
+	if err := yaml.Unmarshal(diagramSpecsData, &m.diagramSpecs); err != nil {
+		return fmt.Errorf("failed to parse diagram_specifications.yaml: %w", err)
+	}
+
+	// Extract global instructions
+	m.globalInstr = m.extractGlobalInstructions()
+
 	return nil
+}
+
+// extractGlobalInstructions extracts the global_instructions section
+func (m *Manager) extractGlobalInstructions() *GlobalInstructions {
+	globalNode, ok := m.diagramSpecs["global_instructions"]
+	if !ok {
+		return nil
+	}
+
+	globalMap, ok := globalNode.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	instr := &GlobalInstructions{}
+	if val, ok := globalMap["precision_requirements"].(string); ok {
+		instr.PrecisionRequirements = val
+	}
+	if val, ok := globalMap["label_guidelines"].(string); ok {
+		instr.LabelGuidelines = val
+	}
+	if val, ok := globalMap["color_specification"].(string); ok {
+		instr.ColorSpecification = val
+	}
+	if val, ok := globalMap["spatial_precision"].(string); ok {
+		instr.SpatialPrecision = val
+	}
+
+	return instr
+}
+
+// GetDiagramSpecification returns the full specification text for a diagram type
+func (m *Manager) GetDiagramSpecification(imageType string) string {
+	specNode, ok := m.diagramSpecs[imageType]
+	if !ok {
+		return m.getDefaultSpecification()
+	}
+
+	specMap, ok := specNode.(map[string]interface{})
+	if !ok {
+		return m.getDefaultSpecification()
+	}
+
+	return m.formatSpecification(imageType, specMap)
+}
+
+// formatSpecification formats a diagram specification into a readable string
+func (m *Manager) formatSpecification(imageType string, specMap map[string]interface{}) string {
+	var sb strings.Builder
+
+	// Get name and description
+	name := getString(specMap, "name")
+	description := getString(specMap, "description")
+
+	sb.WriteString(fmt.Sprintf("### %s\n\n", name))
+	sb.WriteString(fmt.Sprintf("%s\n\n", description))
+
+	// Format required elements
+	sb.WriteString("## Required Elements\n\n")
+	sb.WriteString("You MUST specify ALL of the following elements:\n\n")
+
+	if reqElements, ok := specMap["required_elements"].(map[string]interface{}); ok {
+		for elementName, elementData := range reqElements {
+			elementMap, ok := elementData.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			elemDesc := getString(elementMap, "description")
+			elemInstr := getString(elementMap, "instruction")
+
+			sb.WriteString(fmt.Sprintf("### %s\n", strings.Title(strings.ReplaceAll(elementName, "_", " "))))
+			sb.WriteString(fmt.Sprintf("*%s*\n\n", elemDesc))
+
+			// Add options if present
+			if options, ok := elementMap["options"].(map[string]interface{}); ok {
+				sb.WriteString("Options:\n")
+				for optName, optDesc := range options {
+					if desc, ok := optDesc.(string); ok {
+						sb.WriteString(fmt.Sprintf("- **%s**: %s\n", optName, desc))
+					}
+				}
+				sb.WriteString("\n")
+			}
+
+			sb.WriteString(fmt.Sprintf("Instructions:\n%s\n\n", elemInstr))
+		}
+	}
+
+	// Add output template
+	sb.WriteString("## Output Format\n\n")
+	sb.WriteString("Fill in this template with specific values:\n\n")
+	sb.WriteString("```\n")
+	if outputTemplate := getString(specMap, "output_template"); outputTemplate != "" {
+		sb.WriteString(outputTemplate)
+	}
+	sb.WriteString("```\n\n")
+
+	// Add global instructions
+	if m.globalInstr != nil {
+		sb.WriteString("## Important Guidelines\n\n")
+		if m.globalInstr.PrecisionRequirements != "" {
+			sb.WriteString(fmt.Sprintf("**Precision**: %s\n\n", m.globalInstr.PrecisionRequirements))
+		}
+		if m.globalInstr.LabelGuidelines != "" {
+			sb.WriteString(fmt.Sprintf("**Labels**: %s\n\n", m.globalInstr.LabelGuidelines))
+		}
+		if m.globalInstr.ColorSpecification != "" {
+			sb.WriteString(fmt.Sprintf("**Colors**: %s\n\n", m.globalInstr.ColorSpecification))
+		}
+		if m.globalInstr.SpatialPrecision != "" {
+			sb.WriteString(fmt.Sprintf("**Positioning**: %s\n\n", m.globalInstr.SpatialPrecision))
+		}
+	}
+
+	return sb.String()
+}
+
+// getDefaultSpecification returns a generic specification for unknown diagram types
+func (m *Manager) getDefaultSpecification() string {
+	return `### Generic Diagram
+
+A visual representation of the concepts in this section.
+
+## Required Elements
+
+You MUST specify ALL of the following elements:
+
+### Main Elements
+List 3-8 elements with:
+- Exact label text
+- Shape (rectangle, circle, etc.)
+- Position (center, top, left, etc.)
+- Color
+
+### Connections
+For each connection specify:
+- Source element
+- Target element
+- Arrow type (single, double, none)
+- Line style (solid, dashed)
+- Label (if any)
+
+### Visual Style
+Specify:
+- Color palette
+- Background
+- Typography style
+
+## Output Format
+
+Fill in this template with specific values:
+
+` + "```" + `
+ELEMENTS:
+- "Element 1" | shape | position | color
+- "Element 2" | shape | position | color
+(continue for all elements)
+
+CONNECTIONS:
+- Element 1 → Element 2 | arrow_type | line_style | "label"
+(continue for all connections)
+
+STYLE:
+- Palette: [specific colors]
+- Background: [color or gradient]
+- Typography: [font style]
+` + "```" + `
+
+## Important Guidelines
+
+Be specific: exact labels, exact colors, exact positions. No vague terms.
+`
+}
+
+// getString safely gets a string value from a map
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key].(string); ok {
+		return val
+	}
+	return ""
 }
 
 // ResolveAll resolves all configuration for a given context
@@ -403,4 +626,3 @@ func (m *Manager) SelectRandomColorMood(moods []string) string {
 	}
 	return moods[rand.Intn(len(moods))]
 }
-

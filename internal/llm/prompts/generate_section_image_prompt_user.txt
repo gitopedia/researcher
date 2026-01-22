@@ -1,29 +1,38 @@
-Generate an image prompt for this article section.
+Generate a detailed image specification for this article section.
+
+## Context
 
 Article: {{.ArticleTitle}}
-Section Title: {{.SectionTitle}}
+Section: {{.SectionTitle}}
 Category: {{.Category}}{{if .Subcategory}} > {{.Subcategory}}{{end}}
-
 Image Type: {{.ImageType}}
 Artistic Style: {{.ArtisticStyle}}
 
----
-Section Content:
-{{.SectionContent}}
----
+## Section Content
 
-Key Elements to Visualize:
+{{.SectionContent}}
+
+## Key Elements to Visualize
+
 {{- range .KeyElements}}
 - {{.}}
 {{- end}}
 
----
+## Diagram Type Specification
 
-Generate a {{.ImageType}} prompt that:
-1. Clearly illustrates the key concepts from this section
-2. Uses the {{.ImageType}} format conventions
-3. Incorporates the {{.ArtisticStyle}} style
-4. Would work as an educational supporting graphic
+You are creating a **{{.ImageType}}**. Follow this specification format exactly:
 
-Output only the final prompt text, nothing else.
+{{.DiagramSpecification}}
 
+## Instructions
+
+1. Read the section content carefully
+2. Identify the key concepts that should be visualized
+3. Fill in EVERY field in the specification template above
+4. Use ONLY concepts from the section content
+5. Be specific: exact labels, exact colors, exact positions
+6. Keep the diagram readable: 3-8 main elements maximum
+
+Apply the "{{.ArtisticStyle}}" style to your visual choices (colors, shapes, aesthetics).
+
+Output the completed specification only. No explanations, no commentary.

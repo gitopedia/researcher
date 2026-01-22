@@ -178,14 +178,15 @@ type SectionImageEvaluationResult struct {
 
 // SectionImagePromptRequest contains the input for section image prompt generation
 type SectionImagePromptRequest struct {
-	ArticleTitle   string
-	SectionTitle   string
-	SectionContent string
-	Category       string
-	Subcategory    string
-	ImageType      string
-	ArtisticStyle  string
-	KeyElements    []string
+	ArticleTitle         string
+	SectionTitle         string
+	SectionContent       string
+	Category             string
+	Subcategory          string
+	ImageType            string
+	ArtisticStyle        string
+	KeyElements          []string
+	DiagramSpecification string // Detailed specification template for the diagram type
 }
 
 // SectionImagePromptResult contains the generated section image prompt

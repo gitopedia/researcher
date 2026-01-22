@@ -1612,14 +1612,15 @@ func (c *Client) GenerateSectionImagePrompt(ctx context.Context, req SectionImag
 
 	// Execute user template
 	data := map[string]interface{}{
-		"ArticleTitle":   req.ArticleTitle,
-		"SectionTitle":   req.SectionTitle,
-		"SectionContent": req.SectionContent,
-		"Category":       req.Category,
-		"Subcategory":    req.Subcategory,
-		"ImageType":      req.ImageType,
-		"ArtisticStyle":  req.ArtisticStyle,
-		"KeyElements":    req.KeyElements,
+		"ArticleTitle":         req.ArticleTitle,
+		"SectionTitle":         req.SectionTitle,
+		"SectionContent":       req.SectionContent,
+		"Category":             req.Category,
+		"Subcategory":          req.Subcategory,
+		"ImageType":            req.ImageType,
+		"ArtisticStyle":        req.ArtisticStyle,
+		"KeyElements":          req.KeyElements,
+		"DiagramSpecification": req.DiagramSpecification,
 	}
 	var userBuf bytes.Buffer
 	if err := c.generateSectionImagePromptUserTemplate.Execute(&userBuf, data); err != nil {

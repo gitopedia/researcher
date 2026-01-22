@@ -7,6 +7,11 @@ Requirements:
 - Specify which existing section it should be inserted after
 - Provide a specific search query that includes the full category path to avoid ambiguity with similarly-named topics in other fields
 
+**CRITICAL: Topic-Specific Sections Only**
+- The suggested section MUST be directly about the article's specific topic, not about parent categories or tangential concepts
+- For example: If the topic is "Bell's Theorem", suggest sections like "Bell Test Experiments", "CHSH Inequality Derivation", or "Loophole-Free Bell Tests" - NOT generic quantum mechanics topics like "Many-Worlds Interpretation" or "Measurement Problem"
+- The search query MUST include the article's topic name to find relevant sources
+
 Respond ONLY with valid JSON, no other text.
 
 

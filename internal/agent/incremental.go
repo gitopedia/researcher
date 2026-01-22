@@ -793,7 +793,9 @@ summary: "Initial overview based on %s"
 
 `, id, topic, slug, date, tagsStr, facetsBlock, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
-	fullContent := frontMatter + miniArticle + fmt.Sprintf("\n\n## References\n\n[^1]: [%s](%s)", sourceInfo.Title, sourceInfo.URL)
+	// Strip any hallucinated references section before adding the real one
+	cleanedMiniArticle := stripReferencesSection(miniArticle)
+	fullContent := frontMatter + cleanedMiniArticle + fmt.Sprintf("\n\n## References\n\n[^1]: [%s](%s)", sourceInfo.Title, sourceInfo.URL)
 
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
 	if err := a.gh.CreateFile(branchName, articlePath, fmt.Sprintf("Init article: %s", topic), fullContent); err != nil {
@@ -823,6 +825,45 @@ func getEnvBool(key string, defaultVal bool) bool {
 	}
 	v = strings.ToLower(v)
 	return v == "true" || v == "1" || v == "yes"
+}
+
+// stripReferencesSection removes any hallucinated References/Bibliography/Sources/Notes
+// sections from generated content. This provides defense-in-depth against LLMs
+// that ignore prompt instructions to not include references.
+func stripReferencesSection(content string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+	inReferencesSection := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(strings.ToLower(line))
+
+		// Detect start of a references-like section
+		if strings.HasPrefix(trimmed, "## references") ||
+			strings.HasPrefix(trimmed, "## bibliography") ||
+			strings.HasPrefix(trimmed, "## sources") ||
+			strings.HasPrefix(trimmed, "## notes") ||
+			strings.HasPrefix(trimmed, "## citations") {
+			inReferencesSection = true
+			continue
+		}
+
+		// Detect end of references section (new ## heading)
+		if inReferencesSection && strings.HasPrefix(trimmed, "## ") {
+			inReferencesSection = false
+		}
+
+		if !inReferencesSection {
+			result = append(result, line)
+		}
+	}
+
+	// Trim trailing empty lines
+	for len(result) > 0 && strings.TrimSpace(result[len(result)-1]) == "" {
+		result = result[:len(result)-1]
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // processTopicWithIterations handles a claimed topic issue by iterating through articles
@@ -1186,7 +1227,9 @@ summary: "Initial overview based on %s"
 
 `, id, topic, slug, date, tagsStr, facetsBlock, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
-	fullContent := frontMatter + miniArticle + fmt.Sprintf("\n\n## References\n\n[^1]: [%s](%s)", sourceInfo.Title, sourceInfo.URL)
+	// Strip any hallucinated references section before adding the real one
+	cleanedMiniArticle := stripReferencesSection(miniArticle)
+	fullContent := frontMatter + cleanedMiniArticle + fmt.Sprintf("\n\n## References\n\n[^1]: [%s](%s)", sourceInfo.Title, sourceInfo.URL)
 
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
 	if err := a.gh.CreateFile(branchName, articlePath, fmt.Sprintf("Add article: %s", topic), fullContent); err != nil {

@@ -6,6 +6,11 @@ Requirements:
 - Avoid search terms that would return FAQ pages, how-to guides, or listicles
 - The query should help find content that expands on the existing section
 
+**CRITICAL: Always Include the Article Topic**
+- The search query MUST include the specific article topic name (e.g., "Bell's Theorem", "Schrödinger Equation")
+- Do NOT search for generic category terms without the topic name
+- Example for a Bell's Theorem article: "Science Physics Quantum Mechanics Bell's Theorem experimental tests" NOT "Science Physics Quantum Mechanics quantum correlation measurements"
+
 Respond ONLY with valid JSON, no other text.
 
 

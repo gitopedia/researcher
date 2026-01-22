@@ -181,15 +181,19 @@ func (a *Agent) GenerateSectionImagePrompt(ctx context.Context, articleTitle str
 		selectedStyle = resolved.ArtisticStyles[0]
 	}
 
+	// Get the diagram specification for this image type
+	diagramSpec := styleMgr.GetDiagramSpecification(evaluation.RecommendedType)
+
 	req := llm.SectionImagePromptRequest{
-		ArticleTitle:   articleTitle,
-		SectionTitle:   section.Title,
-		SectionContent: section.Content,
-		Category:       category,
-		Subcategory:    subcategory,
-		ImageType:      evaluation.RecommendedType,
-		ArtisticStyle:  selectedStyle,
-		KeyElements:    evaluation.KeyElementsToVisualize,
+		ArticleTitle:         articleTitle,
+		SectionTitle:         section.Title,
+		SectionContent:       section.Content,
+		Category:             category,
+		Subcategory:          subcategory,
+		ImageType:            evaluation.RecommendedType,
+		ArtisticStyle:        selectedStyle,
+		KeyElements:          evaluation.KeyElementsToVisualize,
+		DiagramSpecification: diagramSpec,
 	}
 
 	return a.llm.GenerateSectionImagePrompt(ctx, req)

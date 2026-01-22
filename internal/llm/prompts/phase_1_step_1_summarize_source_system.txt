@@ -25,5 +25,8 @@ DO NOT:
 - Add your own opinions or analysis
 - Include phrases like "I'll extract..." or "Here are the facts..."
 - Skip any sections of the source
+- Include References, Bibliography, Citations, Sources, or Notes sections from the source
+- Include any citation markers like [1], [2], [^1], etc.
+- Copy reference lists or bibliographic entries - these are handled separately
 
 Start your output directly with "# [First Section Heading]"
