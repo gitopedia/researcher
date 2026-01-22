@@ -1,12 +1,10 @@
 Determine the optimal section order for an article about "{{.Topic}}".
 
 ## Existing Sections (in current order):
-{{range .ExistingSections}}- {{.Title}}
-{{end}}
+{{.ExistingSections}}
 
 ## New Sections to Add:
-{{range .NewSections}}- {{.Title}}: {{.Reason}}
-{{end}}
+{{.NewSections}}
 
 Provide the optimal ordering for ALL sections combined.
 Respond with ONLY a JSON object.

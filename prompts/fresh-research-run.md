@@ -6,7 +6,7 @@
 ITERATIONS = 10
 IMPROVEMENTS_PER_ARTICLE = 5
 ISSUE_NUMBER = 121
-ARTICLE_COUNT = 20
+ARTICLE_COUNT = 5
 ```
 
 ---
@@ -58,35 +58,31 @@ Then update the issue body with these changes:
 
 Use `gh issue edit {ISSUE_NUMBER} --repo gitopedia/gitopedia --body "..."` to update the issue with the modified body.
 
-### Step 4: Run the Researcher
+### Step 4: Build and Run the Researcher
 
-Run the researcher with the configured parameters:
+First, ensure the app is built with the latest code changes:
 
 ```powershell
 cd C:\Solus\Gitopedia\researcher
+go build ./...
+```
 
+If the build fails, stop and report the error.
+
+Then run the researcher with the configured parameters:
+
+```powershell
 $env:TOPIC_PROCESSING_ITERATIONS = "{ITERATIONS}"
 $env:IMPROVEMENTS_PER_NEW_ARTICLE = "{IMPROVEMENTS_PER_ARTICLE}"
-$env:GENERATE_IMAGES_AFTER_RUN = "true"
-$env:GENERATE_SECTION_IMAGES = "false"
 
 go run . --once --repo-path "../gitopedia" --no-commit
 ```
 
-Run this command in the background so we can monitor progress.
-
-### Step 5: Summary
-
-After the run completes, show me:
-1. List of articles created in `Compendium/_incoming/`
-2. Any errors from the improvement logs in `Compendium/_debug/`
-3. The iteration count from each article's frontmatter
+Run this command in the background. **Do NOT monitor progress or wait for completion** - the researcher will run for a long time. End your response after starting the command.
 
 ---
 
 ## Notes
 
 - The `--no-commit` flag means changes are only written locally, not pushed to GitHub
-- Set `GENERATE_IMAGES_AFTER_RUN` to `false` to skip header image generation
-- Section images are disabled by default (not working well currently)
 - When adding new articles, choose topics that fit the issue's category/subcategory context

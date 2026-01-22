@@ -245,12 +245,6 @@ func (m *MockLLM) OrderSections(ctx context.Context, req llm.SectionOrderRequest
 	}, nil
 }
 
-func (m *MockLLM) GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, sectionContent string) (*llm.SearchQueryResult, error) {
-	return &llm.SearchQueryResult{
-		SearchQuery: "mock search query for " + topic,
-	}, nil
-}
-
 func (m *MockLLM) MergeSection(ctx context.Context, topic, sectionTitle, currentContent, newContent string) (string, error) {
 	return currentContent + "\n\n" + newContent, nil
 }

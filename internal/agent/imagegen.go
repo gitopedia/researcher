@@ -430,6 +430,57 @@ func (a *Agent) startOllama() error {
 	return nil
 }
 
+// isDockerAvailable checks if Docker daemon is running and accessible
+func (a *Agent) isDockerAvailable() bool {
+	cmd := exec.Command("docker", "info")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	return cmd.Run() == nil
+}
+
+// ensureDockerRunning checks if Docker is available and attempts to start Docker Desktop on Windows if not
+func (a *Agent) ensureDockerRunning() error {
+	if a.isDockerAvailable() {
+		return nil
+	}
+
+	log.Println("[Docker] Docker daemon not available, attempting to start...")
+
+	if runtime.GOOS == "windows" {
+		// Try to start Docker Desktop on Windows
+		dockerDesktopPath := os.Getenv("DOCKER_DESKTOP_PATH")
+		if dockerDesktopPath == "" {
+			dockerDesktopPath = `C:\Program Files\Docker\Docker\Docker Desktop.exe`
+		}
+
+		// Check if Docker Desktop executable exists
+		if _, err := os.Stat(dockerDesktopPath); os.IsNotExist(err) {
+			return fmt.Errorf("Docker Desktop not found at %s. Please install Docker Desktop or set DOCKER_DESKTOP_PATH", dockerDesktopPath)
+		}
+
+		log.Printf("[Docker] Starting Docker Desktop: %s", dockerDesktopPath)
+		cmd := exec.Command(dockerDesktopPath)
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to start Docker Desktop: %w", err)
+		}
+
+		// Wait for Docker to be ready (up to 90 seconds)
+		log.Println("[Docker] Waiting for Docker Desktop to be ready...")
+		for i := 0; i < 45; i++ {
+			if a.isDockerAvailable() {
+				log.Println("[Docker] Docker Desktop is ready")
+				return nil
+			}
+			time.Sleep(2 * time.Second)
+		}
+
+		return fmt.Errorf("Docker Desktop did not become ready within 90 seconds")
+	}
+
+	// On Linux/macOS, Docker should be started via systemd or similar
+	return fmt.Errorf("Docker daemon not available. Please start Docker manually")
+}
+
 // startComfyUI starts the ComfyUI service and returns a client
 func (a *Agent) startComfyUI(ctx context.Context) (*comfyui.Client, error) {
 	log.Println("[VRAM] Starting ComfyUI...")
@@ -446,6 +497,11 @@ func (a *Agent) startComfyUI(ctx context.Context) (*comfyui.Client, error) {
 	if client.IsHealthy(ctx) {
 		log.Println("[ComfyUI] Already running")
 		return client, nil
+	}
+
+	// Ensure Docker is running before attempting to start ComfyUI
+	if err := a.ensureDockerRunning(); err != nil {
+		return nil, fmt.Errorf("Docker not available: %w", err)
 	}
 
 	// Try to start ComfyUI using configured command

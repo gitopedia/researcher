@@ -67,11 +67,9 @@ type Client struct {
 	suggestNewSectionUserTemplate                *template.Template
 	compareSectionsSystemTemplate                *template.Template
 	compareSectionsUserTemplate                  *template.Template
-	orderSectionsSystemTemplate                  *template.Template
-	orderSectionsUserTemplate                    *template.Template
-	generateSectionSearchQuerySystemTemplate     *template.Template
-	generateSectionSearchQueryUserTemplate       *template.Template
-	mergeSectionSystemTemplate                   *template.Template
+	orderSectionsSystemTemplate  *template.Template
+	orderSectionsUserTemplate    *template.Template
+	mergeSectionSystemTemplate   *template.Template
 	mergeSectionUserTemplate                     *template.Template
 	scoreImprovementSystemTemplate               *template.Template
 	scoreImprovementUserTemplate                 *template.Template
@@ -361,16 +359,6 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load order_sections_user template: %w", err)
 	}
 
-	generateSectionSearchQuerySystem, err := loadTemplate("prompts/generate_section_search_query_system.txt")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load generate_section_search_query_system template: %w", err)
-	}
-
-	generateSectionSearchQueryUser, err := loadTemplate("prompts/generate_section_search_query_user.txt")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load generate_section_search_query_user template: %w", err)
-	}
-
 	mergeSectionSystem, err := loadTemplate("prompts/merge_section_system.txt")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load merge_section_system template: %w", err)
@@ -437,11 +425,9 @@ func NewClient() (*Client, error) {
 		suggestNewSectionUserTemplate:                suggestNewSectionUser,
 		compareSectionsSystemTemplate:                compareSectionsSystem,
 		compareSectionsUserTemplate:                  compareSectionsUser,
-		orderSectionsSystemTemplate:                  orderSectionsSystem,
-		orderSectionsUserTemplate:                    orderSectionsUser,
-		generateSectionSearchQuerySystemTemplate:     generateSectionSearchQuerySystem,
-		generateSectionSearchQueryUserTemplate:       generateSectionSearchQueryUser,
-		mergeSectionSystemTemplate:                   mergeSectionSystem,
+		orderSectionsSystemTemplate:  orderSectionsSystem,
+		orderSectionsUserTemplate:    orderSectionsUser,
+		mergeSectionSystemTemplate:   mergeSectionSystem,
 		mergeSectionUserTemplate:                     mergeSectionUser,
 		scoreImprovementSystemTemplate:               scoreImprovementSystem,
 		scoreImprovementUserTemplate:                 scoreImprovementUser,
@@ -1856,17 +1842,20 @@ func (c *Client) CompareSections(ctx context.Context, topic, existingArticle, ex
 func (c *Client) OrderSections(ctx context.Context, req SectionOrderRequest) (*SectionOrderResult, error) {
 	startTime := time.Now()
 
-	// Format existing sections
+	// Format existing sections as bullet list
 	var existingStr string
 	for _, s := range req.ExistingSections {
-		prefix := strings.Repeat("#", s.Level)
-		existingStr += fmt.Sprintf("%s %s\n", prefix, s.Title)
+		existingStr += fmt.Sprintf("- %s\n", s.Title)
 	}
 
-	// Format new sections
+	// Format new sections as bullet list with reasons
 	var newStr string
 	for _, s := range req.NewSections {
-		newStr += fmt.Sprintf("## %s\n", s.Title)
+		if s.Reason != "" {
+			newStr += fmt.Sprintf("- %s: %s\n", s.Title, s.Reason)
+		} else {
+			newStr += fmt.Sprintf("- %s\n", s.Title)
+		}
 	}
 
 	var systemBuf bytes.Buffer
@@ -1906,52 +1895,6 @@ func (c *Client) OrderSections(ctx context.Context, req SectionOrderRequest) (*S
 	}
 
 	log.Printf("OrderSections: Ordered %d sections in %v", len(result.OrderedTitles), time.Since(startTime))
-	return &result, nil
-}
-
-// GenerateSectionSearchQuery generates a search query for improving a section
-func (c *Client) GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, sectionContent string) (*SearchQueryResult, error) {
-	startTime := time.Now()
-
-	var systemBuf bytes.Buffer
-	if err := c.generateSectionSearchQuerySystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return nil, fmt.Errorf("failed to execute generate_section_search_query system template: %w", err)
-	}
-
-	data := map[string]interface{}{
-		"Category":       category,
-		"Subcategory":    subcategory,
-		"Topic":          topic,
-		"SectionTitle":   sectionTitle,
-		"SectionContent": sectionContent,
-	}
-	var userBuf bytes.Buffer
-	if err := c.generateSectionSearchQueryUserTemplate.Execute(&userBuf, data); err != nil {
-		return nil, fmt.Errorf("failed to execute generate_section_search_query user template: %w", err)
-	}
-
-	resp, err := c.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: c.modelSummarizeJSON,
-			Messages: []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
-				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
-			},
-			Temperature: 0.5,
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
-	var result SearchQueryResult
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse generate_section_search_query JSON: %w", err)
-	}
-
-	log.Printf("GenerateSectionSearchQuery: Generated query '%s' in %v", result.SearchQuery, time.Since(startTime))
 	return &result, nil
 }
 

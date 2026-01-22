@@ -213,7 +213,6 @@ type Generator interface {
 	SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []ArticleSection) (*NewSectionSuggestion, error)
 	CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*SectionComparison, error)
 	OrderSections(ctx context.Context, req SectionOrderRequest) (*SectionOrderResult, error)
-	GenerateSectionSearchQuery(ctx context.Context, category, subcategory, topic, sectionTitle, sectionContent string) (*SearchQueryResult, error)
 	MergeSection(ctx context.Context, topic, sectionTitle, currentContent, newContent string) (string, error)
 	ScoreImprovement(ctx context.Context, topic, sectionTitle, originalContent, improvedContent string) (*ImprovementScore, error)
 

@@ -1558,18 +1558,9 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 		actionLog.WriteString("- **Warning:** Could not extract section content\n")
 	}
 
-	// Generate a context-aware search query using LLM
-	queryResult, err := a.llm.GenerateSectionSearchQuery(ctx, category, subcategory, topicName, selectedSection.Title, currentSectionContent)
-	if err != nil {
-		// Fallback to simple query if LLM fails
-		log.Printf("[Mode B] Warning: Failed to generate LLM search query: %v, using fallback", err)
-		queryResult = &llm.SearchQueryResult{
-			SearchQuery: fmt.Sprintf("%s %s %s %s", category, subcategory, topicName, selectedSection.Title),
-		}
-	}
-
-	query := queryResult.SearchQuery
-	log.Printf("[Mode B] Searching with LLM-generated query: %s", query)
+	// Generate search query using deterministic template (more reliable than LLM)
+	query := fmt.Sprintf("%s %s %s %s", category, subcategory, topicName, selectedSection.Title)
+	log.Printf("[Mode B] Searching with query: %s", query)
 	actionLog.WriteString(fmt.Sprintf("- **Search query:** %s\n", query))
 
 	result.SectionName = selectedSection.Title
