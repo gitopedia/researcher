@@ -157,7 +157,6 @@ func (m *LocalGitManager) AddBinaryFile(branch, path, message string, content []
 	}
 
 	if _, err := m.runGit("add", path); err != nil {
-		return err
 	}
 
 	_, err := m.runGit("commit", "-m", message)

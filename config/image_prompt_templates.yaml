@@ -19,11 +19,11 @@ default:
       - flowing lines
       - depth layers
     color_moods:
-      - "bold and minimal"
-      - "muted earth tones"
-      - "monochromatic with accent"
-      - "gradient spectrum"
-      - "high contrast duotone"
+      - "deep charcoal with vibrant accents"
+      - "midnight blue gradient"
+      - "dark slate with warm highlights"
+      - "moody purple-gray tones"
+      - "obsidian with neon accent"
 
 # Science category
 science:
@@ -44,11 +44,11 @@ science:
       - data visualization elements
       - scientific notation
     color_moods:
-      - "clinical blues and whites"
-      - "laboratory fluorescent"
+      - "deep ocean blue with clinical highlights"
+      - "dark lab with fluorescent glow"
       - "deep space dark with bright accents"
-      - "electron microscope grayscale"
-      - "plasma energy colors"
+      - "charcoal microscopy with silver details"
+      - "dark plasma energy swirls"
 
   physics:
     header:
@@ -70,11 +70,11 @@ science:
         - energy level diagrams
         - Feynman diagram aesthetics
       color_moods:
-        - "quantum blue with probability clouds"
-        - "particle collision energy spectrum"
-        - "wave interference rainbow"
+        - "deep quantum blue with glowing probability clouds"
+        - "dark void with particle collision sparks"
+        - "midnight wave interference patterns"
         - "dark matter deep purple"
-        - "electromagnetic spectrum gradient"
+        - "dark field with electromagnetic spectrum traces"
 
   biology:
     header:
@@ -94,11 +94,11 @@ science:
         - ecosystem connections
         - anatomical details
       color_moods:
-        - "bioluminescent blue-green"
-        - "chlorophyll greens"
-        - "cellular microscopy tints"
-        - "blood and tissue warm tones"
-        - "oceanic life blues"
+        - "bioluminescent glow on dark water"
+        - "deep forest chlorophyll greens"
+        - "dark field microscopy with bright cells"
+        - "deep crimson and dark tissue tones"
+        - "deep oceanic blues with luminescent life"
 
   chemistry:
     header:
@@ -118,11 +118,11 @@ science:
         - reaction arrows
         - periodic table elements
       color_moods:
-        - "flame test spectrum"
-        - "pH indicator gradient"
-        - "metallic element sheens"
-        - "gas discharge tube colors"
-        - "solution transparency layers"
+        - "dark lab with flame test spectrum glow"
+        - "deep vessel with pH indicator gradient"
+        - "dark alloy with metallic sheens"
+        - "blackout with gas discharge tube colors"
+        - "dark solution with luminous layers"
 
   astronomy:
     header:
@@ -142,10 +142,10 @@ science:
         - planetary bodies
         - gravitational lensing
       color_moods:
-        - "nebula purple and gold"
-        - "stellar blue-white"
-        - "cosmic microwave background"
-        - "solar corona orange"
+        - "deep space nebula purple and gold"
+        - "dark cosmos with stellar blue-white points"
+        - "cosmic void with microwave background hints"
+        - "eclipse darkness with solar corona orange"
         - "deep field darkness with distant lights"
 
 # Technology category
@@ -168,9 +168,9 @@ technology:
       - code fragments
     color_moods:
       - "terminal green on black"
-      - "holographic blue"
-      - "silicon chip metallics"
-      - "LED indicator colors"
+      - "dark holographic blue shimmer"
+      - "dark silicon with metallic traces"
+      - "blackout with LED indicator glow"
       - "dark mode with neon accents"
 
   computing:
@@ -191,11 +191,11 @@ technology:
         - processor architectures
         - memory hierarchies
       color_moods:
-        - "matrix code green"
-        - "syntax highlighting palette"
-        - "debug console colors"
-        - "GPU heat map"
-        - "network traffic visualization"
+        - "matrix code green on black"
+        - "dark editor with syntax highlighting"
+        - "dark terminal with debug colors"
+        - "dark board with GPU heat map glow"
+        - "dark network with traffic visualization"
 
   engineering:
     header:
@@ -215,11 +215,11 @@ technology:
         - tolerance specifications
         - assembly sequences
       color_moods:
-        - "blueprint cyan"
-        - "CAD wireframe"
-        - "industrial safety colors"
-        - "steel and copper metallics"
-        - "measurement grid overlay"
+        - "dark blueprint with cyan lines"
+        - "dark CAD with glowing wireframe"
+        - "dark industrial with safety color accents"
+        - "dark forge with steel and copper gleam"
+        - "dark grid with measurement overlay"
 
 # History category
 history:
@@ -240,11 +240,11 @@ history:
       - contemporary documents
       - symbolic objects
     color_moods:
-      - "aged sepia tones"
-      - "faded documentary colors"
-      - "period-appropriate palette"
-      - "archival photograph tints"
-      - "historical map coloring"
+      - "dark aged sepia with warm highlights"
+      - "moody documentary shadows"
+      - "dark period atmosphere"
+      - "dark archive with aged photograph tints"
+      - "dark parchment with historical map coloring"
 
   ancient:
     header:
@@ -264,11 +264,11 @@ history:
         - period-specific art styles
         - excavation discoveries
       color_moods:
-        - "terracotta and stone"
-        - "bronze age metallics"
-        - "faded fresco colors"
-        - "desert sand and sky"
-        - "aged marble whites"
+        - "dark earth with terracotta warmth"
+        - "dark patina bronze age metallics"
+        - "shadowed chamber with fresco colors"
+        - "dusk desert sand and twilight sky"
+        - "dark temple with aged marble gleam"
 
   medieval:
     header:
@@ -288,11 +288,11 @@ history:
         - medieval manuscripts
         - period craftsmanship
       color_moods:
-        - "gold leaf and deep blue"
-        - "stained glass jewel tones"
-        - "parchment and ink"
-        - "tapestry earth colors"
-        - "castle stone grays"
+        - "midnight blue with gold leaf accents"
+        - "dark cathedral with stained glass glow"
+        - "dark study with parchment and ink"
+        - "shadowed hall with tapestry earth tones"
+        - "torch-lit castle stone grays"
 
 # Philosophy category
 philosophy:
@@ -313,11 +313,11 @@ philosophy:
       - philosophical tradition symbols
       - conceptual diagrams
     color_moods:
-      - "contemplative grays and whites"
-      - "enlightenment gold"
+      - "deep contemplative grays with soft light"
+      - "dark space with enlightenment gold glow"
       - "existential dark tones"
-      - "logical clarity blues"
-      - "dialectic contrasts"
+      - "deep twilight with logical clarity blues"
+      - "dark void with dialectic contrasts"
 
 # Mathematics category
 mathematics:
@@ -338,11 +338,11 @@ mathematics:
       - proof diagrams
       - number patterns
     color_moods:
-      - "blackboard chalk and slate"
-      - "graph paper grid lines"
-      - "golden ratio harmonics"
-      - "set theory Venn colors"
-      - "coordinate plane primary colors"
+      - "dark blackboard with chalk and slate"
+      - "dark grid with luminous graph lines"
+      - "deep space with golden ratio harmonics"
+      - "dark canvas with set theory Venn colors"
+      - "dark plane with coordinate primary accents"
 
   geometry:
     header:
@@ -362,11 +362,11 @@ mathematics:
         - compass and straightedge constructions
         - dimensional projections
       color_moods:
-        - "sacred geometry golds"
-        - "crystallographic symmetry"
-        - "fractal rainbow"
-        - "architectural blueprint"
-        - "marble and bronze classical"
+        - "dark void with sacred geometry golds"
+        - "deep space crystallographic symmetry"
+        - "dark field with fractal rainbow glow"
+        - "dark architectural blueprint"
+        - "shadowed marble and bronze classical"
 
 # People/Biography category
 people:
@@ -387,11 +387,11 @@ people:
       - field-specific imagery
       - commemorative motifs
     color_moods:
-      - "commemorative bronze and gold"
-      - "portrait studio lighting"
-      - "period-appropriate palette"
-      - "scholarly earth tones"
-      - "legacy monument grays"
+      - "dark gallery with bronze and gold accents"
+      - "dramatic low-key portrait lighting"
+      - "dark period atmosphere"
+      - "deep scholarly earth tones"
+      - "dusk monument with legacy grays"
 
   scientists:
     header:
@@ -411,11 +411,11 @@ people:
         - experimental setups
         - equations and formulas
       color_moods:
-        - "laboratory white and chrome"
-        - "chalkboard and manuscript"
-        - "Nobel medal gold"
-        - "scientific instrument brass"
-        - "research paper cream"
+        - "dark lab with chrome highlights"
+        - "dark chalkboard with chalk marks"
+        - "shadowed display with Nobel gold gleam"
+        - "dark workshop with brass instrument glow"
+        - "dim study with warm paper tones"
 
 # Geography/Places category
 geography:
@@ -436,9 +436,9 @@ geography:
       - cartographic symbols
       - regional characteristics
     color_moods:
-      - "topographic elevation colors"
-      - "satellite imagery tones"
-      - "antique map coloring"
-      - "regional natural palette"
-      - "urban planning zones"
+      - "dark relief with topographic elevation colors"
+      - "night satellite imagery with city lights"
+      - "dark parchment with antique map coloring"
+      - "twilight regional natural palette"
+      - "dark city with urban planning zone accents"
 
