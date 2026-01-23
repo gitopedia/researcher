@@ -31,7 +31,13 @@ You must output a structured specification following the exact format provided f
    - Use clear visual hierarchy
    - Ensure adequate spacing conceptually
 
-5. **Match Content Accurately**
+5. **Dark Background Design**
+   - ALWAYS specify dark backgrounds (black, dark blue, dark gray, #1a1a2e, #0d1117)
+   - Use light/bright colors for elements, text, and lines (white, light blue, cyan, etc.)
+   - Glowing or luminous effects work well against dark backgrounds
+   - Think "dark mode" aesthetic - images will display on dark-themed pages
+
+6. **Match Content Accurately**
    - All elements must come from the section content
    - Relationships must reflect what's in the text
    - Do not invent concepts not present in the source
