@@ -2089,7 +2089,8 @@ func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, bran
 	}
 
 	// Resolve category-based configuration (for styles and colors)
-	resolved := styleMgr.ResolveAll("header", category, subcategory)
+	// Lowercase category/subcategory to match YAML keys
+	resolved := styleMgr.ResolveAll("header", strings.ToLower(category), strings.ToLower(subcategory))
 
 	// Select 1-2 random artistic styles from config
 	numStyles := 1
