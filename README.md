@@ -131,7 +131,8 @@ LLM_THINK_MODE=true              # Enable reasoning mode
 
 # Topic Processing
 TOPIC_PROCESSING_ITERATIONS=10       # Iterations per claimed topic
-IMPROVEMENTS_PER_NEW_ARTICLE=10      # Improvement passes after creating article
+IMPROVEMENTS_PER_NEW_ARTICLE=10      # Minimum successful improvements per new article
+MAX_IMPROVEMENT_ATTEMPTS=20          # Maximum attempts before giving up (default: 2x min)
 CREATE_PR_AFTER_ITERATIONS=false     # Create PR when done (or just commit to branch)
 AUTO_MERGE_READY_PRS=false           # Auto-merge approved PRs
 

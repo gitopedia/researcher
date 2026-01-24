@@ -870,7 +870,8 @@ func stripReferencesSection(content string) string {
 // It processes N articles (creating new or improving existing), then creates a PR
 func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue, botUsername string) error {
 	iterations := getEnvInt("TOPIC_PROCESSING_ITERATIONS", 50)
-	improvementsPerNewArticle := getEnvInt("IMPROVEMENTS_PER_NEW_ARTICLE", 10)
+	minImprovements := getEnvInt("IMPROVEMENTS_PER_NEW_ARTICLE", 10)
+	maxAttempts := getEnvInt("MAX_IMPROVEMENT_ATTEMPTS", minImprovements*2) // Default to 2x minimum
 	issueNum := *issue.Number
 	topicTitle := issue.GetTitle()
 
@@ -942,19 +943,25 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 			}
 
 			// Run improvement iterations on the newly created article
-			log.Printf("Running %d improvement iterations on new article '%s'", improvementsPerNewArticle, article.Name)
-			for impIter := 1; impIter <= improvementsPerNewArticle; impIter++ {
-				log.Printf("[New Article Improvement %d/%d] Improving '%s'", impIter, improvementsPerNewArticle, article.Name)
+			// Loop until we reach minimum successful improvements OR hit max attempts
+			log.Printf("Running improvements on new article '%s' (min: %d successes, max: %d attempts)", article.Name, minImprovements, maxAttempts)
+			successCount := 0
+			for attempt := 1; attempt <= maxAttempts && successCount < minImprovements; attempt++ {
+				log.Printf("[New Article Improvement %d/%d attempts, %d/%d successes] Improving '%s'", attempt, maxAttempts, successCount, minImprovements, article.Name)
 				result, err := a.improveArticle(ctx, issue, article.Name, branchName, failedSources)
 				if err != nil {
-					slog.Warn("Failed to improve new article", "article", article.Name, "iteration", impIter, "error", err)
-					errors = append(errors, fmt.Sprintf("Failed to improve '%s' (iter %d): %v", article.Name, impIter, err))
+					slog.Warn("Failed to improve new article", "article", article.Name, "attempt", attempt, "error", err)
+					errors = append(errors, fmt.Sprintf("Failed to improve '%s' (attempt %d): %v", article.Name, attempt, err))
 					// Continue trying more improvements even if one fails
 					continue
 				}
+				successCount++
 				if result != nil {
 					improvementResults = append(improvementResults, result)
 				}
+			}
+			if successCount < minImprovements {
+				log.Printf("Warning: Only achieved %d/%d successful improvements for '%s' after %d attempts", successCount, minImprovements, article.Name, maxAttempts)
 			}
 
 			// Generate image prompt after improvements complete
@@ -995,7 +1002,7 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 	}
 
 	// Calculate total iterations including per-article improvements
-	totalImprovementIterations := len(articlesCreated) * improvementsPerNewArticle
+	totalImprovementIterations := len(articlesCreated) * minImprovements
 	totalIterations := iterations + totalImprovementIterations
 	log.Printf("Completed %d main iterations + %d new-article improvements (%d total) for topic #%d",
 		iterations, totalImprovementIterations, totalIterations, issueNum)
@@ -1707,6 +1714,7 @@ func reorderArticleSections(article string, orderedTitles []string, newSections 
 
 	// 3. Build a map of existing section titles to their content
 	existingSections := make(map[string]string)
+	var existingOrder []string // Track original order for fallback
 	var currentTitle string
 	var currentContent strings.Builder
 	inSection := false
@@ -1727,6 +1735,7 @@ func reorderArticleSections(article string, orderedTitles []string, newSections 
 			currentContent.Reset()
 			currentContent.WriteString(lines[i] + "\n")
 			inSection = true
+			existingOrder = append(existingOrder, title)
 		} else if inSection {
 			currentContent.WriteString(lines[i] + "\n")
 		}
@@ -1736,7 +1745,41 @@ func reorderArticleSections(article string, orderedTitles []string, newSections 
 		existingSections[currentTitle] = strings.TrimSpace(currentContent.String())
 	}
 
-	// 4. Write sections in the ordered sequence
+	// 4. DEFENSIVE CHECK: Verify orderedTitles contains all existing sections (except References)
+	// Build a set of titles in orderedTitles for quick lookup
+	orderedSet := make(map[string]bool)
+	for _, title := range orderedTitles {
+		orderedSet[title] = true
+	}
+
+	// Check for missing existing sections
+	var missingSections []string
+	for _, title := range existingOrder {
+		if title != "References" && !orderedSet[title] {
+			missingSections = append(missingSections, title)
+		}
+	}
+
+	// If sections would be lost, log warning and use fallback ordering
+	if len(missingSections) > 0 {
+		slog.Warn("reorderArticleSections: LLM order would drop existing sections, using fallback",
+			"missing", missingSections, "orderedTitles", orderedTitles)
+
+		// Fallback: preserve existing sections in original order, then add new sections
+		orderedTitles = nil
+		for _, title := range existingOrder {
+			if title != "References" {
+				orderedTitles = append(orderedTitles, title)
+			}
+		}
+		// Add new sections at the end (before References)
+		for title := range newSections {
+			orderedTitles = append(orderedTitles, title)
+		}
+		orderedTitles = append(orderedTitles, "References")
+	}
+
+	// 5. Write sections in the ordered sequence
 	var referencesContent string
 	for _, title := range orderedTitles {
 		if title == "References" {
@@ -1757,7 +1800,7 @@ func reorderArticleSections(article string, orderedTitles []string, newSections 
 		}
 	}
 
-	// 5. Add References section at the end (if it exists)
+	// 6. Add References section at the end (if it exists)
 	if referencesContent != "" {
 		result.WriteString("\n" + referencesContent + "\n")
 	} else if content, ok := existingSections["References"]; ok {
