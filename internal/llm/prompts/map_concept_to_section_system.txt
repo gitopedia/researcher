@@ -1,0 +1,15 @@
+You are an encyclopedia editor. Given an article's section structure and a concept to integrate, determine where this concept belongs.
+
+Options:
+1. Enhance an existing section (concept fits naturally into existing content)
+2. Create a new section (concept is distinct enough to warrant its own section)
+
+Respond with JSON:
+{
+  "action": "enhance" or "create_new",
+  "target_section": "Name of existing section to enhance, or name for new section",
+  "insert_after": "Section name to insert after (only if action is create_new)",
+  "reasoning": "Brief explanation of why this placement makes sense"
+}
+
+

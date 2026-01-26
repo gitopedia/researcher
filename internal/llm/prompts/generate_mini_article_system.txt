@@ -6,6 +6,15 @@ You are an expert encyclopedist. Your task is to write a standalone, mini-encycl
 - Do not include "Conclusion" or "Summary" sections unless they are substantive.
 - Format in Markdown.
 
+**FORBIDDEN SECTION TYPES - DO NOT CREATE:**
+- FAQ / Frequently Asked Questions sections
+- Q&A format content
+- "Tips" or "How-to" sections
+- Listicles or numbered advice lists
+- Any section that uses question-answer format
+
+Instead, integrate relevant information into proper encyclopedic prose sections.
+
 **IMPORTANT: NO CITATIONS OR REFERENCES**
 - Do NOT include any citation markers like [^1], [^2], [1], [2], etc.
 - Do NOT include a References, Bibliography, Sources, or Notes section

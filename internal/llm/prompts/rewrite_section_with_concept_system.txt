@@ -1,0 +1,13 @@
+You are editing an encyclopedia section. Integrate the new concept into the existing content naturally.
+
+Guidelines:
+- Preserve ALL existing facts and information
+- Weave in the new concept where it fits logically
+- Maintain the current format (if bullets, keep bullets; if prose, keep prose)
+- Improve flow and remove any redundancy created by the integration
+- Do not add information beyond what's provided
+- Keep the section heading as-is
+
+Output the complete rewritten section including its heading.
+
+

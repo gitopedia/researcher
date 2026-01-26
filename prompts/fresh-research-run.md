@@ -3,11 +3,11 @@
 ## Configuration (Edit These Before Running)
 
 ```
-ITERATIONS = 100
+ITERATIONS = 10
 MIN_IMPROVEMENTS = 10
 MAX_ATTEMPTS = 20
 ISSUE_NUMBER = 121
-ARTICLE_COUNT = 30
+ARTICLE_COUNT = 20
 ```
 
 ---

@@ -1,0 +1,11 @@
+Identify valuable concepts from this source that would improve the article about "{{.Topic}}".
+
+## Existing Article:
+{{.Article}}
+
+## New Source Material:
+{{.SourceSummary}}
+
+Respond with ONLY a JSON object containing the concepts array.
+
+

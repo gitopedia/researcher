@@ -5,6 +5,12 @@ Consider for EACH section in the new article:
 2. Is it substantive and valuable (not just a minor point)?
 3. Where would it logically fit in the existing article's structure?
 
+**SKIP these section types - do NOT add them:**
+- FAQ / Frequently Asked Questions
+- Q&A format sections
+- Any section using question-answer format
+- Tips, How-to, or advice sections
+
 Respond with ONLY a JSON object in this exact format:
 {
   "has_new_section": true/false,

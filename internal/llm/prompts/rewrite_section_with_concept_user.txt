@@ -1,0 +1,13 @@
+Rewrite this section about "{{.Topic}}" to integrate the new concept.
+
+## Current Section:
+{{.CurrentSection}}
+
+## Concept to Integrate:
+Name: {{.ConceptName}}
+Description: {{.ConceptDescription}}
+Source Evidence: {{.SourceEvidence}}
+
+Output ONLY the rewritten section (including the heading).
+
+

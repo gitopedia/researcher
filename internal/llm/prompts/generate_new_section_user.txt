@@ -1,0 +1,18 @@
+Create a new section for the article about "{{.Topic}}".
+
+## Existing Article (DO NOT DUPLICATE THIS CONTENT):
+{{.ExistingArticle}}
+
+## Section to Create:
+Heading: {{.SectionHeading}}
+Heading Level: {{.HeadingLevel}}
+
+## Concept Details:
+Name: {{.ConceptName}}
+Description: {{.ConceptDescription}}
+Source Evidence: {{.SourceEvidence}}
+
+IMPORTANT: Write ONLY about the concept described above. Do not repeat information already in the existing article.
+Output ONLY the new section content (including the heading).
+
+

@@ -129,7 +129,6 @@ func (m *LocalGitManager) ListDirectory(branch, path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	var names []string
 	for _, entry := range entries {
 		names = append(names, entry.Name())
@@ -157,7 +156,8 @@ func (m *LocalGitManager) AddBinaryFile(branch, path, message string, content []
 	}
 
 	if _, err := m.runGit("add", path); err != nil {
-	}
+return err
+}
 
 	_, err := m.runGit("commit", "-m", message)
 	return err

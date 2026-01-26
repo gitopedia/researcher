@@ -236,7 +236,7 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 			for _, issueNum := range pr.IssueRefs {
 				issuesWithPRs[issueNum] = true
 			}
-			if strings.HasPrefix(pr.HeadBranch, "research/") || strings.HasPrefix(pr.HeadBranch, "expand/") {
+			if strings.HasPrefix(pr.HeadBranch, "research/") {
 				managedPRs = append(managedPRs, pr)
 			}
 		}

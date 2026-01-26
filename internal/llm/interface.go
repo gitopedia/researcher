@@ -195,6 +195,28 @@ type SectionImagePromptResult struct {
 	Model  string
 }
 
+// ExtractedConcept represents a valuable concept identified from source material
+type ExtractedConcept struct {
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	SourceEvidence string `json:"source_evidence"`
+	Priority       string `json:"priority"` // "high", "medium", "low"
+}
+
+// ConceptExtraction contains the result of extracting concepts from a source
+type ConceptExtraction struct {
+	Concepts      []ExtractedConcept `json:"concepts"`
+	ReasonIfEmpty string             `json:"reason_if_empty,omitempty"`
+}
+
+// SectionMapping contains the result of mapping a concept to a target section
+type SectionMapping struct {
+	Action        string `json:"action"`         // "enhance" or "create_new"
+	TargetSection string `json:"target_section"` // Section name
+	InsertAfter   string `json:"insert_after"`   // For new sections only
+	Reasoning     string `json:"reasoning"`
+}
+
 type Generator interface {
 	GenerateArticle(ctx context.Context, topic, contextData string) (*ArticleResult, error)
 	AddReferences(ctx context.Context, article string, sources string) (string, error)
@@ -215,6 +237,12 @@ type Generator interface {
 	OrderSections(ctx context.Context, req SectionOrderRequest) (*SectionOrderResult, error)
 	MergeSection(ctx context.Context, topic, sectionTitle, currentContent, newContent string) (string, error)
 	ScoreImprovement(ctx context.Context, topic, sectionTitle, originalContent, improvedContent string) (*ImprovementScore, error)
+
+	// Concept-based improvement methods
+	ExtractConcepts(ctx context.Context, topic, article, sourceSummary string) (*ConceptExtraction, error)
+	MapConceptToSection(ctx context.Context, topic string, sections []string, concept ExtractedConcept) (*SectionMapping, error)
+	RewriteSectionWithConcept(ctx context.Context, topic, sectionContent string, concept ExtractedConcept) (string, error)
+	GenerateNewSection(ctx context.Context, topic string, concept ExtractedConcept, headingLevel int, existingArticle string) (string, error)
 
 	// Image generation methods
 	ExtractVisualElements(ctx context.Context, req VisualElementsRequest) (*VisualElements, error)

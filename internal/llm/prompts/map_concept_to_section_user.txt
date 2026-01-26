@@ -1,0 +1,12 @@
+Determine where to integrate this concept into the article about "{{.Topic}}".
+
+## Article Sections:
+{{.Sections}}
+
+## Concept to Integrate:
+Name: {{.ConceptName}}
+Description: {{.ConceptDescription}}
+
+Respond with ONLY a JSON object.
+
+

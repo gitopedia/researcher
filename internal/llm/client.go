@@ -69,10 +69,18 @@ type Client struct {
 	compareSectionsUserTemplate                  *template.Template
 	orderSectionsSystemTemplate  *template.Template
 	orderSectionsUserTemplate    *template.Template
-	mergeSectionSystemTemplate   *template.Template
-	mergeSectionUserTemplate                     *template.Template
-	scoreImprovementSystemTemplate               *template.Template
-	scoreImprovementUserTemplate                 *template.Template
+	mergeSectionSystemTemplate               *template.Template
+	mergeSectionUserTemplate                 *template.Template
+	scoreImprovementSystemTemplate           *template.Template
+	scoreImprovementUserTemplate             *template.Template
+	extractConceptsSystemTemplate            *template.Template
+	extractConceptsUserTemplate              *template.Template
+	mapConceptToSectionSystemTemplate        *template.Template
+	mapConceptToSectionUserTemplate          *template.Template
+	rewriteSectionWithConceptSystemTemplate  *template.Template
+	rewriteSectionWithConceptUserTemplate    *template.Template
+	generateNewSectionSystemTemplate         *template.Template
+	generateNewSectionUserTemplate           *template.Template
 }
 
 type ollamaChatRequest struct {
@@ -379,6 +387,46 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load score_improvement_user template: %w", err)
 	}
 
+	extractConceptsSystem, err := loadTemplate("prompts/extract_concepts_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load extract_concepts_system template: %w", err)
+	}
+
+	extractConceptsUser, err := loadTemplate("prompts/extract_concepts_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load extract_concepts_user template: %w", err)
+	}
+
+	mapConceptToSectionSystem, err := loadTemplate("prompts/map_concept_to_section_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load map_concept_to_section_system template: %w", err)
+	}
+
+	mapConceptToSectionUser, err := loadTemplate("prompts/map_concept_to_section_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load map_concept_to_section_user template: %w", err)
+	}
+
+	rewriteSectionWithConceptSystem, err := loadTemplate("prompts/rewrite_section_with_concept_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load rewrite_section_with_concept_system template: %w", err)
+	}
+
+	rewriteSectionWithConceptUser, err := loadTemplate("prompts/rewrite_section_with_concept_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load rewrite_section_with_concept_user template: %w", err)
+	}
+
+	generateNewSectionSystem, err := loadTemplate("prompts/generate_new_section_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_new_section_system template: %w", err)
+	}
+
+	generateNewSectionUser, err := loadTemplate("prompts/generate_new_section_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_new_section_user template: %w", err)
+	}
+
 	return &Client{
 		client:                            openai.NewClientWithConfig(config),
 		httpClient:                        httpClient,
@@ -427,10 +475,18 @@ func NewClient() (*Client, error) {
 		compareSectionsUserTemplate:                  compareSectionsUser,
 		orderSectionsSystemTemplate:  orderSectionsSystem,
 		orderSectionsUserTemplate:    orderSectionsUser,
-		mergeSectionSystemTemplate:   mergeSectionSystem,
-		mergeSectionUserTemplate:                     mergeSectionUser,
-		scoreImprovementSystemTemplate:               scoreImprovementSystem,
-		scoreImprovementUserTemplate:                 scoreImprovementUser,
+		mergeSectionSystemTemplate:              mergeSectionSystem,
+		mergeSectionUserTemplate:                mergeSectionUser,
+		scoreImprovementSystemTemplate:          scoreImprovementSystem,
+		scoreImprovementUserTemplate:            scoreImprovementUser,
+		extractConceptsSystemTemplate:           extractConceptsSystem,
+		extractConceptsUserTemplate:             extractConceptsUser,
+		mapConceptToSectionSystemTemplate:       mapConceptToSectionSystem,
+		mapConceptToSectionUserTemplate:         mapConceptToSectionUser,
+		rewriteSectionWithConceptSystemTemplate: rewriteSectionWithConceptSystem,
+		rewriteSectionWithConceptUserTemplate:   rewriteSectionWithConceptUser,
+		generateNewSectionSystemTemplate:        generateNewSectionSystem,
+		generateNewSectionUserTemplate:          generateNewSectionUser,
 	}, nil
 }
 
@@ -1994,4 +2050,187 @@ func (c *Client) ScoreImprovement(ctx context.Context, topic, sectionTitle, orig
 
 	log.Printf("ScoreImprovement: Score %d for '%s' in %v", result.Score, sectionTitle, time.Since(startTime))
 	return &result, nil
+}
+
+// ExtractConcepts identifies valuable concepts from source material that would add value to an article
+func (c *Client) ExtractConcepts(ctx context.Context, topic, article, sourceSummary string) (*ConceptExtraction, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.extractConceptsSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute extract_concepts system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":         topic,
+		"Article":       article,
+		"SourceSummary": sourceSummary,
+	}
+	var userBuf bytes.Buffer
+	if err := c.extractConceptsUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute extract_concepts user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelSummarizeJSON,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result ConceptExtraction
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse extract_concepts JSON: %w", err)
+	}
+
+	log.Printf("ExtractConcepts: Found %d concepts for '%s' in %v", len(result.Concepts), topic, time.Since(startTime))
+	return &result, nil
+}
+
+// MapConceptToSection determines where a concept should be integrated into an article
+func (c *Client) MapConceptToSection(ctx context.Context, topic string, sections []string, concept ExtractedConcept) (*SectionMapping, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.mapConceptToSectionSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute map_concept_to_section system template: %w", err)
+	}
+
+	// Format sections as a numbered list
+	var sectionsStr strings.Builder
+	for i, s := range sections {
+		sectionsStr.WriteString(fmt.Sprintf("%d. %s\n", i+1, s))
+	}
+
+	data := map[string]interface{}{
+		"Topic":              topic,
+		"Sections":           sectionsStr.String(),
+		"ConceptName":        concept.Name,
+		"ConceptDescription": concept.Description,
+	}
+	var userBuf bytes.Buffer
+	if err := c.mapConceptToSectionUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute map_concept_to_section user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelSummarizeJSON,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.3,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonStr := extractJSONObject(resp.Choices[0].Message.Content)
+	var result SectionMapping
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse map_concept_to_section JSON: %w", err)
+	}
+
+	log.Printf("MapConceptToSection: '%s' -> %s '%s' in %v", concept.Name, result.Action, result.TargetSection, time.Since(startTime))
+	return &result, nil
+}
+
+// RewriteSectionWithConcept rewrites an existing section to naturally incorporate a new concept
+func (c *Client) RewriteSectionWithConcept(ctx context.Context, topic, sectionContent string, concept ExtractedConcept) (string, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.rewriteSectionWithConceptSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute rewrite_section_with_concept system template: %w", err)
+	}
+
+	data := map[string]interface{}{
+		"Topic":          topic,
+		"CurrentSection": sectionContent,
+		"ConceptName":    concept.Name,
+		"ConceptDescription": concept.Description,
+		"SourceEvidence":     concept.SourceEvidence,
+	}
+	var userBuf bytes.Buffer
+	if err := c.rewriteSectionWithConceptUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute rewrite_section_with_concept user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.5,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	result := strings.TrimSpace(resp.Choices[0].Message.Content)
+	log.Printf("RewriteSectionWithConcept: Rewrote section with '%s' in %v (%d chars)", concept.Name, time.Since(startTime), len(result))
+	return result, nil
+}
+
+// GenerateNewSection creates a new section for a concept
+func (c *Client) GenerateNewSection(ctx context.Context, topic string, concept ExtractedConcept, headingLevel int, existingArticle string) (string, error) {
+	startTime := time.Now()
+
+	var systemBuf bytes.Buffer
+	if err := c.generateNewSectionSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return "", fmt.Errorf("failed to execute generate_new_section system template: %w", err)
+	}
+
+	// Create heading prefix based on level
+	headingPrefix := strings.Repeat("#", headingLevel)
+	sectionHeading := fmt.Sprintf("%s %s", headingPrefix, concept.Name)
+
+	data := map[string]interface{}{
+		"Topic":              topic,
+		"SectionHeading":     sectionHeading,
+		"HeadingLevel":       headingLevel,
+		"ConceptName":        concept.Name,
+		"ConceptDescription": concept.Description,
+		"SourceEvidence":     concept.SourceEvidence,
+		"ExistingArticle":    existingArticle,
+	}
+	var userBuf bytes.Buffer
+	if err := c.generateNewSectionUserTemplate.Execute(&userBuf, data); err != nil {
+		return "", fmt.Errorf("failed to execute generate_new_section user template: %w", err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.5,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	result := strings.TrimSpace(resp.Choices[0].Message.Content)
+	log.Printf("GenerateNewSection: Created '%s' in %v (%d chars)", concept.Name, time.Since(startTime), len(result))
+	return result, nil
 }
