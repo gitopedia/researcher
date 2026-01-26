@@ -4,20 +4,6 @@ import (
 	"context"
 )
 
-type EntityType string
-
-const (
-	Person EntityType = "person"
-	Org    EntityType = "org"
-	Place  EntityType = "place"
-	Topic  EntityType = "topic"
-)
-
-type ExtractedEntity struct {
-	Name string     `json:"name"`
-	Type EntityType `json:"type"`
-}
-
 // SourceSummary represents a summarized view of a single source page.
 type SourceSummary struct {
 	Relevant bool   `json:"relevant"`
@@ -220,7 +206,6 @@ type SectionMapping struct {
 type Generator interface {
 	GenerateArticle(ctx context.Context, topic, contextData string) (*ArticleResult, error)
 	AddReferences(ctx context.Context, article string, sources string) (string, error)
-	ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error)
 	SuggestTopics(ctx context.Context, category string, existingTopics []string) ([]string, error)
 	SummarizeSource(ctx context.Context, topic, urlStr, content string) (SourceSummary, error)
 	CategorizeArticle(ctx context.Context, title string, tags []string, content string, existingCategories []string) (*ArticleCategory, error)

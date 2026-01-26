@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gitopedia/researcher/internal/authority"
 	"github.com/gitopedia/researcher/internal/github"
 	"github.com/gitopedia/researcher/internal/llm"
 	"github.com/gitopedia/researcher/internal/repository"
@@ -418,7 +417,7 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 
 // saveSourceSummary saves a source summary to the repository
 // Used by incremental.go
-func (a *Agent) saveSourceSummary(ctx context.Context, src SourceInfo, topic, slug, branchName string, authMgr *authority.Manager, debugSources bool) error {
+func (a *Agent) saveSourceSummary(src SourceInfo, topic, slug, branchName string) error {
 	u, err := url.Parse(src.URL)
 	if err != nil {
 		return err
@@ -428,35 +427,6 @@ func (a *Agent) saveSourceSummary(ctx context.Context, src SourceInfo, topic, sl
 	sourceID := ulid.Make().String()
 	sourcePath := fmt.Sprintf("Compendium/_incoming/sources/%s--%s-%d.md", slug, domain, src.Index)
 
-	sourceEntities, err := a.llm.ExtractEntities(ctx, src.Summary)
-	if err != nil {
-		slog.Warn("Entity extraction failed for source", "error", err)
-		sourceEntities = nil
-	}
-	sourceEntities = append(sourceEntities, llm.ExtractedEntity{Name: topic, Type: llm.Topic})
-
-	resolvedSource, err := authMgr.ResolveEntities(sourceEntities)
-	if err != nil {
-		resolvedSource = make(map[string][]string)
-	}
-
-	var sourceTags []string
-	if topicIDs, ok := resolvedSource["topic"]; ok {
-		sourceTags = topicIDs
-	}
-	sourceTagsStr := fmt.Sprintf("[\"%s\"]", strings.Join(sourceTags, "\", \""))
-
-	sourceFacets := ""
-	if ids, ok := resolvedSource["person"]; ok && len(ids) > 0 {
-		sourceFacets += fmt.Sprintf("people: [\"%s\"]\n", strings.Join(ids, "\", \""))
-	}
-	if ids, ok := resolvedSource["org"]; ok && len(ids) > 0 {
-		sourceFacets += fmt.Sprintf("orgs: [\"%s\"]\n", strings.Join(ids, "\", \""))
-	}
-	if ids, ok := resolvedSource["place"]; ok && len(ids) > 0 {
-		sourceFacets += fmt.Sprintf("places: [\"%s\"]\n", strings.Join(ids, "\", \""))
-	}
-
 	sourceContent := fmt.Sprintf(`---
 id: %s
 slug: "%s--%s-%d"
@@ -465,14 +435,12 @@ url: "%s"
 type: source
 related_article: "%s"
 created: %s
-tags: %s
-%ssummary: "Summarized source material for %s"
 researcher_version: "%s"
 ---
 
 %s
 `, sourceID, slug, domain, src.Index, src.Title, src.URL, slug,
-		time.Now().UTC().Format("2006-01-02T15:04:05Z"), sourceTagsStr, sourceFacets, topic, Version, src.Summary)
+		time.Now().UTC().Format("2006-01-02T15:04:05Z"), Version, src.Summary)
 
 	return a.gh.CreateFile(branchName, sourcePath, "Add source: "+src.Title, sourceContent)
 }

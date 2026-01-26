@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gitopedia/researcher/internal/authority"
 	"github.com/gitopedia/researcher/internal/github"
 	"github.com/gitopedia/researcher/internal/search"
 )
@@ -175,9 +174,8 @@ func (a *Agent) stepExpansionIntegration(ctx context.Context, pr *github.PRInfo,
 		}
 
 		// Save Source
-		authMgr := authority.NewManager(a.gh)
 		srcInfo := SourceInfo{Index: rand.Intn(1000) + 100, URL: r.Href, Title: r.Title, Summary: mini}
-		_ = a.saveSourceSummary(ctx, srcInfo, topic, slug, branchName, authMgr, false)
+		_ = a.saveSourceSummary(srcInfo, topic, slug, branchName)
 
 		comment := fmt.Sprintf("## Expansion Integrated\n\nIntegrated content from [%s](%s).\n\nThe expansion summary used is available at:\n`%s` in branch `%s`.", r.Title, r.Href, stepDir, branchName)
 		_ = a.gh.CommentOnPR(pr.Number, comment)
@@ -349,7 +347,6 @@ func (a *Agent) fetchNewSource(ctx context.Context, topic, branchName, articlePa
 			continue
 		}
 
-		authMgr := authority.NewManager(a.gh)
 		srcInfo := SourceInfo{
 			Index:   rand.Intn(1000) + 100,
 			URL:     r.Href,
@@ -358,7 +355,7 @@ func (a *Agent) fetchNewSource(ctx context.Context, topic, branchName, articlePa
 		}
 
 		slug := strings.TrimSuffix(filepath.Base(articlePath), ".md")
-		if err := a.saveSourceSummary(ctx, srcInfo, topic, slug, branchName, authMgr, false); err != nil {
+		if err := a.saveSourceSummary(srcInfo, topic, slug, branchName); err != nil {
 			continue
 		}
 

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gitopedia/researcher/internal/authority"
 	"github.com/gitopedia/researcher/internal/github"
 	"github.com/gitopedia/researcher/internal/llm"
 	"github.com/gitopedia/researcher/internal/search"
@@ -600,10 +599,7 @@ func (a *Agent) stepSummarization(ctx context.Context, issue *gh.Issue, state *R
 		return fmt.Errorf("no relevant non-encyclopedia sources found during summarization step")
 	}
 
-	authMgr := authority.NewManager(a.gh)
-	_ = authMgr.Load("main")
-
-	if err := a.saveSourceSummary(ctx, sourceInfo, topic, slug, branchName, authMgr, false); err != nil {
+	if err := a.saveSourceSummary(sourceInfo, topic, slug, branchName); err != nil {
 		return err
 	}
 
@@ -712,12 +708,6 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 		return fmt.Errorf("failed to create branch: %w", err)
 	}
 
-	// Load authorities for entity resolution
-	authMgr := authority.NewManager(a.gh)
-	if err := authMgr.Load("main"); err != nil {
-		slog.Warn("Failed to load authorities", "error", err)
-	}
-
 	// 2. Search for source with global ignore list, metadata tracking, and pagination
 	query := topic + " explained"
 	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, nil)
@@ -735,7 +725,7 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	}
 
 	// 3. Save Source
-	if err := a.saveSourceSummary(ctx, sourceInfo, topic, slug, branchName, authMgr, false); err != nil {
+	if err := a.saveSourceSummary(sourceInfo, topic, slug, branchName); err != nil {
 		return fmt.Errorf("failed to save source: %w", err)
 	}
 
@@ -750,48 +740,18 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	id := ulid.Make()
 	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
-	// Extract entities
-	extracted, err := a.llm.ExtractEntities(ctx, miniArticle)
-	if err != nil {
-		slog.Warn("Entity extraction failed", "error", err)
-	}
-	extracted = append(extracted, llm.ExtractedEntity{Name: topic, Type: llm.Topic})
-
-	resolved, err := authMgr.ResolveEntities(extracted)
-	if err != nil {
-		slog.Warn("Entity resolution failed", "error", err)
-	}
-
-	var tags []string
-	if topicIDs, ok := resolved["topic"]; ok {
-		tags = topicIDs
-	}
-	tagsStr := fmt.Sprintf("[\"%s\"]", strings.Join(tags, "\", \""))
-
-	facetsBlock := ""
-	if ids, ok := resolved["person"]; ok && len(ids) > 0 {
-		facetsBlock += fmt.Sprintf("people: [\"%s\"]\n", strings.Join(ids, "\", \""))
-	}
-	if ids, ok := resolved["org"]; ok && len(ids) > 0 {
-		facetsBlock += fmt.Sprintf("orgs: [\"%s\"]\n", strings.Join(ids, "\", \""))
-	}
-	if ids, ok := resolved["place"]; ok && len(ids) > 0 {
-		facetsBlock += fmt.Sprintf("places: [\"%s\"]\n", strings.Join(ids, "\", \""))
-	}
-
 	frontMatter := fmt.Sprintf(`---
 id: %s
 title: "%s"
 slug: "%s"
 created: %s
-tags: %s
-%sresearcher_version: "1"
+researcher_version: "1"
 model: "%s"
 iterations: 0
 summary: "Initial overview based on %s"
 ---
 
-`, id, topic, slug, date, tagsStr, facetsBlock, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, topic, slug, date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
@@ -1148,12 +1108,6 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 
 	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
 
-	// Load authorities for entity resolution
-	authMgr := authority.NewManager(a.gh)
-	if err := authMgr.Load("main"); err != nil {
-		slog.Warn("Failed to load authorities", "error", err)
-	}
-
 	// Search for sources with global ignore list, metadata tracking, and pagination
 	query := topic + " explained"
 	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, failedSources)
@@ -1171,7 +1125,7 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 	}
 
 	// Save Source
-	if err := a.saveSourceSummary(ctx, sourceInfo, topic, slug, branchName, authMgr, false); err != nil {
+	if err := a.saveSourceSummary(sourceInfo, topic, slug, branchName); err != nil {
 		return fmt.Errorf("failed to save source: %w", err)
 	}
 
@@ -1191,48 +1145,18 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 	id := ulid.Make()
 	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
-	// Extract entities
-	extracted, err := a.llm.ExtractEntities(ctx, miniArticle)
-	if err != nil {
-		slog.Warn("Entity extraction failed", "error", err)
-	}
-	extracted = append(extracted, llm.ExtractedEntity{Name: topic, Type: llm.Topic})
-
-	resolved, err := authMgr.ResolveEntities(extracted)
-	if err != nil {
-		slog.Warn("Entity resolution failed", "error", err)
-	}
-
-	var tags []string
-	if topicIDs, ok := resolved["topic"]; ok {
-		tags = topicIDs
-	}
-	tagsStr := fmt.Sprintf("[\"%s\"]", strings.Join(tags, "\", \""))
-
-	facetsBlock := ""
-	if ids, ok := resolved["person"]; ok && len(ids) > 0 {
-		facetsBlock += fmt.Sprintf("people: [\"%s\"]\n", strings.Join(ids, "\", \""))
-	}
-	if ids, ok := resolved["org"]; ok && len(ids) > 0 {
-		facetsBlock += fmt.Sprintf("orgs: [\"%s\"]\n", strings.Join(ids, "\", \""))
-	}
-	if ids, ok := resolved["place"]; ok && len(ids) > 0 {
-		facetsBlock += fmt.Sprintf("places: [\"%s\"]\n", strings.Join(ids, "\", \""))
-	}
-
 	frontMatter := fmt.Sprintf(`---
 id: %s
 title: "%s"
 slug: "%s"
 created: %s
-tags: %s
-%sresearcher_version: "1"
+researcher_version: "1"
 model: "%s"
 iterations: 0
 summary: "Initial overview based on %s"
 ---
 
-`, id, topic, slug, date, tagsStr, facetsBlock, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, topic, slug, date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
@@ -1476,8 +1400,7 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	}
 
 	// Save source
-	authMgr := authority.NewManager(a.gh)
-	_ = a.saveSourceSummary(ctx, sourceInfo, topic, slug, branchName, authMgr, false)
+	_ = a.saveSourceSummary(sourceInfo, topic, slug, branchName)
 
 	result.SectionsAdded = addedSections
 	result.SectionName = strings.Join(addedSections, ", ")
@@ -1645,8 +1568,7 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 	}
 
 	// Save source
-	authMgr := authority.NewManager(a.gh)
-	_ = a.saveSourceSummary(ctx, sourceInfo, topic, slug, branchName, authMgr, false)
+	_ = a.saveSourceSummary(sourceInfo, topic, slug, branchName)
 
 	actionLog.WriteString(fmt.Sprintf("\n### Result\n\n- **Success:** Improved section '%s'\n", selectedSection.Title))
 	log.Printf("[Mode B] Successfully improved section '%s' in article '%s'", selectedSection.Title, topic)

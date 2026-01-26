@@ -128,10 +128,6 @@ func (m *MockLLM) AddReferences(ctx context.Context, article, sources string) (s
 	return article, nil // Return article unchanged in mock
 }
 
-func (m *MockLLM) ExtractEntities(ctx context.Context, content string) ([]llm.ExtractedEntity, error) {
-	return []llm.ExtractedEntity{}, nil
-}
-
 func (m *MockLLM) SuggestTopics(ctx context.Context, cat string, exist []string) ([]string, error) {
 	return []string{"Topic 1", "Topic 2"}, nil
 }
@@ -284,6 +280,27 @@ func (m *MockLLM) GenerateSectionImagePrompt(ctx context.Context, req llm.Sectio
 		Prompt: "A mock section image prompt",
 		Model:  "mock-model",
 	}, nil
+}
+
+func (m *MockLLM) ExtractConcepts(ctx context.Context, topic, article, sourceSummary string) (*llm.ConceptExtraction, error) {
+	return &llm.ConceptExtraction{
+		Concepts: []llm.ExtractedConcept{},
+	}, nil
+}
+
+func (m *MockLLM) MapConceptToSection(ctx context.Context, topic string, sections []string, concept llm.ExtractedConcept) (*llm.SectionMapping, error) {
+	return &llm.SectionMapping{
+		Action:        "enhance",
+		TargetSection: "Overview",
+	}, nil
+}
+
+func (m *MockLLM) RewriteSectionWithConcept(ctx context.Context, topic, sectionContent string, concept llm.ExtractedConcept) (string, error) {
+	return sectionContent, nil
+}
+
+func (m *MockLLM) GenerateNewSection(ctx context.Context, topic string, concept llm.ExtractedConcept, headingLevel int, existingArticle string) (string, error) {
+	return "## New Section\n\nContent", nil
 }
 
 func TestAgentRun(t *testing.T) {

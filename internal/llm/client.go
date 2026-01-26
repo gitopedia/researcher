@@ -25,7 +25,6 @@ type Client struct {
 	client                            *openai.Client
 	httpClient                        *http.Client
 	modelGenerateArticle              string
-	modelExtractEntities              string
 	modelSuggestTopics                string
 	modelSummarizePlain               string
 	modelSummarizeJSON                string
@@ -33,8 +32,6 @@ type Client struct {
 	ollamaBaseUrl                     string
 	generateArticleSystemTemplate     *template.Template
 	generateArticleUserTemplate       *template.Template
-	extractEntitiesSystemTemplate     *template.Template
-	extractEntitiesUserTemplate       *template.Template
 	suggestTopicsSystemTemplate       *template.Template
 	suggestTopicsUserTemplate         *template.Template
 	summarizeSourceSystemTemplate     *template.Template
@@ -129,12 +126,11 @@ func NewClient() (*Client, error) {
 	thinkMode := os.Getenv("LLM_THINK_MODE")
 
 	// Model selection
-	var modelGenerateArticle, modelExtractEntities, modelSuggestTopics, modelSummarizePlain, modelSummarizeJSON string
+	var modelGenerateArticle, modelSuggestTopics, modelSummarizePlain, modelSummarizeJSON string
 
 	// Legacy fallback
 	if legacyModel := os.Getenv("LLM_MODEL"); legacyModel != "" {
 		modelGenerateArticle = legacyModel
-		modelExtractEntities = legacyModel
 		modelSuggestTopics = legacyModel
 		modelSummarizePlain = legacyModel
 		modelSummarizeJSON = legacyModel
@@ -154,9 +150,7 @@ func NewClient() (*Client, error) {
 			}
 		}
 
-		// Article generation and entity extraction: large model for reliability
-		// Entity extraction uses the same large model because smaller models struggle
-		// to consistently output valid JSON with large inputs and thinking mode enabled
+		// Article generation: large model for reliability
 		modelArticle := os.Getenv("LLM_MODEL_ARTICLE")
 		if modelArticle == "" {
 			modelArticle = "qwen3:32b"
@@ -164,12 +158,11 @@ func NewClient() (*Client, error) {
 
 		// Assign models to tasks
 		modelGenerateArticle = modelArticle
-		modelExtractEntities = modelArticle // Use large model for reliable JSON output
 		modelSuggestTopics = modelFast
 		modelSummarizePlain = modelArticle // Use large model for comprehensive summarization
 		modelSummarizeJSON = modelFast     // Use fast model for JSON conversion
 
-		log.Printf("Multi-model configuration: Fast=%s, Article/Entity/Summarize=%s", modelFast, modelArticle)
+		log.Printf("Multi-model configuration: Fast=%s, Article/Summarize=%s", modelFast, modelArticle)
 	}
 
 	config := openai.DefaultConfig(apiKey)
@@ -185,16 +178,6 @@ func NewClient() (*Client, error) {
 	generateArticleUser, err := loadTemplate("prompts/generate_article_user.txt")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load generate_article_user template: %w", err)
-	}
-
-	extractEntitiesSystem, err := loadTemplate("prompts/extract_entities_system.txt")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load extract_entities_system template: %w", err)
-	}
-
-	extractEntitiesUser, err := loadTemplate("prompts/extract_entities_user.txt")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load extract_entities_user template: %w", err)
 	}
 
 	suggestTopicsSystem, err := loadTemplate("prompts/suggest_topics_system.txt")
@@ -431,7 +414,6 @@ func NewClient() (*Client, error) {
 		client:                            openai.NewClientWithConfig(config),
 		httpClient:                        httpClient,
 		modelGenerateArticle:              modelGenerateArticle,
-		modelExtractEntities:              modelExtractEntities,
 		modelSuggestTopics:                modelSuggestTopics,
 		modelSummarizePlain:               modelSummarizePlain,
 		modelSummarizeJSON:                modelSummarizeJSON,
@@ -439,8 +421,6 @@ func NewClient() (*Client, error) {
 		ollamaBaseUrl:                     ollamaBaseUrl,
 		generateArticleSystemTemplate:     generateArticleSystem,
 		generateArticleUserTemplate:       generateArticleUser,
-		extractEntitiesSystemTemplate:     extractEntitiesSystem,
-		extractEntitiesUserTemplate:       extractEntitiesUser,
 		suggestTopicsSystemTemplate:       suggestTopicsSystem,
 		suggestTopicsUserTemplate:         suggestTopicsUser,
 		summarizeSourceSystemTemplate:     summarizeSourceSystem,
@@ -754,214 +734,6 @@ func (c *Client) AddReferences(ctx context.Context, article string, sources stri
 	}
 	log.Printf("AddReferences: All attempts failed. Returning original article without citations.")
 	return article, nil
-}
-
-// ExtractEntities extracts named entities from content.
-// For large inputs (>8K chars), it chunks the content and merges results.
-// Thinking mode is DISABLED for entity extraction to prevent multi-hour hangs.
-func (c *Client) ExtractEntities(ctx context.Context, content string) ([]ExtractedEntity, error) {
-	startTime := time.Now()
-	const chunkSize = 8000 // 8K chars per chunk
-	const maxRetries = 3
-
-	// For large content, chunk it and process each chunk
-	if len(content) > chunkSize {
-		log.Printf("ExtractEntities: Large input (%d chars), splitting into chunks of %d", len(content), chunkSize)
-		return c.extractEntitiesChunked(ctx, content, chunkSize)
-	}
-
-	log.Printf("ExtractEntities: Starting (model: %s, input: %d chars)", c.modelExtractEntities, len(content))
-
-	// Execute system template
-	var systemBuf bytes.Buffer
-	if err := c.extractEntitiesSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return nil, fmt.Errorf("failed to execute system template: %w", err)
-	}
-
-	// Execute user template
-	data := map[string]interface{}{
-		"Content": content,
-	}
-	var userBuf bytes.Buffer
-	if err := c.extractEntitiesUserTemplate.Execute(&userBuf, data); err != nil {
-		return nil, fmt.Errorf("failed to execute user template: %w", err)
-	}
-
-	var lastError error
-	var lastRawResponse string
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Create a context with timeout to prevent multi-hour hangs
-		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		defer cancel()
-
-		var rawContent string
-
-		// Standard OpenAI-compatible API call (NO thinking mode for entity extraction)
-		messages := []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
-			{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
-		}
-
-		// On retry attempts, add the failed response and a correction message
-		if attempt > 1 && lastRawResponse != "" {
-			messages = append(messages,
-				openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: lastRawResponse},
-				openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: "That response is invalid. You must respond with ONLY a JSON array, starting with [ and ending with ]. No markdown, no explanation, no headers. Just the JSON array. Try again:"},
-			)
-			log.Printf("Entity extraction retry %d/%d after non-JSON response", attempt, maxRetries)
-		}
-
-		resp, err := c.client.CreateChatCompletion(
-			attemptCtx,
-			openai.ChatCompletionRequest{
-				Model:       c.modelExtractEntities,
-				Messages:    messages,
-				Temperature: 0.0,
-			},
-		)
-		if err != nil {
-			if attemptCtx.Err() == context.DeadlineExceeded {
-				log.Printf("ExtractEntities: Attempt %d timed out after 10 minutes", attempt)
-			}
-			lastError = err
-			continue
-		}
-		rawContent = resp.Choices[0].Message.Content
-
-		jsonStr, found := extractJSONArray(rawContent)
-
-		if !found {
-			lastRawResponse = rawContent
-			lastError = fmt.Errorf("non-JSON response: %.200s...", rawContent)
-			continue
-		}
-
-		var entities []ExtractedEntity
-		if err := json.Unmarshal([]byte(jsonStr), &entities); err != nil {
-			lastRawResponse = rawContent
-			lastError = fmt.Errorf("failed to parse entities JSON: %w (input: %q)", err, jsonStr)
-			continue
-		}
-
-		// Success
-		if attempt > 1 {
-			log.Printf("ExtractEntities: Succeeded on attempt %d", attempt)
-		}
-		log.Printf("ExtractEntities: Completed in %v, found %d entities", time.Since(startTime), len(entities))
-		return entities, nil
-	}
-
-	log.Printf("ExtractEntities: FAILED after %d attempts and %v - %v", maxRetries, time.Since(startTime), lastError)
-	return nil, fmt.Errorf("entity extraction failed after %d attempts: %w", maxRetries, lastError)
-}
-
-// extractEntitiesChunked processes large content by splitting into chunks
-func (c *Client) extractEntitiesChunked(ctx context.Context, content string, chunkSize int) ([]ExtractedEntity, error) {
-	startTime := time.Now()
-
-	// Split content into chunks at sentence boundaries
-	chunks := splitIntoChunks(content, chunkSize)
-	log.Printf("ExtractEntities: Split into %d chunks", len(chunks))
-
-	var allEntities []ExtractedEntity
-	seenEntities := make(map[string]bool) // Dedupe by name+type
-
-	for i, chunk := range chunks {
-		log.Printf("ExtractEntities: Processing chunk %d/%d (%d chars)", i+1, len(chunks), len(chunk))
-
-		entities, err := c.extractEntitiesSingle(ctx, chunk)
-		if err != nil {
-			log.Printf("ExtractEntities: Chunk %d failed: %v (continuing)", i+1, err)
-			continue // Don't fail entirely if one chunk fails
-		}
-
-		// Dedupe and merge
-		for _, e := range entities {
-			key := string(e.Type) + ":" + strings.ToLower(e.Name)
-			if !seenEntities[key] {
-				seenEntities[key] = true
-				allEntities = append(allEntities, e)
-			}
-		}
-		log.Printf("ExtractEntities: Chunk %d found %d entities (total unique: %d)", i+1, len(entities), len(allEntities))
-	}
-
-	log.Printf("ExtractEntities: Chunked extraction completed in %v, found %d unique entities", time.Since(startTime), len(allEntities))
-	return allEntities, nil
-}
-
-// extractEntitiesSingle extracts entities from a single chunk (no further splitting)
-func (c *Client) extractEntitiesSingle(ctx context.Context, content string) ([]ExtractedEntity, error) {
-	const maxRetries = 3
-
-	// Execute system template
-	var systemBuf bytes.Buffer
-	if err := c.extractEntitiesSystemTemplate.Execute(&systemBuf, nil); err != nil {
-		return nil, fmt.Errorf("failed to execute system template: %w", err)
-	}
-
-	// Execute user template
-	data := map[string]interface{}{
-		"Content": content,
-	}
-	var userBuf bytes.Buffer
-	if err := c.extractEntitiesUserTemplate.Execute(&userBuf, data); err != nil {
-		return nil, fmt.Errorf("failed to execute user template: %w", err)
-	}
-
-	var lastError error
-	var lastRawResponse string
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Create a context with timeout
-		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-
-		messages := []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
-			{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
-		}
-
-		if attempt > 1 && lastRawResponse != "" {
-			messages = append(messages,
-				openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: lastRawResponse},
-				openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: "That response is invalid. You must respond with ONLY a JSON array, starting with [ and ending with ]. No markdown, no explanation, no headers. Just the JSON array. Try again:"},
-			)
-		}
-
-		resp, err := c.client.CreateChatCompletion(
-			attemptCtx,
-			openai.ChatCompletionRequest{
-				Model:       c.modelExtractEntities,
-				Messages:    messages,
-				Temperature: 0.0,
-			},
-		)
-		cancel() // Clean up timeout context
-
-		if err != nil {
-			lastError = err
-			continue
-		}
-
-		jsonStr, found := extractJSONArray(resp.Choices[0].Message.Content)
-		if !found {
-			lastRawResponse = resp.Choices[0].Message.Content
-			lastError = fmt.Errorf("non-JSON response")
-			continue
-		}
-
-		var entities []ExtractedEntity
-		if err := json.Unmarshal([]byte(jsonStr), &entities); err != nil {
-			lastRawResponse = resp.Choices[0].Message.Content
-			lastError = fmt.Errorf("failed to parse JSON: %w", err)
-			continue
-		}
-
-		return entities, nil
-	}
-
-	return nil, lastError
 }
 
 // splitIntoChunks splits content into chunks at paragraph/sentence boundaries

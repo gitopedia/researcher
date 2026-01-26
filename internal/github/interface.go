@@ -36,8 +36,7 @@ type GitHubClient interface {
 	CloseIssue(issueNumber int) error
 	ReopenIssue(issueNumber int) error
 	ListClosedIssuesWithLabel(label string, limit int) ([]*github.Issue, error)
-	UpdatePRBranch(prNumber int) error                       // Merge base branch into PR branch to resolve conflicts
-	CreateMergeCommitWithResolution(headBranch string) error // Create merge commit resolving authority/index conflicts
+	UpdatePRBranch(prNumber int) error // Merge base branch into PR branch to resolve conflicts
 
 	// CI monitoring
 	GetFailedCILogs(prNumber int) (string, error) // Get logs from failed CI runs for a PR
