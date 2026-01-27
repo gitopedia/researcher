@@ -688,59 +688,31 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 	log.Printf("Completed %d main iterations + %d new-article improvements (%d total) for topic #%d",
 		iterations, totalImprovementIterations, totalIterations, issueNum)
 
-	// Build comprehensive summary
+	// Build summary of articles updated
 	var summaryBuilder strings.Builder
-	summaryBuilder.WriteString("## 📊 Research Bot Summary\n\n")
+	summaryBuilder.WriteString("## Research Run Summary\n\n")
 	summaryBuilder.WriteString(fmt.Sprintf("- **Branch:** `%s`\n", branchName))
 	summaryBuilder.WriteString(fmt.Sprintf("- **Duration:** %s\n", time.Since(startTime).Round(time.Second)))
-	summaryBuilder.WriteString(fmt.Sprintf("- **Iterations:** %d (+ %d per new article = %d total)\n\n",
-		iterations, totalImprovementIterations, totalIterations))
+	summaryBuilder.WriteString(fmt.Sprintf("- **Iterations:** %d\n\n", totalIterations))
 
-	// Articles created
-	if len(articlesCreated) > 0 {
-		summaryBuilder.WriteString(fmt.Sprintf("### ✅ Articles Created (%d)\n", len(articlesCreated)))
-		for _, a := range articlesCreated {
-			summaryBuilder.WriteString(fmt.Sprintf("- %s\n", a))
-		}
-		summaryBuilder.WriteString("\n")
+	// Collect all updated articles
+	updatedArticles := make(map[string]bool)
+	for _, a := range articlesCreated {
+		updatedArticles[a] = true
 	}
-
-	// Articles improved - with details
-	successfulImprovements := []*ImprovementResult{}
 	for _, r := range improvementResults {
 		if r.Success {
-			successfulImprovements = append(successfulImprovements, r)
+			updatedArticles[r.ArticleName] = true
 		}
 	}
 
-	if len(successfulImprovements) > 0 {
-		summaryBuilder.WriteString(fmt.Sprintf("### 📝 Articles Improved (%d)\n", len(successfulImprovements)))
-		for _, r := range successfulImprovements {
-			if r.Mode == "Add New Section" {
-				summaryBuilder.WriteString(fmt.Sprintf("- **%s**: Added section \"%s\"", r.ArticleName, r.SectionName))
-			} else {
-				summaryBuilder.WriteString(fmt.Sprintf("- **%s**: Improved section \"%s\" (score: %d/10)", r.ArticleName, r.SectionName, r.Score))
-			}
-			if r.SourceTitle != "" {
-				summaryBuilder.WriteString(fmt.Sprintf(" — [%s](%s)", r.SourceTitle, r.SourceURL))
-			}
-			summaryBuilder.WriteString("\n")
+	if len(updatedArticles) > 0 {
+		summaryBuilder.WriteString("**Articles updated:**\n")
+		for article := range updatedArticles {
+			summaryBuilder.WriteString(fmt.Sprintf("- %s\n", article))
 		}
-		summaryBuilder.WriteString("\n")
-	}
-
-	// Errors
-	if len(errors) > 0 {
-		summaryBuilder.WriteString(fmt.Sprintf("### ⚠️ Errors (%d)\n", len(errors)))
-		for _, e := range errors {
-			summaryBuilder.WriteString(fmt.Sprintf("- %s\n", e))
-		}
-		summaryBuilder.WriteString("\n")
-	}
-
-	// No activity
-	if len(articlesCreated) == 0 && len(successfulImprovements) == 0 {
-		summaryBuilder.WriteString("No articles were processed in this run.\n")
+	} else {
+		summaryBuilder.WriteString("No articles were updated in this run.\n")
 	}
 
 	// Post single summary comment
