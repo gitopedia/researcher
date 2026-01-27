@@ -181,7 +181,7 @@ func isIssueUnassigned(issue *gh.Issue) bool {
 	return len(issue.Assignees) == 0
 }
 
-func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error {
+func (a *Agent) Run(ctx context.Context) error {
 	// Get bot username for assignment operations
 	botUsername, err := a.gh.GetAuthenticatedUsername()
 	if err != nil {
@@ -324,9 +324,6 @@ func (a *Agent) Run(ctx context.Context, stepByStep bool, stepName string) error
 	if len(managedPRs) > 0 {
 		rand.Seed(time.Now().UnixNano())
 		pr := managedPRs[rand.Intn(len(managedPRs))]
-		if stepByStep {
-			return a.processExistingPRStepByStep(ctx, pr, stepName)
-		}
 		return a.processExistingPR(ctx, pr)
 	}
 

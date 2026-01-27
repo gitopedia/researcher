@@ -20,8 +20,6 @@ func main() {
 	// Parse CLI flags
 	mergeOnly := flag.Bool("merge-only", false, "Only run the PR merge logic, don't process new issues")
 	once := flag.Bool("once", false, "Run once and exit (no loop)")
-	stepByStep := flag.Bool("step", false, "Run in step-by-step mode, pausing for manual triggers")
-	stepName := flag.String("step-name", "", "Specific step to run (discovery, summarization, drafting, finalize)")
 	repoPath := flag.String("repo-path", "", "Path to local gitopedia repository (enables local git mode)")
 	noCommit := flag.Bool("no-commit", false, "In local mode, add changes to staging area but don't commit")
 	backfillImages := flag.Bool("backfill-images", false, "Generate image prompts and images for existing articles on current branch")
@@ -45,8 +43,6 @@ func main() {
 	log.Printf("Gitopedia Researcher v%s", agent.Version)
 	if *mergeOnly {
 		log.Println("Starting in merge-only mode...")
-	} else if *stepByStep {
-		log.Printf("Starting in step-by-step mode (Step: %s)...", *stepName)
 	} else {
 		log.Println("Starting in full mode...")
 	}
@@ -158,7 +154,7 @@ func main() {
 		if *mergeOnly {
 			err = a.MergeOnly(ctx)
 		} else {
-			err = a.Run(ctx, *stepByStep, *stepName)
+			err = a.Run(ctx)
 		}
 
 		taskMu.Lock()

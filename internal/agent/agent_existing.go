@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gitopedia/researcher/internal/github"
-	"github.com/gitopedia/researcher/internal/search"
 )
 
 type SourceInfo struct {
@@ -20,169 +18,6 @@ type SourceInfo struct {
 	URL     string
 	Title   string
 	Summary string
-}
-
-const (
-	StepExpansionDiscovery   = "expansion-discovery"
-	StepExpansionIntegration = "expansion-integration"
-)
-
-// processExistingPRStepByStep builds on an existing draft PR in stages
-func (a *Agent) processExistingPRStepByStep(ctx context.Context, pr *github.PRInfo, manualStep string) error {
-	topic := strings.TrimPrefix(pr.Title, "Research: ")
-	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
-
-	state, err := a.loadState(slug)
-	if err != nil {
-		// New state for existing PR
-		state = &ResearchState{
-			Topic:  topic,
-			Slug:   slug,
-			Branch: pr.HeadBranch,
-			Steps:  make(map[string]StepState),
-		}
-	}
-
-	stepToRun := manualStep
-	if stepToRun == "" {
-		// Auto-determine next expansion step
-		if !strings.Contains(state.LastCompletedStep, "expansion") {
-			stepToRun = StepExpansionDiscovery
-		} else if state.LastCompletedStep == StepExpansionDiscovery {
-			stepToRun = StepExpansionIntegration
-		} else {
-			// Cyclic expansion: start discovery again
-			stepToRun = StepExpansionDiscovery
-		}
-	}
-
-	log.Printf("Running expansion step '%s' for PR #%d (%s)", stepToRun, pr.Number, topic)
-
-	var runErr error
-	switch stepToRun {
-	case StepExpansionDiscovery:
-		runErr = a.stepExpansionDiscovery(ctx, pr, state)
-	case StepExpansionIntegration:
-		runErr = a.stepExpansionIntegration(ctx, pr, state)
-	default:
-		return fmt.Errorf("unknown expansion step: %s", stepToRun)
-	}
-
-	if runErr != nil {
-		return runErr
-	}
-
-	state.LastCompletedStep = stepToRun
-	state.Steps[stepToRun] = StepState{
-		Status:    "completed",
-		Timestamp: time.Now(),
-	}
-	return a.saveState(state)
-}
-
-func (a *Agent) stepExpansionDiscovery(ctx context.Context, pr *github.PRInfo, state *ResearchState) error {
-	topic := state.Topic
-	slug := state.Slug
-	branchName := state.Branch
-
-	log.Printf("[Step: Expansion Discovery] Searching for more sources for '%s'...", topic)
-
-	query := topic + " details facts"
-	results, err := a.search.Search(query)
-	if err != nil {
-		return err
-	}
-
-	// Save results to _debug folder
-	stepDir := fmt.Sprintf("%s/step-expansion-discovery", debugBasePath(slug))
-	a.saveDebugJSON(branchName, fmt.Sprintf("%s/results.json", stepDir), "Save expansion discovery results", results)
-
-	comment := fmt.Sprintf("## Expansion Discovery: %s\n\nI found %d potential sources to expand this article. I have saved them to the debug folder for your review:\n`%s` in branch `%s`.", topic, len(results), stepDir, branchName)
-	if err := a.gh.CommentOnPR(pr.Number, comment); err != nil {
-		return err
-	}
-	log.Println(comment)
-	return nil
-}
-
-func (a *Agent) stepExpansionIntegration(ctx context.Context, pr *github.PRInfo, state *ResearchState) error {
-	topic := state.Topic
-	slug := state.Slug
-	branchName := state.Branch
-	log.Printf("[Step: Expansion Integration] Integrating new source into PR #%d...", pr.Number)
-
-	// 1. Find the article file
-	files, err := a.gh.ListFilesInBranch(branchName, "Compendium/_incoming/")
-	if err != nil {
-		return err
-	}
-	var articlePath string
-	for _, f := range files {
-		if strings.HasSuffix(f, ".md") && !strings.Contains(f, "/sources/") {
-			articlePath = f
-			break
-		}
-	}
-	if articlePath == "" {
-		return fmt.Errorf("article file not found")
-	}
-
-	articleContent, articleSHA, err := a.gh.GetFile(branchName, articlePath)
-	if err != nil {
-		return err
-	}
-
-	// 2. Load discovery results
-	stepDirDiscovery := fmt.Sprintf("%s/step-expansion-discovery", debugBasePath(slug))
-	content, _, err := a.gh.GetFile(branchName, fmt.Sprintf("%s/results.json", stepDirDiscovery))
-	if err != nil {
-		return fmt.Errorf("failed to load expansion discovery results: %w", err)
-	}
-
-	var results []search.Result
-	if err := json.Unmarshal([]byte(content), &results); err != nil {
-		return err
-	}
-
-	// 3. Fetch and integrate
-	for _, r := range results {
-		if strings.HasSuffix(r.Href, ".pdf") {
-			continue
-		}
-		content, err := a.search.FetchContent(r.Href)
-		if err != nil {
-			continue
-		}
-		mini, err := a.llm.GenerateMiniArticle(ctx, topic, r.Title, content)
-		if err != nil {
-			continue
-		}
-
-		// Save expansion debug info
-		stepDir := fmt.Sprintf("%s/step-expansion-integration", debugBasePath(slug))
-		a.saveDebugText(branchName, fmt.Sprintf("%s/expansion-summary.md", stepDir), "Save expansion summary", mini)
-
-		// Integrate
-		newArticleContent, err := a.llm.IntegrateContent(ctx, topic, articleContent, mini)
-		if err != nil {
-			continue
-		}
-
-		// Update
-		if err := a.gh.UpdateFile(branchName, articlePath, "Expand article with new source", newArticleContent, articleSHA); err != nil {
-			return err
-		}
-
-		// Save Source
-		srcInfo := SourceInfo{Index: rand.Intn(1000) + 100, URL: r.Href, Title: r.Title, Summary: mini}
-		_ = a.saveSourceSummary(srcInfo, topic, slug, branchName)
-
-		comment := fmt.Sprintf("## Expansion Integrated\n\nIntegrated content from [%s](%s).\n\nThe expansion summary used is available at:\n`%s` in branch `%s`.", r.Title, r.Href, stepDir, branchName)
-		_ = a.gh.CommentOnPR(pr.Number, comment)
-		return nil
-	}
-
-	return fmt.Errorf("no new sources found to integrate")
 }
 
 func (a *Agent) processExistingPR(ctx context.Context, pr *github.PRInfo) error {

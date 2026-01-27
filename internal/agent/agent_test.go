@@ -305,7 +305,7 @@ func (m *MockLLM) GenerateNewSection(ctx context.Context, topic string, concept 
 
 func TestAgentRun(t *testing.T) {
 	agent := NewAgentWithDeps(&MockGitHub{}, &MockSearch{}, &MockLLM{})
-	if err := agent.Run(context.Background(), false, ""); err != nil {
+	if err := agent.Run(context.Background()); err != nil {
 		t.Errorf("Agent.Run failed: %v", err)
 	}
 }
