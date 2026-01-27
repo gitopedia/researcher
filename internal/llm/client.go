@@ -1259,8 +1259,8 @@ func (c *Client) ExtractVisualElements(ctx context.Context, req VisualElementsRe
 	// Execute user template
 	data := map[string]interface{}{
 		"Topic":          req.Topic,
+		"Domain":         req.Domain,
 		"Category":       req.Category,
-		"Subcategory":    req.Subcategory,
 		"ArticleContent": req.ArticleContent,
 	}
 	var userBuf bytes.Buffer
@@ -1311,8 +1311,8 @@ func (c *Client) GenerateImagePrompt(ctx context.Context, req ImagePromptRequest
 	// Execute user template
 	data := map[string]interface{}{
 		"Topic":             req.Topic,
+		"Domain":            req.Domain,
 		"Category":          req.Category,
-		"Subcategory":       req.Subcategory,
 		"ArticleSummary":    req.ArticleSummary,
 		"ExtractedElements": req.ExtractedElements,
 		"ColorMood":         req.ColorMood,
@@ -1379,8 +1379,8 @@ func (c *Client) EvaluateSectionImage(ctx context.Context, req SectionImageEvalu
 		"ArticleTitle":   req.ArticleTitle,
 		"SectionTitle":   req.SectionTitle,
 		"SectionContent": req.SectionContent,
+		"Domain":         req.Domain,
 		"Category":       req.Category,
-		"Subcategory":    req.Subcategory,
 	}
 	var userBuf bytes.Buffer
 	if err := c.evaluateSectionImageUserTemplate.Execute(&userBuf, data); err != nil {
@@ -1429,8 +1429,8 @@ func (c *Client) GenerateSectionImagePrompt(ctx context.Context, req SectionImag
 		"ArticleTitle":         req.ArticleTitle,
 		"SectionTitle":         req.SectionTitle,
 		"SectionContent":       req.SectionContent,
+		"Domain":               req.Domain,
 		"Category":             req.Category,
-		"Subcategory":          req.Subcategory,
 		"ImageType":            req.ImageType,
 		"ArtisticStyle":        req.ArtisticStyle,
 		"KeyElements":          req.KeyElements,
@@ -1568,7 +1568,7 @@ func (c *Client) ExtractSections(ctx context.Context, articleContent string) ([]
 }
 
 // SuggestNewSection suggests a new section to add to an article
-func (c *Client) SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []ArticleSection) (*NewSectionSuggestion, error) {
+func (c *Client) SuggestNewSection(ctx context.Context, domain, category, topic string, existingSections []ArticleSection) (*NewSectionSuggestion, error) {
 	startTime := time.Now()
 
 	// Format existing sections
@@ -1585,8 +1585,8 @@ func (c *Client) SuggestNewSection(ctx context.Context, category, subcategory, t
 	}
 
 	data := map[string]interface{}{
+		"Domain":           domain,
 		"Category":         category,
-		"Subcategory":      subcategory,
 		"Topic":            topic,
 		"ExistingSections": sectionsStr,
 	}

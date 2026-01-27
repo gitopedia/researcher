@@ -27,8 +27,8 @@ import (
 func main() {
 	articleSlug := flag.String("article", "", "Article slug (e.g., quantum-decoherence)")
 	repoPath := flag.String("repo-path", "../gitopedia", "Path to gitopedia repository")
-	category := flag.String("category", "Science", "Article category (used when --article is specified)")
-	subcategory := flag.String("subcategory", "Physics", "Article subcategory (used when --article is specified)")
+	domain := flag.String("domain", "Science", "Article domain (used when --article is specified)")
+	category := flag.String("category", "Physics", "Article category (used when --article is specified)")
 	outputDir := flag.String("output", "", "Output directory (defaults to repo _debug folder)")
 	dryRun := flag.Bool("dry-run", false, "Print prompts to stdout instead of writing files")
 	processAll := flag.Bool("all", false, "Process all articles in the _incoming folder")
@@ -82,12 +82,12 @@ func main() {
 				continue
 			}
 
-			cat, subcat := extractCategoryFromFrontmatter(string(content))
+			dom, cat := extractCategoryFromFrontmatter(string(content))
 			articlesToProcess = append(articlesToProcess, articleInfo{
-				slug:        slug,
-				path:        articlePath,
-				category:    cat,
-				subcategory: subcat,
+				slug:     slug,
+				path:     articlePath,
+				domain:   dom,
+				category: cat,
 			})
 		}
 		log.Printf("Found %d articles to process", len(articlesToProcess))
@@ -98,10 +98,10 @@ func main() {
 			articlePath = filepath.Join(*repoPath, "Compendium", "articles", *articleSlug+".md")
 		}
 		articlesToProcess = append(articlesToProcess, articleInfo{
-			slug:        *articleSlug,
-			path:        articlePath,
-			category:    *category,
-			subcategory: *subcategory,
+			slug:     *articleSlug,
+			path:     articlePath,
+			domain:   *domain,
+			category: *category,
 		})
 	}
 
@@ -171,10 +171,10 @@ func main() {
 }
 
 type articleInfo struct {
-	slug        string
-	path        string
-	category    string
-	subcategory string
+	slug     string
+	path     string
+	domain   string
+	category string
 }
 
 type promptInfo struct {
@@ -227,8 +227,8 @@ func processArticle(ctx context.Context, article articleInfo, llmClient *llm.Cli
 			ArticleTitle:   article.slug,
 			SectionTitle:   section.Title,
 			SectionContent: section.Content,
+			Domain:         article.domain,
 			Category:       article.category,
-			Subcategory:    article.subcategory,
 		}
 
 		startTime := time.Now()
@@ -252,7 +252,7 @@ func processArticle(ctx context.Context, article articleInfo, llmClient *llm.Cli
 		}
 
 		// Get styles and diagram specification
-		resolved := styleMgr.ResolveAll(evaluation.RecommendedType, strings.ToLower(article.category), strings.ToLower(article.subcategory))
+		resolved := styleMgr.ResolveAll(evaluation.RecommendedType, strings.ToLower(article.domain), strings.ToLower(article.category))
 		selectedStyle := ""
 		if len(resolved.ArtisticStyles) > 0 {
 			selectedStyle = resolved.ArtisticStyles[0]
@@ -268,8 +268,8 @@ func processArticle(ctx context.Context, article articleInfo, llmClient *llm.Cli
 			ArticleTitle:         article.slug,
 			SectionTitle:         section.Title,
 			SectionContent:       section.Content,
+			Domain:               article.domain,
 			Category:             article.category,
-			Subcategory:          article.subcategory,
 			ImageType:            evaluation.RecommendedType,
 			ArtisticStyle:        selectedStyle,
 			KeyElements:          evaluation.KeyElementsToVisualize,
@@ -332,7 +332,7 @@ func slugify(s string) string {
 	return result.String()
 }
 
-func extractCategoryFromFrontmatter(content string) (category, subcategory string) {
+func extractCategoryFromFrontmatter(content string) (domain, category string) {
 	lines := strings.Split(content, "\n")
 	inFrontmatter := false
 
@@ -349,22 +349,22 @@ func extractCategoryFromFrontmatter(content string) (category, subcategory strin
 			continue
 		}
 
+		if strings.HasPrefix(trimmed, "domain:") {
+			domain = strings.TrimSpace(strings.TrimPrefix(trimmed, "domain:"))
+			domain = strings.Trim(domain, "\"'")
+		}
 		if strings.HasPrefix(trimmed, "category:") {
 			category = strings.TrimSpace(strings.TrimPrefix(trimmed, "category:"))
 			category = strings.Trim(category, "\"'")
 		}
-		if strings.HasPrefix(trimmed, "subcategory:") {
-			subcategory = strings.TrimSpace(strings.TrimPrefix(trimmed, "subcategory:"))
-			subcategory = strings.Trim(subcategory, "\"'")
-		}
 	}
 
+	if domain == "" {
+		domain = "Science"
+	}
 	if category == "" {
-		category = "Science"
-	}
-	if subcategory == "" {
-		subcategory = "Physics"
+		category = "Physics"
 	}
 
-	return category, subcategory
+	return domain, category
 }

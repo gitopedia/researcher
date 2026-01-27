@@ -124,7 +124,7 @@ func countWords(s string) int {
 }
 
 // EvaluateSectionForImage evaluates if a section should have an image
-func (a *Agent) EvaluateSectionForImage(ctx context.Context, articleTitle string, section SectionInfo, category, subcategory string) (*llm.SectionImageEvaluationResult, error) {
+func (a *Agent) EvaluateSectionForImage(ctx context.Context, articleTitle string, section SectionInfo, domain, category string) (*llm.SectionImageEvaluationResult, error) {
 	config := GetSectionImageConfig()
 
 	// Check minimum thresholds
@@ -138,8 +138,8 @@ func (a *Agent) EvaluateSectionForImage(ctx context.Context, articleTitle string
 		ArticleTitle:   articleTitle,
 		SectionTitle:   section.Title,
 		SectionContent: section.Content,
+		Domain:         domain,
 		Category:       category,
-		Subcategory:    subcategory,
 	}
 
 	result, err := a.llm.EvaluateSectionImage(ctx, req)
@@ -158,7 +158,7 @@ func (a *Agent) EvaluateSectionForImage(ctx context.Context, articleTitle string
 }
 
 // GenerateSectionImagePrompt generates an image prompt for a section
-func (a *Agent) GenerateSectionImagePrompt(ctx context.Context, articleTitle string, section SectionInfo, category, subcategory string, evaluation *llm.SectionImageEvaluationResult) (*llm.SectionImagePromptResult, error) {
+func (a *Agent) GenerateSectionImagePrompt(ctx context.Context, articleTitle string, section SectionInfo, domain, category string, evaluation *llm.SectionImageEvaluationResult) (*llm.SectionImagePromptResult, error) {
 	if evaluation == nil || evaluation.RecommendedType == "" || evaluation.RecommendedType == "none" {
 		return nil, nil
 	}
@@ -174,8 +174,8 @@ func (a *Agent) GenerateSectionImagePrompt(ctx context.Context, articleTitle str
 		log.Printf("[Section Image] Failed to load styles, using defaults: %v", err)
 	}
 
-	// Get styles for this category and image type
-	resolved := styleMgr.ResolveAll(evaluation.RecommendedType, strings.ToLower(category), strings.ToLower(subcategory))
+	// Get styles for this domain/category and image type
+	resolved := styleMgr.ResolveAll(evaluation.RecommendedType, strings.ToLower(domain), strings.ToLower(category))
 	selectedStyle := ""
 	if len(resolved.ArtisticStyles) > 0 {
 		selectedStyle = resolved.ArtisticStyles[0]
@@ -188,8 +188,8 @@ func (a *Agent) GenerateSectionImagePrompt(ctx context.Context, articleTitle str
 		ArticleTitle:         articleTitle,
 		SectionTitle:         section.Title,
 		SectionContent:       section.Content,
+		Domain:               domain,
 		Category:             category,
-		Subcategory:          subcategory,
 		ImageType:            evaluation.RecommendedType,
 		ArtisticStyle:        selectedStyle,
 		KeyElements:          evaluation.KeyElementsToVisualize,
@@ -200,7 +200,7 @@ func (a *Agent) GenerateSectionImagePrompt(ctx context.Context, articleTitle str
 }
 
 // ProcessArticleSections processes all sections in an article for image generation
-func (a *Agent) ProcessArticleSections(ctx context.Context, branchName, articleName, articleContent, category, subcategory string) error {
+func (a *Agent) ProcessArticleSections(ctx context.Context, branchName, articleName, articleContent, domain, category string) error {
 	sections := ExtractSections(articleContent)
 
 	log.Printf("[Section Images] Processing %d sections for %s", len(sections), articleName)
@@ -213,7 +213,7 @@ func (a *Agent) ProcessArticleSections(ctx context.Context, branchName, articleN
 		}
 
 		// Evaluate section
-		evaluation, err := a.EvaluateSectionForImage(ctx, articleName, section, category, subcategory)
+		evaluation, err := a.EvaluateSectionForImage(ctx, articleName, section, domain, category)
 		if err != nil {
 			log.Printf("[Section Images] Error evaluating section '%s': %v", section.Title, err)
 			continue
@@ -229,7 +229,7 @@ func (a *Agent) ProcessArticleSections(ctx context.Context, branchName, articleN
 		}
 
 		// Generate prompt
-		result, err := a.GenerateSectionImagePrompt(ctx, articleName, section, category, subcategory, evaluation)
+		result, err := a.GenerateSectionImagePrompt(ctx, articleName, section, domain, category, evaluation)
 		if err != nil {
 			log.Printf("[Section Images] Error generating prompt for section '%s': %v", section.Title, err)
 			continue

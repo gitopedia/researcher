@@ -616,10 +616,13 @@ func (a *Agent) stepSummarization(ctx context.Context, issue *gh.Issue, state *R
 }
 
 func (a *Agent) stepDrafting(ctx context.Context, issue *gh.Issue, state *ResearchState) error {
-	topic := state.Topic
+	articleTitle := state.Topic
 	slug := state.Slug
 	branchName := state.Branch
-	log.Printf("[Step: Drafting] Generating article for '%s'...", topic)
+	log.Printf("[Step: Drafting] Generating article for '%s'...", articleTitle)
+
+	// Extract category context from issue title if available
+	domain, category, topicName := extractCategoryContext(issue.GetTitle())
 
 	// Find the summarized source
 	stepDirSummary := fmt.Sprintf("%s/step-2-summarization", debugBasePath(slug))
@@ -634,7 +637,7 @@ func (a *Agent) stepDrafting(ctx context.Context, issue *gh.Issue, state *Resear
 	}
 
 	log.Printf("Loaded summary from %s: %d characters", summaryPath, len(summary))
-	miniArticle, err := a.llm.GenerateMiniArticle(ctx, topic, "Source", summary)
+	miniArticle, err := a.llm.GenerateMiniArticle(ctx, articleTitle, "Source", summary)
 	if err != nil {
 		return err
 	}
@@ -642,7 +645,7 @@ func (a *Agent) stepDrafting(ctx context.Context, issue *gh.Issue, state *Resear
 	// Create Article File
 	id := ulid.Make()
 	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	frontMatter := fmt.Sprintf("---\nid: %s\ntitle: \"%s\"\nslug: \"%s\"\ncreated: %s\nresearcher_version: \"1\"\niterations: 0\n---\n\n", id, topic, slug, date)
+	frontMatter := fmt.Sprintf("---\nid: %s\narticle: \"%s\"\nslug: \"%s\"\ndomain: \"%s\"\ncategory: \"%s\"\ntopic: \"%s\"\ncreated: %s\nresearcher_version: \"1\"\niterations: 0\n---\n\n", id, articleTitle, slug, domain, category, topicName, date)
 	fullContent := frontMatter + miniArticle
 
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
@@ -678,9 +681,9 @@ func cleanTopic(title string) string {
 	return topic
 }
 
-// extractCategoryContext extracts category, subcategory, and topic from issue title
+// extractCategoryContext extracts domain, category, and topic from issue title
 // e.g., "Science > Physics > Quantum Mechanics" -> ("Science", "Physics", "Quantum Mechanics")
-func extractCategoryContext(issueTitle string) (category, subcategory, topic string) {
+func extractCategoryContext(issueTitle string) (domain, category, topic string) {
 	parts := strings.Split(issueTitle, " > ")
 	if len(parts) >= 3 {
 		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
@@ -695,12 +698,15 @@ func extractCategoryContext(issueTitle string) (category, subcategory, topic str
 // processNewTopic handles the creation of a new research topic from scratch.
 func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	title := *issue.Title
-	topic := cleanTopic(title)
+	articleTitle := cleanTopic(title)
 
-	log.Printf("Starting NEW TOPIC flow for Issue #%d: '%s'", *issue.Number, topic)
+	log.Printf("Starting NEW TOPIC flow for Issue #%d: '%s'", *issue.Number, articleTitle)
 
-	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
+	slug := strings.ToLower(strings.ReplaceAll(articleTitle, " ", "-"))
 	branchName := fmt.Sprintf("research/%s-%s", slug, time.Now().Format("20060102-150405"))
+
+	// Extract category context from issue title if available
+	domain, category, topicName := extractCategoryContext(title)
 
 	// 1. Create Branch
 	log.Printf("Creating branch %s...", branchName)
@@ -709,8 +715,8 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	}
 
 	// 2. Search for source with global ignore list, metadata tracking, and pagination
-	query := topic + " explained"
-	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, nil)
+	query := articleTitle + " explained"
+	searchResult, err := a.findUsableSourceWithSummary(ctx, articleTitle, query, slug, branchName, nil)
 	if err != nil {
 		return err
 	}
@@ -725,13 +731,13 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	}
 
 	// 3. Save Source
-	if err := a.saveSourceSummary(sourceInfo, topic, slug, branchName); err != nil {
+	if err := a.saveSourceSummary(sourceInfo, articleTitle, slug, branchName); err != nil {
 		return fmt.Errorf("failed to save source: %w", err)
 	}
 
 	// 4. Generate Mini Article (Overview)
 	log.Printf("Generating mini-article from source...")
-	miniArticle, err := a.llm.GenerateMiniArticle(ctx, topic, sourceInfo.Title, sourceInfo.Summary)
+	miniArticle, err := a.llm.GenerateMiniArticle(ctx, articleTitle, sourceInfo.Title, sourceInfo.Summary)
 	if err != nil {
 		return fmt.Errorf("failed to generate mini article: %w", err)
 	}
@@ -742,8 +748,11 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 
 	frontMatter := fmt.Sprintf(`---
 id: %s
-title: "%s"
+article: "%s"
 slug: "%s"
+domain: "%s"
+category: "%s"
+topic: "%s"
 created: %s
 researcher_version: "1"
 model: "%s"
@@ -751,14 +760,14 @@ iterations: 0
 summary: "Initial overview based on %s"
 ---
 
-`, id, topic, slug, date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, articleTitle, slug, domain, category, topicName, date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
 	fullContent := frontMatter + cleanedMiniArticle + fmt.Sprintf("\n\n## References\n\n[^1]: [%s](%s)", sourceInfo.Title, sourceInfo.URL)
 
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
-	if err := a.gh.CreateFile(branchName, articlePath, fmt.Sprintf("Init article: %s", topic), fullContent); err != nil {
+	if err := a.gh.CreateFile(branchName, articlePath, fmt.Sprintf("Init article: %s", articleTitle), fullContent); err != nil {
 		return fmt.Errorf("failed to create article file: %w", err)
 	}
 
@@ -925,8 +934,8 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 			}
 
 			// Generate image prompt after improvements complete
-			category, subcategory, _ := extractCategoryContext(issue.GetTitle())
-			if err := a.generateHeaderImagePrompt(ctx, article.Name, branchName, category, subcategory); err != nil {
+			domain, category, _ := extractCategoryContext(issue.GetTitle())
+			if err := a.generateHeaderImagePrompt(ctx, article.Name, branchName, domain, category); err != nil {
 				slog.Warn("Failed to generate image prompt", "article", article.Name, "error", err)
 				errors = append(errors, fmt.Sprintf("Failed to generate image prompt for '%s': %v", article.Name, err))
 			} else {
@@ -941,7 +950,7 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 				if err != nil {
 					slog.Warn("Failed to read article for section images", "article", article.Name, "error", err)
 				} else {
-					if err := a.ProcessArticleSections(ctx, branchName, articleSlug, articleContent, category, subcategory); err != nil {
+					if err := a.ProcessArticleSections(ctx, branchName, articleSlug, articleContent, domain, category); err != nil {
 						slog.Warn("Failed to process section images", "article", article.Name, "error", err)
 					}
 				}
@@ -1101,16 +1110,19 @@ func (a *Agent) checkOffArticle(issueNum int, articleName string) error {
 // processNewArticle creates a new article for the given article name using a shared branch
 // This is similar to processNewTopic but uses a pre-created branch and explicit article name
 func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleName, branchName string, failedSources map[string]bool) error {
-	topic := cleanTopic(articleName)
+	articleTitle := cleanTopic(articleName)
 	issueNum := *issue.Number
 
-	log.Printf("Creating NEW article '%s' for Issue #%d", topic, issueNum)
+	log.Printf("Creating NEW article '%s' for Issue #%d", articleTitle, issueNum)
 
-	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
+	slug := strings.ToLower(strings.ReplaceAll(articleTitle, " ", "-"))
+
+	// Extract category context from issue title (e.g., "Science > Physics > Quantum Mechanics")
+	domain, category, topicName := extractCategoryContext(issue.GetTitle())
 
 	// Search for sources with global ignore list, metadata tracking, and pagination
-	query := topic + " explained"
-	searchResult, err := a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, failedSources)
+	query := articleTitle + " explained"
+	searchResult, err := a.findUsableSourceWithSummary(ctx, articleTitle, query, slug, branchName, failedSources)
 	if err != nil {
 		return err
 	}
@@ -1125,13 +1137,13 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 	}
 
 	// Save Source
-	if err := a.saveSourceSummary(sourceInfo, topic, slug, branchName); err != nil {
+	if err := a.saveSourceSummary(sourceInfo, articleTitle, slug, branchName); err != nil {
 		return fmt.Errorf("failed to save source: %w", err)
 	}
 
 	// Generate Mini Article (Overview)
 	log.Printf("Generating mini-article from source...")
-	miniArticle, err := a.llm.GenerateMiniArticle(ctx, topic, sourceInfo.Title, sourceInfo.Summary)
+	miniArticle, err := a.llm.GenerateMiniArticle(ctx, articleTitle, sourceInfo.Title, sourceInfo.Summary)
 	if err != nil {
 		// Mark this source as failed so we don't retry it
 		if failedSources != nil {
@@ -1147,8 +1159,11 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 
 	frontMatter := fmt.Sprintf(`---
 id: %s
-title: "%s"
+article: "%s"
 slug: "%s"
+domain: "%s"
+category: "%s"
+topic: "%s"
 created: %s
 researcher_version: "1"
 model: "%s"
@@ -1156,18 +1171,18 @@ iterations: 0
 summary: "Initial overview based on %s"
 ---
 
-`, id, topic, slug, date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, articleTitle, slug, domain, category, topicName, date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
 	fullContent := frontMatter + cleanedMiniArticle + fmt.Sprintf("\n\n## References\n\n[^1]: [%s](%s)", sourceInfo.Title, sourceInfo.URL)
 
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
-	if err := a.gh.CreateFile(branchName, articlePath, fmt.Sprintf("Add article: %s", topic), fullContent); err != nil {
+	if err := a.gh.CreateFile(branchName, articlePath, fmt.Sprintf("Add article: %s", articleTitle), fullContent); err != nil {
 		return fmt.Errorf("failed to create article file: %w", err)
 	}
 
-	log.Printf("Successfully created article '%s'", topic)
+	log.Printf("Successfully created article '%s'", articleTitle)
 	return nil
 }
 
@@ -1220,12 +1235,12 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 
 	// Extract category context from issue title
 	issueTitle := issue.GetTitle()
-	category, subcategory, topicName := extractCategoryContext(issueTitle)
+	domain, category, topicName := extractCategoryContext(issueTitle)
 
 	if useAddNewSection {
-		err = a.improveModeAddSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources, category, subcategory, topicName)
+		err = a.improveModeAddSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources, domain, category, topicName)
 	} else {
-		err = a.improveModeImproveSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources, category, subcategory, topicName)
+		err = a.improveModeImproveSection(ctx, topic, slug, branchName, articlePath, articleContent, articleSHA, existingSections, &actionLog, result, failedSources, domain, category, topicName)
 	}
 
 	// Save action log to debug folder
@@ -1242,12 +1257,12 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 }
 
 // improveModeAddSection implements Mode A: Find new source, create temp article, add new section
-func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool, category, subcategory, topicName string) error {
-	log.Printf("[Mode A] Asking LLM to suggest a new section for topic '%s' (%s > %s > %s)", topic, category, subcategory, topicName)
+func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool, domain, category, topicName string) error {
+	log.Printf("[Mode A] Asking LLM to suggest a new section for topic '%s' (%s > %s > %s)", topic, domain, category, topicName)
 	actionLog.WriteString("\n### Suggest New Section\n\n")
 
 	// Ask LLM to suggest what new section to add and provide a search query
-	suggestion, err := a.llm.SuggestNewSection(ctx, category, subcategory, topicName, existingSections)
+	suggestion, err := a.llm.SuggestNewSection(ctx, domain, category, topicName, existingSections)
 	if err != nil {
 		actionLog.WriteString(fmt.Sprintf("- **Error:** Failed to get section suggestion: %v\n", err))
 		return fmt.Errorf("failed to get section suggestion: %w", err)
@@ -1440,8 +1455,8 @@ func selectSectionWeighted(sections []llm.ArticleSection) *llm.ArticleSection {
 }
 
 // improveModeImproveSection implements Mode B: Select existing section, search for details, improve it
-func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool, category, subcategory, topicName string) error {
-	log.Printf("[Mode B] Improving existing section for topic '%s' (%s > %s > %s)", topic, category, subcategory, topicName)
+func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, branchName, articlePath, articleContent, articleSHA string, existingSections []llm.ArticleSection, actionLog *strings.Builder, result *ImprovementResult, failedSources map[string]bool, domain, category, topicName string) error {
+	log.Printf("[Mode B] Improving existing section for topic '%s' (%s > %s > %s)", topic, domain, category, topicName)
 
 	if len(existingSections) == 0 {
 		actionLog.WriteString("- **Result:** No sections found to improve\n")
@@ -1489,7 +1504,7 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 	}
 
 	// Generate search query using deterministic template (more reliable than LLM)
-	query := fmt.Sprintf("%s %s %s %s", category, subcategory, topicName, selectedSection.Title)
+	query := fmt.Sprintf("%s %s %s %s", domain, category, topicName, selectedSection.Title)
 	log.Printf("[Mode B] Searching with query: %s", query)
 	actionLog.WriteString(fmt.Sprintf("- **Search query:** %s\n", query))
 
@@ -2014,11 +2029,11 @@ func appendReference(content string, sourceTitle, sourceURL string) string {
 }
 
 // generateHeaderImagePrompt generates an image prompt for the article header and saves it to the debug folder
-func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, branchName, category, subcategory string) error {
-	topic := cleanTopic(articleName)
-	slug := strings.ToLower(strings.ReplaceAll(topic, " ", "-"))
+func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, branchName, domain, category string) error {
+	articleTitle := cleanTopic(articleName)
+	slug := strings.ToLower(strings.ReplaceAll(articleTitle, " ", "-"))
 
-	log.Printf("[Image Prompt] Generating header image prompt for '%s' (%s > %s)", topic, category, subcategory)
+	log.Printf("[Image Prompt] Generating header image prompt for '%s' (%s > %s)", articleTitle, domain, category)
 
 	// Load the article content
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
@@ -2030,9 +2045,9 @@ func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, bran
 	// Step 1: Extract article-specific visual elements using LLM
 	log.Printf("[Image Prompt] Extracting visual elements from article...")
 	visualReq := llm.VisualElementsRequest{
-		Topic:          topic,
+		Topic:          articleTitle,
+		Domain:         domain,
 		Category:       category,
-		Subcategory:    subcategory,
 		ArticleContent: articleContent,
 	}
 	visualElements, err := a.llm.ExtractVisualElements(ctx, visualReq)
@@ -2054,8 +2069,8 @@ func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, bran
 	}
 
 	// Resolve category-based configuration (for styles and colors)
-	// Lowercase category/subcategory to match YAML keys
-	resolved := styleMgr.ResolveAll("header", strings.ToLower(category), strings.ToLower(subcategory))
+	// Lowercase domain/category to match YAML keys
+	resolved := styleMgr.ResolveAll("header", strings.ToLower(domain), strings.ToLower(category))
 
 	// Select 1-2 random artistic styles from config
 	numStyles := 1
@@ -2069,9 +2084,9 @@ func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, bran
 
 	// Step 2: Generate the image prompt with structured elements (not flattened)
 	req := llm.ImagePromptRequest{
-		Topic:             topic,
+		Topic:             articleTitle,
+		Domain:            domain,
 		Category:          category,
-		Subcategory:       subcategory,
 		ArticleSummary:    summary,
 		ExtractedElements: visualElements, // Pass full structured extraction
 		ColorMood:         colorMood,
@@ -2088,9 +2103,9 @@ func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, bran
 	debugDir := debugBasePath(slug)
 	extractionDebugPath := fmt.Sprintf("%s/extraction_debug.json", debugDir)
 	extractionDebug := map[string]interface{}{
-		"topic":       topic,
-		"category":    category,
-		"subcategory": subcategory,
+		"article":  articleTitle,
+		"domain":   domain,
+		"category": category,
 		"extraction": map[string]interface{}{
 			"key_concepts":       visualElements.KeyConcepts,
 			"specific_phenomena": visualElements.SpecificPhenomena,
@@ -2105,14 +2120,14 @@ func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, bran
 		"generated_at": time.Now().UTC().Format(time.RFC3339),
 	}
 	extractionJSON, _ := json.MarshalIndent(extractionDebug, "", "  ")
-	if err := a.gh.CreateFile(branchName, extractionDebugPath, fmt.Sprintf("Add extraction debug for %s", topic), string(extractionJSON)); err != nil {
+	if err := a.gh.CreateFile(branchName, extractionDebugPath, fmt.Sprintf("Add extraction debug for %s", articleTitle), string(extractionJSON)); err != nil {
 		slog.Warn("Failed to save extraction debug", "error", err)
 	}
 
 	// Save the prompt to the debug folder with extraction details
 	promptPath := fmt.Sprintf("%s/header_image_prompt.txt", debugDir)
-	promptContent := fmt.Sprintf("# Header Image Prompt for: %s\n", topic)
-	promptContent += fmt.Sprintf("# Category: %s > %s\n", category, subcategory)
+	promptContent := fmt.Sprintf("# Header Image Prompt for: %s\n", articleTitle)
+	promptContent += fmt.Sprintf("# Domain > Category: %s > %s\n", domain, category)
 	promptContent += fmt.Sprintf("# Styles: %s\n", strings.Join(selectedStyles, ", "))
 	promptContent += fmt.Sprintf("# Color Mood: %s\n", colorMood)
 	promptContent += fmt.Sprintf("# Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
@@ -2139,7 +2154,7 @@ func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, bran
 	promptContent += "\n"
 	promptContent += result.Prompt
 
-	if err := a.gh.CreateFile(branchName, promptPath, fmt.Sprintf("Add header image prompt for %s", topic), promptContent); err != nil {
+	if err := a.gh.CreateFile(branchName, promptPath, fmt.Sprintf("Add header image prompt for %s", articleTitle), promptContent); err != nil {
 		return fmt.Errorf("failed to save image prompt: %w", err)
 	}
 
@@ -2147,7 +2162,6 @@ func (a *Agent) generateHeaderImagePrompt(ctx context.Context, articleName, bran
 
 	return nil
 }
-
 
 // extractArticleSummary extracts a summary from the article content
 // It tries to get the intro section (content before the first ## heading after frontmatter)

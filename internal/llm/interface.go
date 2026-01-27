@@ -120,16 +120,16 @@ type VisualElements struct {
 // VisualElementsRequest contains the input for visual element extraction
 type VisualElementsRequest struct {
 	Topic          string
+	Domain         string
 	Category       string
-	Subcategory    string
 	ArticleContent string
 }
 
 // ImagePromptRequest contains the input for image prompt generation
 type ImagePromptRequest struct {
 	Topic             string
+	Domain            string
 	Category          string
-	Subcategory       string
 	ArticleSummary    string
 	ExtractedElements *VisualElements
 	ColorMood         string
@@ -149,8 +149,8 @@ type SectionImageEvaluationRequest struct {
 	ArticleTitle   string
 	SectionTitle   string
 	SectionContent string
+	Domain         string
 	Category       string
-	Subcategory    string
 }
 
 // SectionImageEvaluationResult contains the evaluation scores for different image types
@@ -167,8 +167,8 @@ type SectionImagePromptRequest struct {
 	ArticleTitle         string
 	SectionTitle         string
 	SectionContent       string
+	Domain               string
 	Category             string
-	Subcategory          string
 	ImageType            string
 	ArtisticStyle        string
 	KeyElements          []string
@@ -217,7 +217,7 @@ type Generator interface {
 	IntegrateContent(ctx context.Context, topic, existingArticle, newContent string) (string, error)
 	IsEncyclopediaSource(ctx context.Context, domain, url, title string) (*EncyclopediaCheckResult, error)
 	ExtractSections(ctx context.Context, articleContent string) ([]ArticleSection, error)
-	SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []ArticleSection) (*NewSectionSuggestion, error)
+	SuggestNewSection(ctx context.Context, domain, category, topic string, existingSections []ArticleSection) (*NewSectionSuggestion, error)
 	CompareSections(ctx context.Context, topic, existingArticle, existingSections, newArticle, newSections string) (*SectionComparison, error)
 	OrderSections(ctx context.Context, req SectionOrderRequest) (*SectionOrderResult, error)
 	MergeSection(ctx context.Context, topic, sectionTitle, currentContent, newContent string) (string, error)

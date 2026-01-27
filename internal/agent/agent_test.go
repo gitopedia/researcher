@@ -219,7 +219,7 @@ func (m *MockLLM) ExtractSections(ctx context.Context, articleContent string) ([
 	}, nil
 }
 
-func (m *MockLLM) SuggestNewSection(ctx context.Context, category, subcategory, topic string, existingSections []llm.ArticleSection) (*llm.NewSectionSuggestion, error) {
+func (m *MockLLM) SuggestNewSection(ctx context.Context, domain, category, topic string, existingSections []llm.ArticleSection) (*llm.NewSectionSuggestion, error) {
 	return &llm.NewSectionSuggestion{
 		SectionTitle: "Mock Section",
 		InsertAfter:  "Overview",
