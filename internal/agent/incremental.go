@@ -651,18 +651,21 @@ func (a *Agent) stepDrafting(ctx context.Context, issue *gh.Issue, state *Resear
 
 	frontMatter := fmt.Sprintf(`---
 id: %s
-article: "%s"
-slug: "%s"
 domain: "%s"
+domain-slug: "%s"
 category: "%s"
+category-slug: "%s"
 topic: "%s"
+topic-slug: "%s"
+article: "%s"
+article-slug: "%s"
 github_issue_ids: %s
 created: %s
 researcher_version: "1"
 iterations: 0
 ---
 
-`, id, articleTitle, slug, domain, category, topicName, formatIssueIDChain(issueIDs), date)
+`, id, domain, toSlug(domain), category, toSlug(category), topicName, toSlug(topicName), articleTitle, slug, formatIssueIDChain(issueIDs), date)
 	fullContent := frontMatter + miniArticle
 
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
@@ -768,11 +771,14 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 
 	frontMatter := fmt.Sprintf(`---
 id: %s
-article: "%s"
-slug: "%s"
 domain: "%s"
+domain-slug: "%s"
 category: "%s"
+category-slug: "%s"
 topic: "%s"
+topic-slug: "%s"
+article: "%s"
+article-slug: "%s"
 github_issue_ids: %s
 created: %s
 researcher_version: "1"
@@ -781,7 +787,7 @@ iterations: 0
 summary: "Initial overview based on %s"
 ---
 
-`, id, articleTitle, slug, domain, category, topicName, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, domain, toSlug(domain), category, toSlug(category), topicName, toSlug(topicName), articleTitle, slug, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
@@ -1183,11 +1189,14 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 
 	frontMatter := fmt.Sprintf(`---
 id: %s
-article: "%s"
-slug: "%s"
 domain: "%s"
+domain-slug: "%s"
 category: "%s"
+category-slug: "%s"
 topic: "%s"
+topic-slug: "%s"
+article: "%s"
+article-slug: "%s"
 github_issue_ids: %s
 created: %s
 researcher_version: "1"
@@ -1196,7 +1205,7 @@ iterations: 0
 summary: "Initial overview based on %s"
 ---
 
-`, id, articleTitle, slug, domain, category, topicName, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, domain, toSlug(domain), category, toSlug(category), topicName, toSlug(topicName), articleTitle, slug, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
@@ -2339,4 +2348,9 @@ func formatIssueIDChain(ids []int) string {
 		parts[i] = strconv.Itoa(id)
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// toSlug converts a string to a URL-friendly slug
+func toSlug(s string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), " ", "-"))
 }
