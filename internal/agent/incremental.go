@@ -755,6 +755,14 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		slog.Warn("Failed to post summary comment", "issue", issueNum, "error", err)
 	}
 
+	// Update github_pr_ids in each article's frontmatter
+	prNumber := pr.GetNumber()
+	for articleName := range updatedArticles {
+		if err := a.addPRToArticleFrontmatter(branchName, articleName, prNumber); err != nil {
+			slog.Warn("Failed to add PR ID to article frontmatter", "article", articleName, "pr", prNumber, "error", err)
+		}
+	}
+
 	// Add "pending review" label to the issue
 	if err := a.gh.AddLabel(issueNum, LabelPendingReview); err != nil {
 		slog.Warn("Failed to add pending review label", "issue", issueNum, "error", err)
@@ -771,6 +779,96 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		}
 	}
 
+	return nil
+}
+
+// addPRToArticleFrontmatter adds a PR number to the github_pr_ids field in an article's frontmatter
+func (a *Agent) addPRToArticleFrontmatter(branchName, articleName string, prNumber int) error {
+	slug := strings.ToLower(strings.ReplaceAll(articleName, " ", "-"))
+	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
+
+	content, sha, err := a.gh.GetFile(branchName, articlePath)
+	if err != nil {
+		return fmt.Errorf("failed to get article file: %w", err)
+	}
+
+	// Parse frontmatter
+	if !strings.HasPrefix(content, "---") {
+		return fmt.Errorf("article has no frontmatter")
+	}
+	parts := strings.SplitN(content, "---", 3)
+	if len(parts) < 3 {
+		return fmt.Errorf("malformed frontmatter")
+	}
+
+	frontmatter := parts[1]
+	body := parts[2]
+
+	// Check if github_pr_ids already exists
+	if strings.Contains(frontmatter, "github_pr_ids:") {
+		// Add to existing list
+		lines := strings.Split(frontmatter, "\n")
+		for i, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "github_pr_ids:") {
+				// Parse existing IDs and add new one
+				existing := strings.TrimPrefix(strings.TrimSpace(line), "github_pr_ids:")
+				existing = strings.TrimSpace(existing)
+				existing = strings.Trim(existing, "[]")
+				
+				var ids []string
+				if existing != "" {
+					for _, id := range strings.Split(existing, ",") {
+						ids = append(ids, strings.TrimSpace(id))
+					}
+				}
+				
+				// Check if PR already in list
+				prStr := strconv.Itoa(prNumber)
+				found := false
+				for _, id := range ids {
+					if id == prStr {
+						found = true
+						break
+					}
+				}
+				if !found {
+					ids = append(ids, prStr)
+				}
+				
+				lines[i] = fmt.Sprintf("github_pr_ids: [%s]", strings.Join(ids, ", "))
+				break
+			}
+		}
+		frontmatter = strings.Join(lines, "\n")
+	} else {
+		// Add new field after github_issue_ids
+		lines := strings.Split(frontmatter, "\n")
+		var newLines []string
+		added := false
+		for _, line := range lines {
+			newLines = append(newLines, line)
+			if strings.HasPrefix(strings.TrimSpace(line), "github_issue_ids:") && !added {
+				newLines = append(newLines, fmt.Sprintf("github_pr_ids: [%d]", prNumber))
+				added = true
+			}
+		}
+		if !added {
+			// If github_issue_ids not found, add before the closing ---
+			newLines = append(newLines[:len(newLines)-1], fmt.Sprintf("github_pr_ids: [%d]", prNumber))
+			newLines = append(newLines, "")
+		}
+		frontmatter = strings.Join(newLines, "\n")
+	}
+
+	// Reconstruct content
+	newContent := fmt.Sprintf("---%s---%s", frontmatter, body)
+
+	// Update file
+	if err := a.gh.UpdateFile(branchName, articlePath, fmt.Sprintf("Add PR #%d to article frontmatter", prNumber), newContent, sha); err != nil {
+		return fmt.Errorf("failed to update article file: %w", err)
+	}
+
+	log.Printf("Added PR #%d to frontmatter of '%s'", prNumber, articleName)
 	return nil
 }
 
