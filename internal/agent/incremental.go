@@ -466,7 +466,6 @@ article: "%s"
 article-slug: "%s"
 github_issue_ids: %s
 created: %s
-researcher_version: "1"
 model: "%s"
 iterations: 0
 ---
@@ -952,7 +951,6 @@ article: "%s"
 article-slug: "%s"
 github_issue_ids: %s
 created: %s
-researcher_version: "1"
 model: "%s"
 iterations: 0
 ---
@@ -1422,18 +1420,21 @@ func reorderArticleSections(article string, orderedTitles []string, newSections 
 	}
 
 	// 2. Extract intro content (content between frontmatter and first heading)
+	// Note: We don't write intro directly - it will be converted to Overview if needed
 	var introContent strings.Builder
 	for i := frontmatterEnd; i < len(lines); i++ {
 		trimmed := strings.TrimSpace(lines[i])
 		if strings.HasPrefix(trimmed, "#") {
 			break
 		}
-		introContent.WriteString(lines[i] + "\n")
+		// Skip image lines (e.g., ![Header](...)) - they should be preserved separately
+		if strings.HasPrefix(trimmed, "![") {
+			result.WriteString("\n" + lines[i] + "\n")
+		} else if trimmed != "" {
+			introContent.WriteString(lines[i] + "\n")
+		}
 	}
 	intro := strings.TrimSpace(introContent.String())
-	if intro != "" {
-		result.WriteString("\n" + intro + "\n")
-	}
 
 	// 3. Build a map of existing section titles to their content
 	existingSections := make(map[string]string)
@@ -1466,6 +1467,29 @@ func reorderArticleSections(article string, orderedTitles []string, newSections 
 	// Save last section
 	if inSection && currentTitle != "" {
 		existingSections[currentTitle] = strings.TrimSpace(currentContent.String())
+	}
+
+	// 3b. Handle intro content: convert to Overview if no Overview exists, otherwise discard
+	if intro != "" {
+		if _, hasOverview := existingSections["Overview"]; !hasOverview {
+			// Convert intro to Overview section
+			existingSections["Overview"] = "## Overview\n\n" + intro
+			// Insert Overview at the beginning of the order if not already present
+			hasOverviewInOrder := false
+			for _, t := range existingOrder {
+				if t == "Overview" {
+					hasOverviewInOrder = true
+					break
+				}
+			}
+			if !hasOverviewInOrder {
+				existingOrder = append([]string{"Overview"}, existingOrder...)
+			}
+			slog.Info("reorderArticleSections: converted intro content to Overview section")
+		} else {
+			// Overview exists, discard intro (it's redundant)
+			slog.Info("reorderArticleSections: discarded intro content (Overview section already exists)")
+		}
 	}
 
 	// 4. DEFENSIVE CHECK: Verify orderedTitles contains all existing sections (except References)

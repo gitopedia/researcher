@@ -26,9 +26,8 @@ type DomainRecord struct {
 
 // ProtectedDomainsDelta represents new domain records to be exported
 type ProtectedDomainsDelta struct {
-	ExportedAt        time.Time                `json:"exported_at"`
-	ResearcherVersion string                   `json:"researcher_version"`
-	Domains           map[string]*DomainRecord `json:"domains"`
+	ExportedAt time.Time                `json:"exported_at"`
+	Domains    map[string]*DomainRecord `json:"domains"`
 }
 
 // ProtectedDomains manages the list of domains that are known to be protected
@@ -237,7 +236,7 @@ func (pd *ProtectedDomains) GetDeltaCount() int {
 // ExportDelta generates a delta file containing only domains added/updated during this session.
 // Returns the filename and content, or empty strings if no delta exists.
 // The filename is uniquely named with a timestamp.
-func (pd *ProtectedDomains) ExportDelta(researcherVersion string) (filename string, content string, err error) {
+func (pd *ProtectedDomains) ExportDelta() (filename string, content string, err error) {
 	pd.mu.RLock()
 	defer pd.mu.RUnlock()
 
@@ -247,9 +246,8 @@ func (pd *ProtectedDomains) ExportDelta(researcherVersion string) (filename stri
 
 	now := time.Now()
 	delta := ProtectedDomainsDelta{
-		ExportedAt:        now,
-		ResearcherVersion: researcherVersion,
-		Domains:           make(map[string]*DomainRecord),
+		ExportedAt: now,
+		Domains:    make(map[string]*DomainRecord),
 	}
 
 	// Copy session domains to delta

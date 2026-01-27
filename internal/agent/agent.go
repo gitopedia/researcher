@@ -441,12 +441,11 @@ url: "%s"
 type: source
 related_article: "%s"
 created: %s
-researcher_version: "%s"
 ---
 
 %s
 `, sourceID, slug, domain, src.Index, src.Title, src.URL, slug,
-		time.Now().UTC().Format("2006-01-02T15:04:05Z"), Version, src.Summary)
+		time.Now().UTC().Format("2006-01-02T15:04:05Z"), src.Summary)
 
 	return a.gh.CreateFile(branchName, sourcePath, "Add source: "+src.Title, sourceContent)
 }
