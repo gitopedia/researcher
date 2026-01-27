@@ -182,3 +182,53 @@ func (m *LocalGitManager) ResetToMain() error {
 	_, err := m.runGit("pull", "origin", "main")
 	return err
 }
+// ListFilesInBranch lists all files under a given path in the local repository
+func (m *LocalGitManager) ListFilesInBranch(branch, path string) ([]string, error) {
+fullPath := filepath.Join(m.repoPath, path)
+var files []string
+
+err := filepath.Walk(fullPath, func(filePath string, info os.FileInfo, err error) error {
+if err != nil {
+return err
+}
+if !info.IsDir() {
+relPath, err := filepath.Rel(m.repoPath, filePath)
+if err != nil {
+return err
+}
+files = append(files, filepath.ToSlash(relPath))
+}
+return nil
+})
+
+if err != nil {
+return nil, err
+}
+return files, nil
+}
+
+// DeleteFile removes a file from the local repository
+func (m *LocalGitManager) DeleteFile(branch, path, message, sha string) error {
+fullPath := filepath.Join(m.repoPath, path)
+
+if err := os.Remove(fullPath); err != nil {
+return err
+}
+
+if m.noCommit {
+return nil
+}
+
+if _, err := m.runGit("add", path); err != nil {
+return err
+}
+
+_, err := m.runGit("commit", "-m", message)
+return err
+}
+
+// UpdatePRBranch merges main into the current branch (for local mode)
+func (m *LocalGitManager) UpdatePRBranch(prNumber int) error {
+_, err := m.runGit("merge", "main", "--no-edit")
+return err
+}

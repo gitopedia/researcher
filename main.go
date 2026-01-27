@@ -24,6 +24,7 @@ func main() {
 	noCommit := flag.Bool("no-commit", false, "In local mode, add changes to staging area but don't commit")
 	backfillImages := flag.Bool("backfill-images", false, "Generate image prompts and images for existing articles on current branch")
 	generateImages := flag.Bool("generate-images", false, "Only generate images from existing prompts (skip prompt generation)")
+	organizeBranch := flag.String("organize", "", "Organize articles from _incoming on specified branch (e.g., research/topic-121-...)")
 	flag.Parse()
 
 	// Initialize structured, colorized logging using Go's standard library slog,
@@ -125,6 +126,19 @@ func main() {
 		log.Println("Image generation complete")
 
 		log.Println("Image processing complete")
+		logging.Close()
+		return
+	}
+
+	// Handle organize mode - organize articles from _incoming on a specific branch
+	if *organizeBranch != "" {
+		log.Printf("Organizing articles on branch: %s", *organizeBranch)
+
+		if err := a.OrganizeArticlesOnBranch(*organizeBranch); err != nil {
+			log.Fatalf("Failed to organize articles: %v", err)
+		}
+
+		log.Println("Article organization complete")
 		logging.Close()
 		return
 	}

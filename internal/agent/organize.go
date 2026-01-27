@@ -27,6 +27,16 @@ type ArticleInfo struct {
 	SHA            string
 }
 
+// OrganizeArticlesOnBranch is a public method to organize articles on a specific branch
+// Can be called via CLI with --organize flag
+func (a *Agent) OrganizeArticlesOnBranch(branchName string) error {
+	pr := &github.PRInfo{
+		HeadBranch: branchName,
+		Number:     0,
+	}
+	return a.organizeIncomingArticles(pr)
+}
+
 // organizeIncomingArticles moves articles from _incoming to their correct locations
 // and updates index files as needed. This should be called before PR merge.
 func (a *Agent) organizeIncomingArticles(pr *github.PRInfo) error {
