@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -521,5 +523,46 @@ func (a *Agent) cleanupWorkingFolders(branchName string) {
 				slog.Warn("Failed to delete file during cleanup", "file", file, "error", err)
 			}
 		}
+
+		// Remove empty directories locally if in local mode
+		if a.gh.IsLocal() {
+			a.removeEmptyDirs(folder)
+		}
 	}
+}
+
+// removeEmptyDirs removes a directory and all empty parent directories
+func (a *Agent) removeEmptyDirs(path string) {
+	repoMgr, ok := a.gh.(interface{ GetRepoPath() string })
+	if !ok {
+		return
+	}
+	repoPath := repoMgr.GetRepoPath()
+	fullPath := filepath.Join(repoPath, path)
+
+	// Walk the directory tree bottom-up and remove empty directories
+	filepath.Walk(fullPath, func(p string, info os.FileInfo, err error) error {
+		return nil // Just traverse, we'll handle deletion after
+	})
+
+	// Remove the directory tree (will only remove if empty)
+	removeEmptyDirTree(fullPath)
+}
+
+// removeEmptyDirTree removes empty directories bottom-up
+func removeEmptyDirTree(path string) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return
+	}
+
+	// First, recursively clean subdirectories
+	for _, entry := range entries {
+		if entry.IsDir() {
+			removeEmptyDirTree(filepath.Join(path, entry.Name()))
+		}
+	}
+
+	// Then try to remove this directory (will fail if not empty, which is fine)
+	os.Remove(path)
 }
