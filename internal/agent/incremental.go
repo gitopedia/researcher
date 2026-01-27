@@ -645,7 +645,24 @@ func (a *Agent) stepDrafting(ctx context.Context, issue *gh.Issue, state *Resear
 	// Create Article File
 	id := ulid.Make()
 	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	frontMatter := fmt.Sprintf("---\nid: %s\narticle: \"%s\"\nslug: \"%s\"\ndomain: \"%s\"\ncategory: \"%s\"\ntopic: \"%s\"\ncreated: %s\nresearcher_version: \"1\"\niterations: 0\n---\n\n", id, articleTitle, slug, domain, category, topicName, date)
+
+	// Get the chain of GitHub issue IDs (index -> domain -> category -> topic)
+	issueIDs := a.getIssueIDChain(*issue.Number)
+
+	frontMatter := fmt.Sprintf(`---
+id: %s
+article: "%s"
+slug: "%s"
+domain: "%s"
+category: "%s"
+topic: "%s"
+github_issue_ids: %s
+created: %s
+researcher_version: "1"
+iterations: 0
+---
+
+`, id, articleTitle, slug, domain, category, topicName, formatIssueIDChain(issueIDs), date)
 	fullContent := frontMatter + miniArticle
 
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
@@ -746,6 +763,9 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 	id := ulid.Make()
 	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
+	// Get the chain of GitHub issue IDs (index -> domain -> category -> topic)
+	issueIDs := a.getIssueIDChain(*issue.Number)
+
 	frontMatter := fmt.Sprintf(`---
 id: %s
 article: "%s"
@@ -753,6 +773,7 @@ slug: "%s"
 domain: "%s"
 category: "%s"
 topic: "%s"
+github_issue_ids: %s
 created: %s
 researcher_version: "1"
 model: "%s"
@@ -760,7 +781,7 @@ iterations: 0
 summary: "Initial overview based on %s"
 ---
 
-`, id, articleTitle, slug, domain, category, topicName, date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, articleTitle, slug, domain, category, topicName, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
@@ -1157,6 +1178,9 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 	id := ulid.Make()
 	date := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
+	// Get the chain of GitHub issue IDs (index -> domain -> category -> topic)
+	issueIDs := a.getIssueIDChain(*issue.Number)
+
 	frontMatter := fmt.Sprintf(`---
 id: %s
 article: "%s"
@@ -1164,6 +1188,7 @@ slug: "%s"
 domain: "%s"
 category: "%s"
 topic: "%s"
+github_issue_ids: %s
 created: %s
 researcher_version: "1"
 model: "%s"
@@ -1171,7 +1196,7 @@ iterations: 0
 summary: "Initial overview based on %s"
 ---
 
-`, id, articleTitle, slug, domain, category, topicName, date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, articleTitle, slug, domain, category, topicName, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
@@ -2239,4 +2264,79 @@ func getEnvOrDefault(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+// extractParentIssueID extracts the parent issue ID from an issue body
+// Looks for patterns like "**Parent:** [...](https://github.com/.../issues/123)"
+// or "**Domain:** [...](https://github.com/.../issues/123)"
+func extractParentIssueID(body string) int {
+	// Look for GitHub issue URLs in parent/domain links
+	patterns := []string{"**Parent:**", "**Domain:**", "**Category:**"}
+
+	for _, pattern := range patterns {
+		idx := strings.Index(body, pattern)
+		if idx == -1 {
+			continue
+		}
+
+		// Find the issue URL after this pattern
+		remaining := body[idx:]
+		urlStart := strings.Index(remaining, "/issues/")
+		if urlStart == -1 {
+			continue
+		}
+
+		// Extract the number after /issues/
+		numStart := urlStart + len("/issues/")
+		numEnd := numStart
+		for numEnd < len(remaining) && remaining[numEnd] >= '0' && remaining[numEnd] <= '9' {
+			numEnd++
+		}
+
+		if numEnd > numStart {
+			if num, err := strconv.Atoi(remaining[numStart:numEnd]); err == nil {
+				return num
+			}
+		}
+	}
+
+	return 0
+}
+
+// getIssueIDChain returns the chain of issue IDs from index to topic
+// Returns [indexID, domainID, categoryID, topicID] in order
+func (a *Agent) getIssueIDChain(topicIssueNumber int) []int {
+	var chain []int
+
+	// Walk up the parent chain starting from topic issue
+	currentIssueNum := topicIssueNumber
+	for currentIssueNum > 0 {
+		chain = append([]int{currentIssueNum}, chain...) // Prepend
+
+		issue, err := a.gh.GetIssue(currentIssueNum)
+		if err != nil {
+			log.Printf("Warning: could not get issue %d: %v", currentIssueNum, err)
+			break
+		}
+
+		parentID := extractParentIssueID(issue.GetBody())
+		if parentID == 0 {
+			break
+		}
+		currentIssueNum = parentID
+	}
+
+	return chain
+}
+
+// formatIssueIDChain formats issue IDs as a YAML list like [126, 127, 124, 121]
+func formatIssueIDChain(ids []int) string {
+	if len(ids) == 0 {
+		return "[]"
+	}
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.Itoa(id)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
