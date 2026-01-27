@@ -688,14 +688,7 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 	log.Printf("Completed %d main iterations + %d new-article improvements (%d total) for topic #%d",
 		iterations, totalImprovementIterations, totalIterations, issueNum)
 
-	// Build summary of articles updated
-	var summaryBuilder strings.Builder
-	summaryBuilder.WriteString("## Research Run Summary\n\n")
-	summaryBuilder.WriteString(fmt.Sprintf("- **Branch:** `%s`\n", branchName))
-	summaryBuilder.WriteString(fmt.Sprintf("- **Duration:** %s\n", time.Since(startTime).Round(time.Second)))
-	summaryBuilder.WriteString(fmt.Sprintf("- **Iterations:** %d\n\n", totalIterations))
-
-	// Collect all updated articles
+	// Collect all updated articles for summary
 	updatedArticles := make(map[string]bool)
 	for _, a := range articlesCreated {
 		updatedArticles[a] = true
@@ -704,20 +697,6 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		if r.Success {
 			updatedArticles[r.ArticleName] = true
 		}
-	}
-
-	if len(updatedArticles) > 0 {
-		summaryBuilder.WriteString("**Articles updated:**\n")
-		for article := range updatedArticles {
-			summaryBuilder.WriteString(fmt.Sprintf("- %s\n", article))
-		}
-	} else {
-		summaryBuilder.WriteString("No articles were updated in this run.\n")
-	}
-
-	// Post single summary comment
-	if err := a.gh.CommentOnIssue(issueNum, summaryBuilder.String()); err != nil {
-		slog.Warn("Failed to post summary comment", "issue", issueNum, "error", err)
 	}
 
 	// Run image generation as finalization step (if enabled)
@@ -755,6 +734,26 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		return fmt.Errorf("failed to create PR: %w", err)
 	}
 	log.Printf("Created PR #%d: %s", pr.GetNumber(), prTitle)
+
+	// Post summary comment with PR link
+	var summaryBuilder strings.Builder
+	summaryBuilder.WriteString("## Research Run Summary\n\n")
+	summaryBuilder.WriteString(fmt.Sprintf("- **PR:** #%d\n", pr.GetNumber()))
+	summaryBuilder.WriteString(fmt.Sprintf("- **Duration:** %s\n", time.Since(startTime).Round(time.Second)))
+	summaryBuilder.WriteString(fmt.Sprintf("- **Iterations:** %d\n\n", totalIterations))
+
+	if len(updatedArticles) > 0 {
+		summaryBuilder.WriteString("**Articles updated:**\n")
+		for article := range updatedArticles {
+			summaryBuilder.WriteString(fmt.Sprintf("- %s\n", article))
+		}
+	} else {
+		summaryBuilder.WriteString("No articles were updated in this run.\n")
+	}
+
+	if err := a.gh.CommentOnIssue(issueNum, summaryBuilder.String()); err != nil {
+		slog.Warn("Failed to post summary comment", "issue", issueNum, "error", err)
+	}
 
 	// Add "pending review" label to the issue
 	if err := a.gh.AddLabel(issueNum, LabelPendingReview); err != nil {
