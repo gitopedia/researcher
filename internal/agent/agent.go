@@ -400,6 +400,15 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 
 		if !status.Draft && status.CIStatus == "success" && status.Mergeable != nil && *status.Mergeable {
 			log.Printf("PR #%d is ready to merge!", pr.Number)
+
+			// Step 1: Organize incoming articles before merge
+			log.Printf("Organizing articles for PR #%d...", pr.Number)
+			if err := a.organizeIncomingArticles(pr); err != nil {
+				slog.Error("Failed to organize articles", "pr", pr.Number, "error", err)
+				continue // Skip merge if organization fails
+			}
+
+			// Step 2: Merge the PR
 			commitMsg := fmt.Sprintf("Merge PR #%d: automated content expansion", pr.Number)
 			if err := a.gh.MergePR(pr.Number, commitMsg); err != nil {
 				slog.Error("Failed to merge PR", "pr", pr.Number, "error", err)
