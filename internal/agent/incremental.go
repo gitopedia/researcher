@@ -469,10 +469,9 @@ created: %s
 researcher_version: "1"
 model: "%s"
 iterations: 0
-summary: "Initial overview based on %s"
 ---
 
-`, id, domain, toSlug(domain), category, toSlug(category), topicName, toSlug(topicName), articleTitle, slug, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, domain, toSlug(domain), category, toSlug(category), topicName, toSlug(topicName), articleTitle, slug, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"))
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
@@ -814,14 +813,14 @@ func (a *Agent) addPRToArticleFrontmatter(branchName, articleName string, prNumb
 				existing := strings.TrimPrefix(strings.TrimSpace(line), "github_pr_ids:")
 				existing = strings.TrimSpace(existing)
 				existing = strings.Trim(existing, "[]")
-				
+
 				var ids []string
 				if existing != "" {
 					for _, id := range strings.Split(existing, ",") {
 						ids = append(ids, strings.TrimSpace(id))
 					}
 				}
-				
+
 				// Check if PR already in list
 				prStr := strconv.Itoa(prNumber)
 				found := false
@@ -834,7 +833,7 @@ func (a *Agent) addPRToArticleFrontmatter(branchName, articleName string, prNumb
 				if !found {
 					ids = append(ids, prStr)
 				}
-				
+
 				lines[i] = fmt.Sprintf("github_pr_ids: [%s]", strings.Join(ids, ", "))
 				break
 			}
@@ -956,10 +955,9 @@ created: %s
 researcher_version: "1"
 model: "%s"
 iterations: 0
-summary: "Initial overview based on %s"
 ---
 
-`, id, domain, toSlug(domain), category, toSlug(category), topicName, toSlug(topicName), articleTitle, slug, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"), sourceInfo.Title)
+`, id, domain, toSlug(domain), category, toSlug(category), topicName, toSlug(topicName), articleTitle, slug, formatIssueIDChain(issueIDs), date, os.Getenv("LLM_MODEL_ARTICLE"))
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
