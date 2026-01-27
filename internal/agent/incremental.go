@@ -711,7 +711,7 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 	}
 
 	// Check if PR creation is enabled
-	createPR := getEnvBool("CREATE_PR_AFTER_ITERATIONS", false)
+	createPR := getEnvBool("CREATE_PR_AFTER_ITERATIONS", true)
 	if !createPR {
 		log.Printf("PR creation disabled (CREATE_PR_AFTER_ITERATIONS=false). Branch '%s' ready for manual review.", branchName)
 		// Still unassign the bot so the topic can be picked up again if needed
