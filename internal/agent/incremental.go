@@ -727,7 +727,7 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 
 	// Create PR
 	prTitle := fmt.Sprintf("Research: %s", topicTitle)
-	prBody := fmt.Sprintf("Automated research for topic issue #%d: %s\n\nCloses #%d", issueNum, topicTitle, issueNum)
+	prBody := fmt.Sprintf("Automated research for topic issue #%d: %s\n\nRelated to #%d", issueNum, topicTitle, issueNum)
 	pr, err := a.gh.CreatePullRequest(prTitle, prBody, branchName, "main")
 	if err != nil {
 		slog.Error("Failed to create PR", "error", err)
