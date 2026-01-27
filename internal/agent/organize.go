@@ -87,6 +87,9 @@ func (a *Agent) organizeIncomingArticles(pr *github.PRInfo) error {
 
 	if len(articles) == 0 {
 		log.Println("No articles found in _incoming to organize")
+		// Still run cleanup even if no articles to move
+		log.Println("Cleaning up working folders...")
+		a.cleanupWorkingFolders(branchName)
 		return nil
 	}
 
@@ -137,9 +140,9 @@ func (a *Agent) organizeIncomingArticles(pr *github.PRInfo) error {
 		}
 	}
 
-	// Step 6: Clean up _incoming folder (remove sources, .meta, _debug, _config)
-	log.Println("Cleaning up _incoming folder...")
-	a.cleanupIncomingFolder(branchName)
+	// Step 6: Clean up working folders (_incoming, _debug, _config)
+	log.Println("Cleaning up working folders...")
+	a.cleanupWorkingFolders(branchName)
 
 	return nil
 }
@@ -493,13 +496,13 @@ func (a *Agent) updateTopicIndex(branchName string, domain *DomainIndex, categor
 	return a.gh.CreateFile(branchName, indexPath, fmt.Sprintf("Create %s index", topic.Name), content)
 }
 
-// cleanupIncomingFolder removes sources, .meta, _debug, _config from _incoming
-func (a *Agent) cleanupIncomingFolder(branchName string) {
+// cleanupWorkingFolders removes _incoming, _debug, and _config folders from Compendium
+func (a *Agent) cleanupWorkingFolders(branchName string) {
+	// Folders to completely remove (all at Compendium/ root level)
 	foldersToClean := []string{
-		"Compendium/_incoming/sources",
-		"Compendium/_incoming/.meta",
-		"Compendium/_incoming/_debug",
-		"Compendium/_incoming/_config",
+		"Compendium/_incoming",
+		"Compendium/_debug",
+		"Compendium/_config",
 	}
 
 	for _, folder := range foldersToClean {
@@ -508,6 +511,7 @@ func (a *Agent) cleanupIncomingFolder(branchName string) {
 			continue // Folder might not exist
 		}
 
+		log.Printf("Cleaning up %s (%d files)...", folder, len(files))
 		for _, file := range files {
 			_, sha, err := a.gh.GetFile(branchName, file)
 			if err != nil {
@@ -516,22 +520,6 @@ func (a *Agent) cleanupIncomingFolder(branchName string) {
 			if err := a.gh.DeleteFile(branchName, file, "Cleanup: remove "+file, sha); err != nil {
 				slog.Warn("Failed to delete file during cleanup", "file", file, "error", err)
 			}
-		}
-	}
-
-	// Also clean up any remaining files in _incoming (like images)
-	files, err := a.gh.ListFilesInBranch(branchName, "Compendium/_incoming")
-	if err != nil {
-		return
-	}
-
-	for _, file := range files {
-		_, sha, err := a.gh.GetFile(branchName, file)
-		if err != nil {
-			continue
-		}
-		if err := a.gh.DeleteFile(branchName, file, "Cleanup: remove "+file, sha); err != nil {
-			slog.Warn("Failed to delete file during cleanup", "file", file, "error", err)
 		}
 	}
 }
