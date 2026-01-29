@@ -195,6 +195,14 @@ mathematics:
     - equation typography art
     - number theory abstract
   
+  algebra:
+    header:
+      - algebraic equation art
+      - variable symbol patterns
+      - matrix visualization
+      - polynomial curve design
+      - abstract algebraic structures
+  
   geometry:
     header:
       - sacred geometry patterns
@@ -202,4 +210,143 @@ mathematics:
       - tessellation design
       - polyhedra visualization
       - geometric proof aesthetic
+  
+  calculus:
+    header:
+      - integral curve visualization
+      - derivative slope patterns
+      - limit convergence art
+      - differential equation flow
+      - infinite series aesthetic
+  
+  statistics:
+    header:
+      - data distribution visualization
+      - probability curve design
+      - statistical chart patterns
+      - bell curve aesthetic
+      - regression line art
+
+# Engineering category
+engineering:
+  header:
+    - technical blueprint style
+    - isometric engineering diagrams
+    - precision measurement aesthetic
+    - industrial design patterns
+    - structural analysis visualization
+  
+  civil:
+    header:
+      - architectural blueprint design
+      - structural framework visualization
+      - bridge engineering aesthetic
+      - construction diagram style
+      - urban infrastructure patterns
+  
+  mechanical:
+    header:
+      - gear mechanism visualization
+      - fluid dynamics patterns
+      - thermodynamic diagram style
+      - machine component aesthetic
+      - kinematic chain design
+  
+  electrical:
+    header:
+      - circuit diagram visualization
+      - electromagnetic field patterns
+      - power grid aesthetic
+      - signal wave design
+      - electronic component art
+  
+  chemical:
+    header:
+      - process flow diagram style
+      - reactor vessel visualization
+      - chemical plant aesthetic
+      - distillation column patterns
+      - molecular process design
+
+# Medicine category
+medicine:
+  header:
+    - anatomical illustration style
+    - medical diagram visualization
+    - healthcare symbol design
+    - clinical precision aesthetic
+    - biological systems patterns
+  
+  anatomy:
+    header:
+      - anatomical cross-section style
+      - organ system visualization
+      - skeletal structure design
+      - muscular diagram aesthetic
+      - medical illustration patterns
+  
+  pharmacology:
+    header:
+      - molecular drug design style
+      - pharmaceutical visualization
+      - medication symbol patterns
+      - chemical compound aesthetic
+      - therapeutic pathway design
+  
+  pathology:
+    header:
+      - cellular pathology visualization
+      - disease mechanism diagrams
+      - tissue sample aesthetic
+      - diagnostic pattern design
+      - medical microscopy style
+  
+  publichealth:
+    header:
+      - epidemiological chart style
+      - population health visualization
+      - disease spread patterns
+      - public health symbol design
+      - healthcare system aesthetic
+
+# Computer Science category
+computerscience:
+  header:
+    - algorithm flowchart style
+    - binary code visualization
+    - data structure patterns
+    - computational diagram aesthetic
+    - digital logic design
+  
+  algorithms:
+    header:
+      - sorting visualization style
+      - graph traversal patterns
+      - complexity diagram design
+      - recursive structure aesthetic
+      - computational flow art
+  
+  artificialintelligence:
+    header:
+      - neural network visualization
+      - machine learning patterns
+      - AI node connection design
+      - deep learning aesthetic
+      - cognitive computing style
+  
+  networking:
+    header:
+      - network topology visualization
+      - data packet flow patterns
+      - protocol layer design
+      - connectivity diagram aesthetic
+      - distributed system style
+  
+  databases:
+    header:
+      - entity relationship diagram
+      - data schema visualization
+      - table structure patterns
+      - query flow aesthetic
+      - database architecture design
 

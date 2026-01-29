@@ -225,9 +225,7 @@ return err
 
 _, err := m.runGit("commit", "-m", message)
 return err
-}
-
-// UpdatePRBranch merges main into the current branch (for local mode)
+}// UpdatePRBranch merges main into the current branch (for local mode)
 func (m *LocalGitManager) UpdatePRBranch(prNumber int) error {
 _, err := m.runGit("merge", "main", "--no-edit")
 return err

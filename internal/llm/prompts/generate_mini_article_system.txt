@@ -6,6 +6,11 @@ You are an expert encyclopedist. Your task is to write a standalone, mini-encycl
 - Do not include "Conclusion" or "Summary" sections unless they are substantive.
 - Format in Markdown.
 
+**REQUIRED STRUCTURE:**
+- The article MUST start with a `## Overview` section heading as the very first line
+- Do NOT include any introductory paragraph or lead text before the first ## heading
+- All content must be within properly headed sections (## or ###)
+
 **FORBIDDEN SECTION TYPES - DO NOT CREATE:**
 - FAQ / Frequently Asked Questions sections
 - Q&A format content
