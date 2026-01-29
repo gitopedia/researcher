@@ -181,6 +181,23 @@ type SectionImagePromptResult struct {
 	Model  string
 }
 
+// IndexImagePromptRequest contains the input for index header image prompt generation
+type IndexImagePromptRequest struct {
+	IndexType      string   // "domain", "category", or "topic"
+	Name           string   // e.g., "Science", "Physics", "Quantum Mechanics"
+	Domain         string   // Parent domain (empty for domain-level)
+	Category       string   // Parent category (empty for domain/category-level)
+	ChildItems     []string // List of categories/topics/articles contained
+	ColorMood      string
+	ArtisticStyles []string
+}
+
+// IndexImagePromptResult contains the generated index image prompt
+type IndexImagePromptResult struct {
+	Prompt string
+	Model  string
+}
+
 // ExtractedConcept represents a valuable concept identified from source material
 type ExtractedConcept struct {
 	Name           string `json:"name"`
@@ -234,6 +251,7 @@ type Generator interface {
 	GenerateImagePrompt(ctx context.Context, req ImagePromptRequest) (*ImagePromptResult, error)
 	EvaluateSectionImage(ctx context.Context, req SectionImageEvaluationRequest) (*SectionImageEvaluationResult, error)
 	GenerateSectionImagePrompt(ctx context.Context, req SectionImagePromptRequest) (*SectionImagePromptResult, error)
+	GenerateIndexImagePrompt(ctx context.Context, req IndexImagePromptRequest) (*IndexImagePromptResult, error)
 }
 
 // Ensure Client implements Generator

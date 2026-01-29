@@ -10,6 +10,24 @@ default:
     - modern geometric abstract
     - clean line art
     - contemporary digital art
+  domain_header:
+    - grand knowledge panorama
+    - interconnected disciplines abstract
+    - expansive field visualization
+    - universal knowledge tree
+    - domain constellation design
+  category_header:
+    - field of study visualization
+    - subdomain connection patterns
+    - categorical knowledge map
+    - discipline branch aesthetic
+    - thematic overview design
+  topic_header:
+    - focused subject exploration
+    - topic concept constellation
+    - thematic knowledge cluster
+    - specialized area visualization
+    - subject matter synthesis
 
 # Science category
 science:
@@ -19,6 +37,24 @@ science:
     - scientific visualization
     - modern infographic style
     - abstract data visualization
+  domain_header:
+    - grand scientific panorama
+    - tree of scientific knowledge
+    - interconnected sciences abstract
+    - universal scientific method visualization
+    - scientific discovery constellation
+  category_header:
+    - field of science visualization
+    - scientific discipline branches
+    - research area connection patterns
+    - categorical science map
+    - scientific domain overview
+  topic_header:
+    - focused scientific exploration
+    - research topic constellation
+    - scientific concept cluster
+    - specialized field visualization
+    - topic synthesis diagram
   
   physics:
     header:
@@ -27,6 +63,12 @@ science:
       - wave interference patterns
       - bauhaus design with physics motifs
       - abstract energy visualization
+    topic_header:
+      - physics concept constellation
+      - fundamental forces visualization
+      - physical phenomena cluster
+      - physics branch exploration
+      - theoretical framework abstract
   
   biology:
     header:
@@ -35,6 +77,12 @@ science:
       - botanical illustration style
       - cellular abstract patterns
       - bio-luminescent aesthetic
+    topic_header:
+      - life sciences constellation
+      - biological systems overview
+      - organism classification tree
+      - living world exploration
+      - biological concept cluster
   
   chemistry:
     header:
@@ -43,6 +91,12 @@ science:
       - periodic table inspired design
       - chemical bond abstractions
       - laboratory glassware aesthetic
+    topic_header:
+      - chemical concepts constellation
+      - molecular world exploration
+      - chemistry branch overview
+      - elemental knowledge cluster
+      - reaction pathway synthesis
   
   astronomy:
     header:
@@ -51,6 +105,12 @@ science:
       - nebula-inspired abstract
       - planetary system diagrams
       - deep space aesthetic
+    topic_header:
+      - celestial concepts constellation
+      - cosmic phenomena exploration
+      - astronomical objects cluster
+      - universe mapping overview
+      - space science synthesis
 
 # Technology category
 technology:
@@ -60,6 +120,24 @@ technology:
     - clean tech minimal
     - futuristic interface design
     - bauhaus design with tech elements
+  domain_header:
+    - technological advancement panorama
+    - innovation ecosystem visualization
+    - interconnected technologies abstract
+    - digital age constellation
+    - tech evolution tree
+  category_header:
+    - technology field visualization
+    - tech domain connection patterns
+    - innovation area map
+    - technological discipline overview
+    - industry sector synthesis
+  topic_header:
+    - focused tech exploration
+    - technology concept cluster
+    - specialized innovation area
+    - technical knowledge constellation
+    - subject matter synthesis
   
   computing:
     header:
@@ -68,6 +146,12 @@ technology:
       - network topology design
       - pixel art modern fusion
       - code-inspired typography
+    topic_header:
+      - computing concepts constellation
+      - digital systems exploration
+      - computational knowledge cluster
+      - software architecture overview
+      - tech concept synthesis
   
   engineering:
     header:
@@ -76,6 +160,12 @@ technology:
       - mechanical component art
       - structural wireframe design
       - industrial precision aesthetic
+    topic_header:
+      - engineering principles constellation
+      - design methodology exploration
+      - technical knowledge cluster
+      - engineering branch overview
+      - applied science synthesis
 
 # History category
 history:
@@ -85,6 +175,24 @@ history:
     - historical document style
     - classical engraving look
     - sepia-toned illustration
+  domain_header:
+    - grand historical timeline panorama
+    - civilization tree visualization
+    - interconnected eras abstract
+    - historical knowledge constellation
+    - ages of humanity overview
+  category_header:
+    - historical period visualization
+    - era connection patterns
+    - temporal knowledge map
+    - historical discipline overview
+    - epoch synthesis design
+  topic_header:
+    - focused historical exploration
+    - period concept constellation
+    - historical theme cluster
+    - specialized era visualization
+    - historical subject synthesis
   
   ancient:
     header:
@@ -93,6 +201,12 @@ history:
       - hieroglyphic-inspired design
       - classical sculpture aesthetic
       - antiquity mosaic patterns
+    topic_header:
+      - ancient world exploration
+      - antiquity concepts cluster
+      - classical era constellation
+      - ancient knowledge synthesis
+      - civilization origins overview
   
   medieval:
     header:
@@ -101,6 +215,12 @@ history:
       - gothic architectural motifs
       - tapestry-inspired patterns
       - medieval cartography
+    topic_header:
+      - medieval world exploration
+      - middle ages constellation
+      - feudal era cluster
+      - medieval knowledge synthesis
+      - dark ages overview
 
 # Arts category
 arts:
@@ -110,6 +230,24 @@ arts:
     - creative process abstract
     - museum collection aesthetic
     - art movement fusion
+  domain_header:
+    - grand artistic panorama
+    - creative disciplines tree
+    - interconnected arts abstract
+    - artistic expression constellation
+    - cultural heritage overview
+  category_header:
+    - art form visualization
+    - creative discipline branches
+    - artistic medium connection
+    - cultural expression map
+    - art discipline overview
+  topic_header:
+    - focused artistic exploration
+    - creative concept constellation
+    - art theme cluster
+    - specialized medium visualization
+    - artistic subject synthesis
   
   music:
     header:
@@ -118,6 +256,12 @@ arts:
       - instrument silhouette design
       - rhythm pattern abstract
       - concert hall aesthetic
+    topic_header:
+      - musical concepts constellation
+      - sound world exploration
+      - compositional cluster
+      - music theory overview
+      - auditory art synthesis
   
   literature:
     header:
@@ -126,6 +270,12 @@ arts:
       - narrative illustration style
       - library aesthetic
       - inkwell and quill motifs
+    topic_header:
+      - literary concepts constellation
+      - written word exploration
+      - narrative theme cluster
+      - literary genre overview
+      - textual art synthesis
 
 # People category (biographies)
 people:
@@ -135,6 +285,24 @@ people:
     - legacy symbol composition
     - biographical milestone art
     - iconic attribute visualization
+  domain_header:
+    - influential figures panorama
+    - human achievement tree
+    - interconnected legacies abstract
+    - notable persons constellation
+    - biographical heritage overview
+  category_header:
+    - field contributors visualization
+    - professional pioneers branches
+    - achievement connection patterns
+    - notable figures map
+    - legacy discipline overview
+  topic_header:
+    - focused biography exploration
+    - achievement constellation
+    - life story cluster
+    - specialized contribution visualization
+    - biographical subject synthesis
   
   scientists:
     header:
@@ -143,6 +311,12 @@ people:
       - scientific legacy symbols
       - equation and formula art
       - experimental apparatus design
+    topic_header:
+      - scientific pioneers constellation
+      - discovery legacy exploration
+      - research contribution cluster
+      - scientific field overview
+      - innovator synthesis
   
   artists:
     header:
@@ -151,6 +325,12 @@ people:
       - creative process symbols
       - masterwork reference style
       - palette and brush motifs
+    topic_header:
+      - artistic pioneers constellation
+      - creative legacy exploration
+      - masterwork contribution cluster
+      - artistic movement overview
+      - creator synthesis
 
 # Philosophy category
 philosophy:
@@ -160,6 +340,24 @@ philosophy:
     - philosophical symbol art
     - mind map aesthetic
     - dialectic pattern design
+  domain_header:
+    - grand philosophical panorama
+    - thought traditions tree
+    - interconnected ideas abstract
+    - wisdom constellation
+    - intellectual heritage overview
+  category_header:
+    - philosophical branch visualization
+    - thought school connection patterns
+    - conceptual framework map
+    - philosophical discipline overview
+    - wisdom tradition synthesis
+  topic_header:
+    - focused philosophical exploration
+    - concept constellation
+    - thought theme cluster
+    - specialized inquiry visualization
+    - philosophical subject synthesis
   
   ethics:
     header:
@@ -168,6 +366,12 @@ philosophy:
       - virtue diagram style
       - ethical framework abstract
       - justice symbol design
+    topic_header:
+      - ethical concepts constellation
+      - moral philosophy exploration
+      - virtue theme cluster
+      - ethical framework overview
+      - moral thought synthesis
 
 # Geography/Places category
 geography:
@@ -177,6 +381,24 @@ geography:
     - cartographic illustration
     - terrain visualization
     - geographic feature abstract
+  domain_header:
+    - grand world panorama
+    - continental connections tree
+    - global landscapes abstract
+    - earth systems constellation
+    - planetary geography overview
+  category_header:
+    - regional visualization
+    - geographic zone connection patterns
+    - landform knowledge map
+    - geographical discipline overview
+    - terrain synthesis design
+  topic_header:
+    - focused geographic exploration
+    - location concept constellation
+    - place theme cluster
+    - specialized terrain visualization
+    - geographic subject synthesis
   
   cities:
     header:
@@ -185,6 +407,12 @@ geography:
       - city grid pattern art
       - metropolitan aerial view
       - civic symbol composition
+    topic_header:
+      - urban concepts constellation
+      - metropolitan exploration
+      - city theme cluster
+      - urban planning overview
+      - civic subject synthesis
 
 # Mathematics category
 mathematics:
@@ -194,6 +422,24 @@ mathematics:
     - fractal pattern design
     - equation typography art
     - number theory abstract
+  domain_header:
+    - grand mathematical panorama
+    - mathematical branches tree
+    - interconnected theorems abstract
+    - numerical knowledge constellation
+    - mathematical universe overview
+  category_header:
+    - mathematical field visualization
+    - discipline connection patterns
+    - theorem relationship map
+    - mathematical branch overview
+    - abstract structure synthesis
+  topic_header:
+    - focused mathematical exploration
+    - concept constellation
+    - theorem theme cluster
+    - specialized proof visualization
+    - mathematical subject synthesis
   
   algebra:
     header:
@@ -202,6 +448,12 @@ mathematics:
       - matrix visualization
       - polynomial curve design
       - abstract algebraic structures
+    topic_header:
+      - algebraic concepts constellation
+      - equation world exploration
+      - variable theme cluster
+      - algebraic structure overview
+      - abstract algebra synthesis
   
   geometry:
     header:
@@ -210,6 +462,12 @@ mathematics:
       - tessellation design
       - polyhedra visualization
       - geometric proof aesthetic
+    topic_header:
+      - geometric concepts constellation
+      - spatial world exploration
+      - shape theme cluster
+      - geometric theorem overview
+      - spatial reasoning synthesis
   
   calculus:
     header:
@@ -218,6 +476,12 @@ mathematics:
       - limit convergence art
       - differential equation flow
       - infinite series aesthetic
+    topic_header:
+      - calculus concepts constellation
+      - continuous world exploration
+      - derivative theme cluster
+      - integration overview
+      - infinitesimal synthesis
   
   statistics:
     header:
@@ -226,6 +490,12 @@ mathematics:
       - statistical chart patterns
       - bell curve aesthetic
       - regression line art
+    topic_header:
+      - statistical concepts constellation
+      - probability world exploration
+      - data theme cluster
+      - distribution overview
+      - analytical synthesis
 
 # Engineering category
 engineering:
@@ -235,6 +505,24 @@ engineering:
     - precision measurement aesthetic
     - industrial design patterns
     - structural analysis visualization
+  domain_header:
+    - grand engineering panorama
+    - engineering disciplines tree
+    - interconnected systems abstract
+    - applied science constellation
+    - innovation heritage overview
+  category_header:
+    - engineering field visualization
+    - discipline connection patterns
+    - technical knowledge map
+    - engineering branch overview
+    - applied science synthesis
+  topic_header:
+    - focused engineering exploration
+    - technical concept constellation
+    - design theme cluster
+    - specialized methodology visualization
+    - engineering subject synthesis
   
   civil:
     header:
@@ -243,6 +531,12 @@ engineering:
       - bridge engineering aesthetic
       - construction diagram style
       - urban infrastructure patterns
+    topic_header:
+      - civil engineering constellation
+      - infrastructure exploration
+      - structural theme cluster
+      - construction overview
+      - built environment synthesis
   
   mechanical:
     header:
@@ -251,6 +545,12 @@ engineering:
       - thermodynamic diagram style
       - machine component aesthetic
       - kinematic chain design
+    topic_header:
+      - mechanical concepts constellation
+      - machine world exploration
+      - motion theme cluster
+      - mechanism overview
+      - kinetic synthesis
   
   electrical:
     header:
@@ -259,6 +559,12 @@ engineering:
       - power grid aesthetic
       - signal wave design
       - electronic component art
+    topic_header:
+      - electrical concepts constellation
+      - circuit world exploration
+      - power theme cluster
+      - electronics overview
+      - signal synthesis
   
   chemical:
     header:
@@ -267,6 +573,12 @@ engineering:
       - chemical plant aesthetic
       - distillation column patterns
       - molecular process design
+    topic_header:
+      - chemical engineering constellation
+      - process world exploration
+      - reaction theme cluster
+      - industrial chemistry overview
+      - process synthesis
 
 # Medicine category
 medicine:
@@ -276,6 +588,24 @@ medicine:
     - healthcare symbol design
     - clinical precision aesthetic
     - biological systems patterns
+  domain_header:
+    - grand medical panorama
+    - healthcare disciplines tree
+    - interconnected body systems abstract
+    - medical knowledge constellation
+    - healing arts overview
+  category_header:
+    - medical field visualization
+    - discipline connection patterns
+    - clinical knowledge map
+    - medical branch overview
+    - healthcare synthesis
+  topic_header:
+    - focused medical exploration
+    - clinical concept constellation
+    - health theme cluster
+    - specialized treatment visualization
+    - medical subject synthesis
   
   anatomy:
     header:
@@ -284,6 +614,12 @@ medicine:
       - skeletal structure design
       - muscular diagram aesthetic
       - medical illustration patterns
+    topic_header:
+      - anatomical concepts constellation
+      - body structure exploration
+      - organ theme cluster
+      - physiological overview
+      - structural synthesis
   
   pharmacology:
     header:
@@ -292,6 +628,12 @@ medicine:
       - medication symbol patterns
       - chemical compound aesthetic
       - therapeutic pathway design
+    topic_header:
+      - pharmacological concepts constellation
+      - drug world exploration
+      - medication theme cluster
+      - therapeutic overview
+      - pharmaceutical synthesis
   
   pathology:
     header:
@@ -300,6 +642,12 @@ medicine:
       - tissue sample aesthetic
       - diagnostic pattern design
       - medical microscopy style
+    topic_header:
+      - pathological concepts constellation
+      - disease world exploration
+      - diagnostic theme cluster
+      - condition overview
+      - clinical synthesis
   
   publichealth:
     header:
@@ -308,6 +656,12 @@ medicine:
       - disease spread patterns
       - public health symbol design
       - healthcare system aesthetic
+    topic_header:
+      - public health constellation
+      - population exploration
+      - epidemiological theme cluster
+      - community health overview
+      - prevention synthesis
 
 # Computer Science category
 computerscience:
@@ -317,6 +671,24 @@ computerscience:
     - data structure patterns
     - computational diagram aesthetic
     - digital logic design
+  domain_header:
+    - grand computing panorama
+    - computer science branches tree
+    - interconnected algorithms abstract
+    - digital knowledge constellation
+    - computational heritage overview
+  category_header:
+    - computing field visualization
+    - discipline connection patterns
+    - algorithmic knowledge map
+    - computer science branch overview
+    - digital synthesis
+  topic_header:
+    - focused computing exploration
+    - algorithm concept constellation
+    - data structure theme cluster
+    - specialized methodology visualization
+    - computational subject synthesis
   
   algorithms:
     header:
@@ -325,6 +697,12 @@ computerscience:
       - complexity diagram design
       - recursive structure aesthetic
       - computational flow art
+    topic_header:
+      - algorithm concepts constellation
+      - computational exploration
+      - complexity theme cluster
+      - algorithm design overview
+      - procedural synthesis
   
   artificialintelligence:
     header:
@@ -333,6 +711,12 @@ computerscience:
       - AI node connection design
       - deep learning aesthetic
       - cognitive computing style
+    topic_header:
+      - AI concepts constellation
+      - machine learning exploration
+      - neural theme cluster
+      - intelligent systems overview
+      - cognitive synthesis
   
   networking:
     header:
@@ -341,6 +725,12 @@ computerscience:
       - protocol layer design
       - connectivity diagram aesthetic
       - distributed system style
+    topic_header:
+      - networking concepts constellation
+      - connectivity exploration
+      - protocol theme cluster
+      - distributed systems overview
+      - network synthesis
   
   databases:
     header:
@@ -349,4 +739,10 @@ computerscience:
       - table structure patterns
       - query flow aesthetic
       - database architecture design
+    topic_header:
+      - database concepts constellation
+      - data storage exploration
+      - schema theme cluster
+      - data modeling overview
+      - relational synthesis
 

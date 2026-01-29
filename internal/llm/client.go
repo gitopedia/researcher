@@ -78,6 +78,8 @@ type Client struct {
 	rewriteSectionWithConceptUserTemplate    *template.Template
 	generateNewSectionSystemTemplate         *template.Template
 	generateNewSectionUserTemplate           *template.Template
+	generateIndexImagePromptSystemTemplate   *template.Template
+	generateIndexImagePromptUserTemplate     *template.Template
 }
 
 type ollamaChatRequest struct {
@@ -410,6 +412,16 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to load generate_new_section_user template: %w", err)
 	}
 
+	generateIndexImagePromptSystem, err := loadTemplate("prompts/generate_index_image_prompt_system.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_index_image_prompt_system template: %w", err)
+	}
+
+	generateIndexImagePromptUser, err := loadTemplate("prompts/generate_index_image_prompt_user.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load generate_index_image_prompt_user template: %w", err)
+	}
+
 	return &Client{
 		client:                            openai.NewClientWithConfig(config),
 		httpClient:                        httpClient,
@@ -467,6 +479,8 @@ func NewClient() (*Client, error) {
 		rewriteSectionWithConceptUserTemplate:   rewriteSectionWithConceptUser,
 		generateNewSectionSystemTemplate:        generateNewSectionSystem,
 		generateNewSectionUserTemplate:          generateNewSectionUser,
+		generateIndexImagePromptSystemTemplate:  generateIndexImagePromptSystem,
+		generateIndexImagePromptUserTemplate:    generateIndexImagePromptUser,
 	}, nil
 }
 
@@ -1461,6 +1475,73 @@ func (c *Client) GenerateSectionImagePrompt(ctx context.Context, req SectionImag
 	log.Printf("GenerateSectionImagePrompt: Generated %s prompt in %v (%d chars)",
 		req.ImageType, time.Since(startTime), len(result))
 	return &SectionImagePromptResult{
+		Prompt: result,
+		Model:  c.modelGenerateArticle,
+	}, nil
+}
+
+// GenerateIndexImagePrompt generates an image prompt for an index header (domain/category/topic)
+func (c *Client) GenerateIndexImagePrompt(ctx context.Context, req IndexImagePromptRequest) (*IndexImagePromptResult, error) {
+	startTime := time.Now()
+
+	// Execute system template
+	var systemBuf bytes.Buffer
+	if err := c.generateIndexImagePromptSystemTemplate.Execute(&systemBuf, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute generate_index_image_prompt system template: %w", err)
+	}
+
+	// Execute user template
+	data := map[string]interface{}{
+		"IndexType":      req.IndexType,
+		"Name":           req.Name,
+		"Domain":         req.Domain,
+		"Category":       req.Category,
+		"ChildItems":     req.ChildItems,
+		"ColorMood":      req.ColorMood,
+		"ArtisticStyles": req.ArtisticStyles,
+	}
+	var userBuf bytes.Buffer
+	if err := c.generateIndexImagePromptUserTemplate.Execute(&userBuf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute generate_index_image_prompt user template: %w", err)
+	}
+
+	// Use thinking mode for creative generation
+	if c.ThinkingEnabled() {
+		messages := []ollamaChatMessage{
+			{Role: "system", Content: systemBuf.String()},
+			{Role: "user", Content: userBuf.String()},
+		}
+		resp, err := c.chatWithThinking(ctx, c.modelGenerateArticle, messages, 0.7)
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("GenerateIndexImagePrompt: Generated %s prompt for '%s' in %v (%d chars)",
+			req.IndexType, req.Name, time.Since(startTime), len(resp.Message.Content))
+		return &IndexImagePromptResult{
+			Prompt: strings.TrimSpace(resp.Message.Content),
+			Model:  c.modelGenerateArticle,
+		}, nil
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.modelGenerateArticle,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemBuf.String()},
+				{Role: openai.ChatMessageRoleUser, Content: userBuf.String()},
+			},
+			Temperature: 0.7,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	result := strings.TrimSpace(resp.Choices[0].Message.Content)
+	log.Printf("GenerateIndexImagePrompt: Generated %s prompt for '%s' in %v (%d chars)",
+		req.IndexType, req.Name, time.Since(startTime), len(result))
+	return &IndexImagePromptResult{
 		Prompt: result,
 		Model:  c.modelGenerateArticle,
 	}, nil

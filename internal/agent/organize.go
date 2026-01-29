@@ -386,6 +386,13 @@ func (a *Agent) updateDomainIndex(branchName string, domain *DomainIndex) error 
 	indexPath := fmt.Sprintf("Compendium/%s/index.md", domain.Slug)
 	existingContent, sha, _ := a.gh.GetFile(branchName, indexPath)
 
+	// Check if header image exists
+	headerImagePath := fmt.Sprintf("Compendium/%s/img/%s_header.png", domain.Slug, domain.Slug)
+	hasHeaderImage := false
+	if _, _, err := a.gh.GetFile(branchName, headerImagePath); err == nil {
+		hasHeaderImage = true
+	}
+
 	// Collect categories
 	var categoryList []string
 	for slug := range domain.Categories {
@@ -403,6 +410,12 @@ func (a *Agent) updateDomainIndex(branchName string, domain *DomainIndex) error 
 		sb.WriteString(fmt.Sprintf("github_issue_ids: [%d, %d]\n", domain.RootIssueID, domain.IssueID))
 	}
 	sb.WriteString("---\n\n")
+
+	// Add header image if it exists
+	if hasHeaderImage {
+		sb.WriteString(fmt.Sprintf("![Header](img/%s_header.png)\n\n", domain.Slug))
+	}
+
 	sb.WriteString(fmt.Sprintf("# %s\n\n", domain.Name))
 	sb.WriteString("## Categories\n\n")
 
@@ -424,6 +437,13 @@ func (a *Agent) updateCategoryIndex(branchName string, domain *DomainIndex, cate
 	indexPath := fmt.Sprintf("Compendium/%s/%s/index.md", domain.Slug, category.Slug)
 	existingContent, sha, _ := a.gh.GetFile(branchName, indexPath)
 
+	// Check if header image exists
+	headerImagePath := fmt.Sprintf("Compendium/%s/%s/img/%s_header.png", domain.Slug, category.Slug, category.Slug)
+	hasHeaderImage := false
+	if _, _, err := a.gh.GetFile(branchName, headerImagePath); err == nil {
+		hasHeaderImage = true
+	}
+
 	// Collect topics
 	var topicList []string
 	for slug := range category.Topics {
@@ -443,6 +463,12 @@ func (a *Agent) updateCategoryIndex(branchName string, domain *DomainIndex, cate
 		sb.WriteString(fmt.Sprintf("github_issue_ids: [%d, %d, %d]\n", domain.RootIssueID, domain.IssueID, category.IssueID))
 	}
 	sb.WriteString("---\n\n")
+
+	// Add header image if it exists
+	if hasHeaderImage {
+		sb.WriteString(fmt.Sprintf("![Header](img/%s_header.png)\n\n", category.Slug))
+	}
+
 	sb.WriteString(fmt.Sprintf("# %s\n\n", category.Name))
 	sb.WriteString("## Topics\n\n")
 
@@ -464,6 +490,13 @@ func (a *Agent) updateTopicIndex(branchName string, domain *DomainIndex, categor
 	indexPath := fmt.Sprintf("Compendium/%s/%s/%s/index.md", domain.Slug, category.Slug, topic.Slug)
 	existingContent, sha, _ := a.gh.GetFile(branchName, indexPath)
 
+	// Check if header image exists
+	headerImagePath := fmt.Sprintf("Compendium/%s/%s/%s/img/%s_header.png", domain.Slug, category.Slug, topic.Slug, topic.Slug)
+	hasHeaderImage := false
+	if _, _, err := a.gh.GetFile(branchName, headerImagePath); err == nil {
+		hasHeaderImage = true
+	}
+
 	// Sort articles
 	sort.Slice(topic.Articles, func(i, j int) bool {
 		return topic.Articles[i].Name < topic.Articles[j].Name
@@ -483,6 +516,12 @@ func (a *Agent) updateTopicIndex(branchName string, domain *DomainIndex, categor
 		sb.WriteString(fmt.Sprintf("github_issue_ids: [%d, %d, %d, %d]\n", domain.RootIssueID, domain.IssueID, category.IssueID, topic.IssueID))
 	}
 	sb.WriteString("---\n\n")
+
+	// Add header image if it exists
+	if hasHeaderImage {
+		sb.WriteString(fmt.Sprintf("![Header](img/%s_header.png)\n\n", topic.Slug))
+	}
+
 	sb.WriteString(fmt.Sprintf("# %s\n\n", topic.Name))
 	sb.WriteString("## Articles\n\n")
 

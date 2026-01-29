@@ -1,0 +1,32 @@
+Index Type: {{.IndexType}}
+Name: {{.Name}}
+{{- if .Domain}}
+Domain: {{.Domain}}
+{{- end}}
+{{- if .Category}}
+Category: {{.Category}}
+{{- end}}
+
+---
+CHILD ITEMS (content within this {{.IndexType}}):
+{{- range .ChildItems}}
+- {{.}}
+{{- end}}
+
+---
+STYLE REQUIREMENTS (from configuration):
+
+Artistic Style(s): {{range $i, $s := .ArtisticStyles}}{{if $i}}, {{end}}{{$s}}{{end}}
+Color/Mood: {{.ColorMood}}
+
+---
+
+Generate a 1920x1080 header image prompt that:
+1. Represents the {{.IndexType}} "{{.Name}}" as a collection/knowledge area
+2. Suggests the breadth and interconnectedness of its contents
+3. References themes from the child items listed above where appropriate
+4. Uses the specified artistic style(s) and color mood
+5. Works as a visual gateway to exploring the {{.IndexType}}'s content
+
+Output only the final prompt text, nothing else.
+
