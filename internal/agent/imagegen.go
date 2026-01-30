@@ -567,7 +567,7 @@ func (a *Agent) insertHeaderImageInMarkdown(branchName, articlePath, imagePath s
 	}
 
 	// Compute relative path from article to image
-	// For index files, images are in img/ subdirectory: img/<slug>_header.png
+	// For index files, images are in _img/ subdirectory: _img/<slug>_header.png
 	// For article files, images are alongside: <slug>_header.png
 	articleDir := filepath.Dir(articlePath)
 	imageDir := filepath.Dir(imagePath)
@@ -578,7 +578,7 @@ func (a *Agent) insertHeaderImageInMarkdown(branchName, articlePath, imagePath s
 		// Image is in same directory as article
 		imageRef = imageFilename
 	} else {
-		// Image is in a subdirectory (e.g., img/)
+		// Image is in a subdirectory (e.g., _img/)
 		relPath, err := filepath.Rel(articleDir, imagePath)
 		if err != nil {
 			imageRef = imageFilename
@@ -588,7 +588,7 @@ func (a *Agent) insertHeaderImageInMarkdown(branchName, articlePath, imagePath s
 		}
 	}
 
-	// Check if image is already present (check both with and without img/ prefix)
+	// Check if image is already present (check both with and without _img/ prefix)
 	if strings.Contains(content, fmt.Sprintf("![Header](%s)", imageRef)) ||
 		strings.Contains(content, fmt.Sprintf("![Header](%s)", imageFilename)) {
 		log.Printf("[Header Image] Already present in %s, skipping insertion", articlePath)
