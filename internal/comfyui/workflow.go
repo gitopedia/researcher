@@ -50,11 +50,11 @@ func BuildTextToImageWorkflow(prompt string, opts GenerateOptions) map[string]in
 			},
 		},
 
-		// Node 5: Encode negative prompt (empty for Qwen-Image)
+		// Node 5: Encode negative prompt
 		"5": map[string]interface{}{
 			"class_type": "CLIPTextEncode",
 			"inputs": map[string]interface{}{
-				"text": "",
+				"text": opts.NegativePrompt,
 				"clip": []interface{}{"2", 0},
 			},
 		},

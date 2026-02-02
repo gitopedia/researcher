@@ -3,16 +3,17 @@ package comfyui
 
 // GenerateOptions configures image generation parameters
 type GenerateOptions struct {
-	Model       string  // Diffusion model filename
-	TextEncoder string  // Text encoder filename
-	VAE         string  // VAE filename
-	Width       int     // Image width
-	Height      int     // Image height
-	Steps       int     // Number of sampling steps
-	CFG         float64 // Classifier-free guidance scale
-	Seed        int64   // Random seed (-1 for random)
-	Sampler     string  // Sampler name (euler, dpm++, etc.)
-	Scheduler   string  // Scheduler name (normal, karras, etc.)
+	Model          string  // Diffusion model filename
+	TextEncoder    string  // Text encoder filename
+	VAE            string  // VAE filename
+	Width          int     // Image width
+	Height         int     // Image height
+	Steps          int     // Number of sampling steps
+	CFG            float64 // Classifier-free guidance scale
+	Seed           int64   // Random seed (-1 for random)
+	Sampler        string  // Sampler name (euler, dpm++, etc.)
+	Scheduler      string  // Scheduler name (normal, karras, etc.)
+	NegativePrompt string  // Negative prompt text
 }
 
 // DefaultOptions returns sensible default options for Qwen-Image FP8

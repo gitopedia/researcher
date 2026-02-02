@@ -6,8 +6,8 @@
 ITERATIONS = 10
 MIN_IMPROVEMENTS = 10
 MAX_ATTEMPTS = 20
-ISSUE_NUMBER = 121
-ARTICLE_COUNT = 20
+<!-- ISSUE_NUMBER = 121 --> pick one randomly using cli with label "research topic"
+ARTICLE_COUNT = 10
 ```
 
 ---

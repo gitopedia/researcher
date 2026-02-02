@@ -8,9 +8,16 @@ Requirements:
 - Provide a specific search query that includes the full category path to avoid ambiguity with similarly-named topics in other fields
 
 **CRITICAL: Topic-Specific Sections Only**
-- The suggested section MUST be directly about the article's specific topic, not about parent categories or tangential concepts
-- For example: If the topic is "Bell's Theorem", suggest sections like "Bell Test Experiments", "CHSH Inequality Derivation", or "Loophole-Free Bell Tests" - NOT generic quantum mechanics topics like "Many-Worlds Interpretation" or "Measurement Problem"
-- The search query MUST include the article's topic name to find relevant sources
+- The suggested section MUST be directly about the ARTICLE TITLE, not about parent categories or tangential concepts
+- The article title is the specific subject you are writing about - stay focused on it
+- For example: If the article is "Rise of Fascism", suggest sections like "Economic Conditions Leading to Fascism", "Fascist Ideology and Propaganda", or "Key Fascist Leaders" - NOT generic World Wars topics like "Military Technology", "Battle Strategies", or "Weapons Development"
+- Another example: If the article is "Bell's Theorem", suggest sections like "Bell Test Experiments", "CHSH Inequality Derivation", or "Loophole-Free Bell Tests" - NOT generic quantum mechanics topics like "Many-Worlds Interpretation" or "Measurement Problem"
+- The search query MUST include the article's title to find sources specifically about that subject
+
+**AVOID THESE COMMON MISTAKES:**
+- Do NOT suggest sections about the broader category (e.g., "World Wars") when the article is about a specific topic within that category (e.g., "Rise of Fascism")
+- Do NOT suggest military/technology/weapons sections unless the article is specifically about military/technology/weapons
+- Do NOT suggest generic historical overview sections - focus on aspects unique to the article's specific subject
 
 Respond ONLY with valid JSON, no other text.
 

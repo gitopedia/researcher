@@ -1313,9 +1313,10 @@ func (c *Client) ExtractVisualElements(ctx context.Context, req VisualElementsRe
 func (c *Client) GenerateImagePrompt(ctx context.Context, req ImagePromptRequest) (*ImagePromptResult, error) {
 	startTime := time.Now()
 
-	// Execute system template with category guidance
+	// Execute system template with category guidance and background guidance
 	systemData := map[string]interface{}{
-		"CategoryGuidance": req.CategoryGuidance,
+		"CategoryGuidance":   req.CategoryGuidance,
+		"BackgroundGuidance": req.BackgroundGuidance,
 	}
 	var systemBuf bytes.Buffer
 	if err := c.generateImagePromptSystemTemplate.Execute(&systemBuf, systemData); err != nil {

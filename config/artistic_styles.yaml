@@ -2,6 +2,37 @@
 # Hierarchical structure: image_type -> category -> subcategory -> styles
 # Styles are inherited from parent levels if not specified at a lower level
 
+# Global configuration applied to all image generation
+global:
+  # Negative prompts - always included in the system prompt to avoid unwanted elements
+  negative_prompts:
+    - do not use neon glowing effects
+    - avoid vibrant neon colours
+    - avoid photorealistic human faces
+    - no watermarks or text overlays
+    - no text, words, letters, numbers, or typography of any kind
+    - avoid cluttered or busy compositions
+  
+  # Positive prompts - 0, 1, or 2 randomly selected and added to each image
+  positive_prompts:
+    - bauhaus design influence
+    - high contrast and visual clarity
+    - subtle texture and depth
+  
+  # Number of image candidates to generate per request
+  candidate_count: 10
+  
+  # Background mode: "dark", "light", or "random" (50/50 chance)
+  background_mode: random
+  
+  # Background guidance text for dark mode
+  dark_background_guidance: |
+    Design for a dark background aesthetic.
+  
+  # Background guidance text for light mode
+  light_background_guidance: |
+    Design for a light background aesthetic.
+
 # Default styles used when no category/subcategory match
 default:
   header:
@@ -29,7 +60,7 @@ default:
     - specialized area visualization
     - subject matter synthesis
 
-# Science category
+# Science domain
 science:
   header:
     - bauhaus design
@@ -111,310 +142,22 @@ science:
       - astronomical objects cluster
       - universe mapping overview
       - space science synthesis
+  
+  geography:
+    header:
+      - topographic map style
+      - landscape silhouette art
+      - cartographic illustration
+      - terrain visualization
+      - geographic feature abstract
+    topic_header:
+      - focused geographic exploration
+      - location concept constellation
+      - place theme cluster
+      - specialized terrain visualization
+      - geographic subject synthesis
 
-# Technology category
-technology:
-  header:
-    - circuit board aesthetic
-    - digital matrix style
-    - clean tech minimal
-    - futuristic interface design
-    - bauhaus design with tech elements
-  domain_header:
-    - technological advancement panorama
-    - innovation ecosystem visualization
-    - interconnected technologies abstract
-    - digital age constellation
-    - tech evolution tree
-  category_header:
-    - technology field visualization
-    - tech domain connection patterns
-    - innovation area map
-    - technological discipline overview
-    - industry sector synthesis
-  topic_header:
-    - focused tech exploration
-    - technology concept cluster
-    - specialized innovation area
-    - technical knowledge constellation
-    - subject matter synthesis
-  
-  computing:
-    header:
-      - binary data visualization
-      - algorithmic pattern art
-      - network topology design
-      - pixel art modern fusion
-      - code-inspired typography
-    topic_header:
-      - computing concepts constellation
-      - digital systems exploration
-      - computational knowledge cluster
-      - software architecture overview
-      - tech concept synthesis
-  
-  engineering:
-    header:
-      - technical blueprint style
-      - isometric engineering diagrams
-      - mechanical component art
-      - structural wireframe design
-      - industrial precision aesthetic
-    topic_header:
-      - engineering principles constellation
-      - design methodology exploration
-      - technical knowledge cluster
-      - engineering branch overview
-      - applied science synthesis
-
-# History category
-history:
-  header:
-    - vintage map cartography
-    - aged parchment aesthetic
-    - historical document style
-    - classical engraving look
-    - sepia-toned illustration
-  domain_header:
-    - grand historical timeline panorama
-    - civilization tree visualization
-    - interconnected eras abstract
-    - historical knowledge constellation
-    - ages of humanity overview
-  category_header:
-    - historical period visualization
-    - era connection patterns
-    - temporal knowledge map
-    - historical discipline overview
-    - epoch synthesis design
-  topic_header:
-    - focused historical exploration
-    - period concept constellation
-    - historical theme cluster
-    - specialized era visualization
-    - historical subject synthesis
-  
-  ancient:
-    header:
-      - archaeological artifact style
-      - ancient civilization motifs
-      - hieroglyphic-inspired design
-      - classical sculpture aesthetic
-      - antiquity mosaic patterns
-    topic_header:
-      - ancient world exploration
-      - antiquity concepts cluster
-      - classical era constellation
-      - ancient knowledge synthesis
-      - civilization origins overview
-  
-  medieval:
-    header:
-      - illuminated manuscript style
-      - heraldic design elements
-      - gothic architectural motifs
-      - tapestry-inspired patterns
-      - medieval cartography
-    topic_header:
-      - medieval world exploration
-      - middle ages constellation
-      - feudal era cluster
-      - medieval knowledge synthesis
-      - dark ages overview
-
-# Arts category
-arts:
-  header:
-    - gallery exhibition style
-    - artistic palette visualization
-    - creative process abstract
-    - museum collection aesthetic
-    - art movement fusion
-  domain_header:
-    - grand artistic panorama
-    - creative disciplines tree
-    - interconnected arts abstract
-    - artistic expression constellation
-    - cultural heritage overview
-  category_header:
-    - art form visualization
-    - creative discipline branches
-    - artistic medium connection
-    - cultural expression map
-    - art discipline overview
-  topic_header:
-    - focused artistic exploration
-    - creative concept constellation
-    - art theme cluster
-    - specialized medium visualization
-    - artistic subject synthesis
-  
-  music:
-    header:
-      - sound wave visualization
-      - musical notation art
-      - instrument silhouette design
-      - rhythm pattern abstract
-      - concert hall aesthetic
-    topic_header:
-      - musical concepts constellation
-      - sound world exploration
-      - compositional cluster
-      - music theory overview
-      - auditory art synthesis
-  
-  literature:
-    header:
-      - book page typography
-      - literary quote design
-      - narrative illustration style
-      - library aesthetic
-      - inkwell and quill motifs
-    topic_header:
-      - literary concepts constellation
-      - written word exploration
-      - narrative theme cluster
-      - literary genre overview
-      - textual art synthesis
-
-# People category (biographies)
-people:
-  header:
-    - portrait silhouette style
-    - achievement timeline design
-    - legacy symbol composition
-    - biographical milestone art
-    - iconic attribute visualization
-  domain_header:
-    - influential figures panorama
-    - human achievement tree
-    - interconnected legacies abstract
-    - notable persons constellation
-    - biographical heritage overview
-  category_header:
-    - field contributors visualization
-    - professional pioneers branches
-    - achievement connection patterns
-    - notable figures map
-    - legacy discipline overview
-  topic_header:
-    - focused biography exploration
-    - achievement constellation
-    - life story cluster
-    - specialized contribution visualization
-    - biographical subject synthesis
-  
-  scientists:
-    header:
-      - laboratory setting aesthetic
-      - discovery moment visualization
-      - scientific legacy symbols
-      - equation and formula art
-      - experimental apparatus design
-    topic_header:
-      - scientific pioneers constellation
-      - discovery legacy exploration
-      - research contribution cluster
-      - scientific field overview
-      - innovator synthesis
-  
-  artists:
-    header:
-      - studio environment aesthetic
-      - artistic medium visualization
-      - creative process symbols
-      - masterwork reference style
-      - palette and brush motifs
-    topic_header:
-      - artistic pioneers constellation
-      - creative legacy exploration
-      - masterwork contribution cluster
-      - artistic movement overview
-      - creator synthesis
-
-# Philosophy category
-philosophy:
-  header:
-    - abstract thought visualization
-    - conceptual diagram style
-    - philosophical symbol art
-    - mind map aesthetic
-    - dialectic pattern design
-  domain_header:
-    - grand philosophical panorama
-    - thought traditions tree
-    - interconnected ideas abstract
-    - wisdom constellation
-    - intellectual heritage overview
-  category_header:
-    - philosophical branch visualization
-    - thought school connection patterns
-    - conceptual framework map
-    - philosophical discipline overview
-    - wisdom tradition synthesis
-  topic_header:
-    - focused philosophical exploration
-    - concept constellation
-    - thought theme cluster
-    - specialized inquiry visualization
-    - philosophical subject synthesis
-  
-  ethics:
-    header:
-      - moral compass visualization
-      - balance scale symbolism
-      - virtue diagram style
-      - ethical framework abstract
-      - justice symbol design
-    topic_header:
-      - ethical concepts constellation
-      - moral philosophy exploration
-      - virtue theme cluster
-      - ethical framework overview
-      - moral thought synthesis
-
-# Geography/Places category
-geography:
-  header:
-    - topographic map style
-    - landscape silhouette art
-    - cartographic illustration
-    - terrain visualization
-    - geographic feature abstract
-  domain_header:
-    - grand world panorama
-    - continental connections tree
-    - global landscapes abstract
-    - earth systems constellation
-    - planetary geography overview
-  category_header:
-    - regional visualization
-    - geographic zone connection patterns
-    - landform knowledge map
-    - geographical discipline overview
-    - terrain synthesis design
-  topic_header:
-    - focused geographic exploration
-    - location concept constellation
-    - place theme cluster
-    - specialized terrain visualization
-    - geographic subject synthesis
-  
-  cities:
-    header:
-      - urban skyline design
-      - architectural landmark style
-      - city grid pattern art
-      - metropolitan aerial view
-      - civic symbol composition
-    topic_header:
-      - urban concepts constellation
-      - metropolitan exploration
-      - city theme cluster
-      - urban planning overview
-      - civic subject synthesis
-
-# Mathematics category
+# Mathematics domain
 mathematics:
   header:
     - geometric theorem visualization
@@ -496,8 +239,285 @@ mathematics:
       - data theme cluster
       - distribution overview
       - analytical synthesis
+  
+  numbertheory:
+    header:
+      - prime number spiral visualization
+      - integer sequence patterns
+      - modular arithmetic design
+      - divisibility diagram aesthetic
+      - number relationship abstract
+    topic_header:
+      - number theory concepts constellation
+      - integer world exploration
+      - prime theme cluster
+      - divisibility overview
+      - arithmetic synthesis
 
-# Engineering category
+# Philosophy domain
+philosophy:
+  header:
+    - abstract thought visualization
+    - conceptual diagram style
+    - philosophical symbol art
+    - mind map aesthetic
+    - dialectic pattern design
+  domain_header:
+    - grand philosophical panorama
+    - thought traditions tree
+    - interconnected ideas abstract
+    - wisdom constellation
+    - intellectual heritage overview
+  category_header:
+    - philosophical branch visualization
+    - thought school connection patterns
+    - conceptual framework map
+    - philosophical discipline overview
+    - wisdom tradition synthesis
+  topic_header:
+    - focused philosophical exploration
+    - concept constellation
+    - thought theme cluster
+    - specialized inquiry visualization
+    - philosophical subject synthesis
+  
+  ethics:
+    header:
+      - moral compass visualization
+      - balance scale symbolism
+      - virtue diagram style
+      - ethical framework abstract
+      - justice symbol design
+    topic_header:
+      - ethical concepts constellation
+      - moral philosophy exploration
+      - virtue theme cluster
+      - ethical framework overview
+      - moral thought synthesis
+  
+  metaphysics:
+    header:
+      - abstract existence visualization
+      - reality structure patterns
+      - being and essence design
+      - ontological diagram aesthetic
+      - fundamental nature abstract
+    topic_header:
+      - metaphysical concepts constellation
+      - reality exploration
+      - existence theme cluster
+      - being overview
+      - ontological synthesis
+  
+  epistemology:
+    header:
+      - knowledge structure visualization
+      - truth and belief patterns
+      - justification diagram style
+      - cognitive pathway aesthetic
+      - understanding abstract
+    topic_header:
+      - epistemological concepts constellation
+      - knowledge exploration
+      - belief theme cluster
+      - justification overview
+      - cognitive synthesis
+  
+  logic:
+    header:
+      - logical gate visualization
+      - syllogism diagram patterns
+      - truth table aesthetic
+      - inference chain design
+      - deductive reasoning abstract
+    topic_header:
+      - logical concepts constellation
+      - reasoning exploration
+      - argument theme cluster
+      - inference overview
+      - formal logic synthesis
+
+# History domain
+history:
+  header:
+    - vintage map cartography
+    - aged parchment aesthetic
+    - historical document style
+    - classical engraving look
+    - sepia-toned illustration
+  domain_header:
+    - grand historical timeline panorama
+    - civilization tree visualization
+    - interconnected eras abstract
+    - historical knowledge constellation
+    - ages of humanity overview
+  category_header:
+    - historical period visualization
+    - era connection patterns
+    - temporal knowledge map
+    - historical discipline overview
+    - epoch synthesis design
+  topic_header:
+    - focused historical exploration
+    - period concept constellation
+    - historical theme cluster
+    - specialized era visualization
+    - historical subject synthesis
+  
+  ancient:
+    header:
+      - archaeological artifact style
+      - ancient civilization motifs
+      - hieroglyphic-inspired design
+      - classical sculpture aesthetic
+      - antiquity mosaic patterns
+    topic_header:
+      - ancient world exploration
+      - antiquity concepts cluster
+      - classical era constellation
+      - ancient knowledge synthesis
+      - civilization origins overview
+  
+  medieval:
+    header:
+      - illuminated manuscript style
+      - heraldic design elements
+      - gothic architectural motifs
+      - tapestry-inspired patterns
+      - medieval cartography
+    topic_header:
+      - medieval world exploration
+      - middle ages constellation
+      - feudal era cluster
+      - medieval knowledge synthesis
+      - dark ages overview
+  
+  modern:
+    header:
+      - industrial revolution aesthetic
+      - enlightenment era design
+      - colonial period cartography
+      - steam age illustration
+      - modern nation-state patterns
+    topic_header:
+      - modern era exploration
+      - industrial age constellation
+      - enlightenment theme cluster
+      - revolution overview
+      - modernity synthesis
+  
+  worldhistory:
+    header:
+      - global timeline visualization
+      - interconnected civilizations design
+      - world events panorama
+      - cross-cultural exchange aesthetic
+      - universal history patterns
+    topic_header:
+      - world history constellation
+      - global events exploration
+      - civilization theme cluster
+      - international overview
+      - universal synthesis
+
+# Technology domain
+technology:
+  header:
+    - clean tech minimal
+    - futuristic interface design
+    - bauhaus design with tech elements
+    - innovation visualization
+    - modern industrial aesthetic
+  domain_header:
+    - technological advancement panorama
+    - innovation ecosystem visualization
+    - interconnected technologies abstract
+    - digital age constellation
+    - tech evolution tree
+  category_header:
+    - technology field visualization
+    - tech domain connection patterns
+    - innovation area map
+    - technological discipline overview
+    - industry sector synthesis
+  topic_header:
+    - focused tech exploration
+    - technology concept cluster
+    - specialized innovation area
+    - technical knowledge constellation
+    - subject matter synthesis
+  
+  computing:
+    header:
+      - binary data visualization
+      - algorithmic pattern art
+      - network topology design
+      - pixel art modern fusion
+      - code-inspired typography
+    topic_header:
+      - computing concepts constellation
+      - digital systems exploration
+      - computational knowledge cluster
+      - software architecture overview
+      - tech concept synthesis
+  
+  electronics:
+    header:
+      - circuit board aesthetic
+      - semiconductor visualization
+      - electronic component art
+      - signal flow patterns
+      - microchip design style
+    topic_header:
+      - electronics concepts constellation
+      - circuit world exploration
+      - component theme cluster
+      - semiconductor overview
+      - electronic synthesis
+  
+  energy:
+    header:
+      - power generation visualization
+      - energy flow patterns
+      - renewable sources aesthetic
+      - grid infrastructure design
+      - sustainable energy abstract
+    topic_header:
+      - energy concepts constellation
+      - power systems exploration
+      - generation theme cluster
+      - sustainability overview
+      - energy synthesis
+  
+  transportation:
+    header:
+      - dynamic vehicle silhouette design
+      - automotive engineering blueprint
+      - streamlined motion aesthetic
+      - vehicle component cutaway
+      - transportation infrastructure panorama
+    topic_header:
+      - mobility systems constellation
+      - transportation evolution exploration
+      - vehicle technology cluster
+      - automotive branch overview
+      - transit synthesis design
+    
+    automotive:
+      header:
+        - automotive design sketch style
+        - engine cutaway visualization
+        - vehicle dynamics motion lines
+        - precision mechanical components
+        - sleek automotive form aesthetic
+      topic_header:
+        - automotive concepts constellation
+        - vehicle systems exploration
+        - drivetrain technology cluster
+        - automotive engineering overview
+        - vehicular synthesis design
+
+# Engineering domain
 engineering:
   header:
     - technical blueprint style
@@ -580,7 +600,7 @@ engineering:
       - industrial chemistry overview
       - process synthesis
 
-# Medicine category
+# Medicine domain
 medicine:
   header:
     - anatomical illustration style
@@ -663,7 +683,7 @@ medicine:
       - community health overview
       - prevention synthesis
 
-# Computer Science category
+# Computer Science domain
 computerscience:
   header:
     - algorithm flowchart style
@@ -745,4 +765,3 @@ computerscience:
       - schema theme cluster
       - data modeling overview
       - relational synthesis
-

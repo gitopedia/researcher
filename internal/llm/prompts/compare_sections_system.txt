@@ -4,12 +4,19 @@ Consider for EACH section in the new article:
 1. Does it cover a topic NOT already in the existing article?
 2. Is it substantive and valuable (not just a minor point)?
 3. Where would it logically fit in the existing article's structure?
+4. **CRITICAL: Is the content DIRECTLY about the article's specific topic?**
 
 **SKIP these section types - do NOT add them:**
 - FAQ / Frequently Asked Questions
 - Q&A format sections
 - Any section using question-answer format
 - Tips, How-to, or advice sections
+- Generic "Methodology", "Limitations", or "Conclusion" sections from research papers
+- Sections about tangentially related subjects that aren't directly about the article's specific topic
+- Sections that discuss the broader category rather than the specific article topic
+
+**TOPIC RELEVANCE CHECK:**
+Before adding any section, ask yourself: "Is this section specifically about the article topic?" If not, skip it. The article topic is a specific subject - do not add sections that are only relevant to its parent category or domain.
 
 Respond with ONLY a JSON object in this exact format:
 {

@@ -142,7 +142,13 @@ func (a *Agent) organizeIncomingArticles(pr *github.PRInfo) error {
 		}
 	}
 
-	// Step 6: Clean up working folders (_incoming, _debug, _config)
+	// Step 6: Move images from _incoming to their final locations
+	log.Println("Moving images to final locations...")
+	if err := a.moveIncomingImages(branchName, articles); err != nil {
+		slog.Warn("Failed to move some images", "error", err)
+	}
+
+	// Step 7: Clean up working folders (_incoming, _debug, _config)
 	log.Println("Cleaning up working folders...")
 	a.cleanupWorkingFolders(branchName)
 
@@ -535,6 +541,142 @@ func (a *Agent) updateTopicIndex(branchName string, domain *DomainIndex, categor
 		return a.gh.UpdateFile(branchName, indexPath, fmt.Sprintf("Update %s index", topic.Name), content, sha)
 	}
 	return a.gh.CreateFile(branchName, indexPath, fmt.Sprintf("Create %s index", topic.Name), content)
+}
+
+// moveIncomingImages moves images from _incoming to their final locations
+func (a *Agent) moveIncomingImages(branchName string, articles []ArticleInfo) error {
+	var moveErrors []error
+
+	// Move article header images
+	for _, article := range articles {
+		articleSlug := article.ArticleSlug
+		targetDir := fmt.Sprintf("Compendium/%s/%s/%s",
+			article.DomainSlug, article.CategorySlug, article.TopicSlug)
+
+		// Move header image and its medium variant
+		for _, suffix := range []string{"_header.png", "_header-medium.png"} {
+			srcPath := fmt.Sprintf("Compendium/_incoming/%s%s", articleSlug, suffix)
+			dstPath := fmt.Sprintf("%s/%s%s", targetDir, articleSlug, suffix)
+
+			content, sha, err := a.gh.GetFile(branchName, srcPath)
+			if err != nil {
+				continue // Image doesn't exist, skip
+			}
+
+			// Create at destination (as binary)
+			if err := a.gh.CreateFile(branchName, dstPath,
+				fmt.Sprintf("Move image: %s", filepath.Base(srcPath)), content); err != nil {
+				slog.Warn("Failed to create image at destination", "src", srcPath, "dst", dstPath, "error", err)
+				moveErrors = append(moveErrors, err)
+				continue
+			}
+
+			// Delete from source
+			if err := a.gh.DeleteFile(branchName, srcPath,
+				fmt.Sprintf("Remove from _incoming: %s", filepath.Base(srcPath)), sha); err != nil {
+				slog.Warn("Failed to delete source image", "path", srcPath, "error", err)
+			}
+		}
+	}
+
+	// Move index images (domains, categories, topics)
+	indexFolders := []struct {
+		srcFolder string
+		parseFunc func(filename string) (dstPath string, ok bool)
+	}{
+		{
+			srcFolder: "Compendium/_incoming/indexes/domains",
+			parseFunc: func(filename string) (string, bool) {
+				// Format: <domain>_header.png or <domain>_header-medium.png
+				slug := strings.TrimSuffix(strings.TrimSuffix(filename, ".png"), "_header")
+				slug = strings.TrimSuffix(slug, "-medium")
+				isMedium := strings.Contains(filename, "-medium")
+				suffix := "_header.png"
+				if isMedium {
+					suffix = "_header-medium.png"
+				}
+				return fmt.Sprintf("Compendium/%s/_img/%s%s", slug, slug, suffix), true
+			},
+		},
+		{
+			srcFolder: "Compendium/_incoming/indexes/categories",
+			parseFunc: func(filename string) (string, bool) {
+				// Format: <domain>--<category>_header.png or <domain>--<category>_header-medium.png
+				base := strings.TrimSuffix(strings.TrimSuffix(filename, ".png"), "_header")
+				base = strings.TrimSuffix(base, "-medium")
+				parts := strings.SplitN(base, "--", 2)
+				if len(parts) != 2 {
+					return "", false
+				}
+				isMedium := strings.Contains(filename, "-medium")
+				suffix := "_header.png"
+				if isMedium {
+					suffix = "_header-medium.png"
+				}
+				return fmt.Sprintf("Compendium/%s/%s/_img/%s%s", parts[0], parts[1], parts[1], suffix), true
+			},
+		},
+		{
+			srcFolder: "Compendium/_incoming/indexes/topics",
+			parseFunc: func(filename string) (string, bool) {
+				// Format: <domain>--<category>--<topic>_header.png or -medium variant
+				base := strings.TrimSuffix(strings.TrimSuffix(filename, ".png"), "_header")
+				base = strings.TrimSuffix(base, "-medium")
+				parts := strings.SplitN(base, "--", 3)
+				if len(parts) != 3 {
+					return "", false
+				}
+				isMedium := strings.Contains(filename, "-medium")
+				suffix := "_header.png"
+				if isMedium {
+					suffix = "_header-medium.png"
+				}
+				return fmt.Sprintf("Compendium/%s/%s/%s/_img/%s%s", parts[0], parts[1], parts[2], parts[2], suffix), true
+			},
+		},
+	}
+
+	for _, folder := range indexFolders {
+		files, err := a.gh.ListFilesInBranch(branchName, folder.srcFolder)
+		if err != nil {
+			continue // Folder might not exist
+		}
+
+		for _, file := range files {
+			filename := filepath.Base(file)
+			dstPath, ok := folder.parseFunc(filename)
+			if !ok {
+				slog.Warn("Failed to parse index image filename", "file", file)
+				continue
+			}
+
+			content, sha, err := a.gh.GetFile(branchName, file)
+			if err != nil {
+				continue
+			}
+
+			// Create at destination
+			if err := a.gh.CreateFile(branchName, dstPath,
+				fmt.Sprintf("Move index image: %s", filename), content); err != nil {
+				slog.Warn("Failed to create index image at destination", "src", file, "dst", dstPath, "error", err)
+				moveErrors = append(moveErrors, err)
+				continue
+			}
+
+			// Delete from source
+			if err := a.gh.DeleteFile(branchName, file,
+				fmt.Sprintf("Remove from _incoming: %s", filename), sha); err != nil {
+				slog.Warn("Failed to delete source index image", "path", file, "error", err)
+			}
+
+			log.Printf("Moved index image: %s -> %s", file, dstPath)
+		}
+	}
+
+	if len(moveErrors) > 0 {
+		return fmt.Errorf("failed to move %d images", len(moveErrors))
+	}
+	return nil
 }
 
 // cleanupWorkingFolders removes _incoming, _debug, and _config folders from Compendium

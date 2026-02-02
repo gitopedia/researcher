@@ -697,6 +697,16 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 		}
 	}
 
+	// Organize articles BEFORE image generation so index.md files exist
+	// This creates/updates domain, category, and topic index files
+	if getEnvBool("ORGANIZE_BEFORE_IMAGES", true) {
+		log.Println("=== Organizing Articles (Creating Index Files) ===")
+		if err := a.OrganizeArticlesOnBranch(branchName); err != nil {
+			slog.Warn("Failed to organize articles before image generation", "error", err)
+			// Continue anyway - existing articles will still get images
+		}
+	}
+
 	// Run image generation as finalization step (if enabled)
 	if getEnvBool("GENERATE_IMAGES_AFTER_RUN", true) {
 		log.Println("=== Running Image Generation Finalization ===")

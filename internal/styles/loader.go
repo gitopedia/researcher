@@ -79,6 +79,16 @@ type GlobalInstructions struct {
 	SpatialPrecision      string `yaml:"spatial_precision"`
 }
 
+// GlobalConfig contains global settings applied to all image generation
+type GlobalConfig struct {
+	NegativePrompts         []string `yaml:"negative_prompts"`
+	PositivePrompts         []string `yaml:"positive_prompts"`
+	CandidateCount          int      `yaml:"candidate_count"`
+	BackgroundMode          string   `yaml:"background_mode"`
+	DarkBackgroundGuidance  string   `yaml:"dark_background_guidance"`
+	LightBackgroundGuidance string   `yaml:"light_background_guidance"`
+}
+
 // ResolvedConfig contains the resolved styles and templates for a specific context
 type ResolvedConfig struct {
 	ArtisticStyles    []string
@@ -97,6 +107,7 @@ type Manager struct {
 	templates        map[string]interface{}
 	diagramSpecs     map[string]interface{}
 	globalInstr      *GlobalInstructions
+	globalConfig     *GlobalConfig
 }
 
 // NewManager creates a new style manager with the given config paths
@@ -120,6 +131,9 @@ func (m *Manager) Load() error {
 	if err := yaml.Unmarshal(stylesData, &m.styles); err != nil {
 		return fmt.Errorf("failed to parse artistic_styles.yaml: %w", err)
 	}
+
+	// Extract global configuration
+	m.globalConfig = m.extractGlobalConfig()
 
 	// Load templates
 	templatesData, err := os.ReadFile(m.templatesPath)
@@ -147,6 +161,66 @@ func (m *Manager) Load() error {
 	m.globalInstr = m.extractGlobalInstructions()
 
 	return nil
+}
+
+// extractGlobalConfig extracts the global section from styles config
+func (m *Manager) extractGlobalConfig() *GlobalConfig {
+	globalNode, ok := m.styles["global"]
+	if !ok {
+		return &GlobalConfig{CandidateCount: 1}
+	}
+
+	globalMap, ok := globalNode.(map[string]interface{})
+	if !ok {
+		return &GlobalConfig{CandidateCount: 1}
+	}
+
+	config := &GlobalConfig{CandidateCount: 1}
+
+	// Extract negative prompts
+	if negPrompts, ok := globalMap["negative_prompts"].([]interface{}); ok {
+		for _, p := range negPrompts {
+			if str, ok := p.(string); ok {
+				config.NegativePrompts = append(config.NegativePrompts, str)
+			}
+		}
+	}
+
+	// Extract positive prompts
+	if posPrompts, ok := globalMap["positive_prompts"].([]interface{}); ok {
+		for _, p := range posPrompts {
+			if str, ok := p.(string); ok {
+				config.PositivePrompts = append(config.PositivePrompts, str)
+			}
+		}
+	}
+
+	// Extract candidate count
+	if count, ok := globalMap["candidate_count"].(int); ok {
+		config.CandidateCount = count
+	}
+
+	// Extract background mode (default to "random")
+	if mode, ok := globalMap["background_mode"].(string); ok {
+		config.BackgroundMode = mode
+	} else {
+		config.BackgroundMode = "random"
+	}
+
+	// Extract background guidance texts
+	if guidance, ok := globalMap["dark_background_guidance"].(string); ok {
+		config.DarkBackgroundGuidance = strings.TrimSpace(guidance)
+	} else {
+		config.DarkBackgroundGuidance = "Design for a dark background aesthetic."
+	}
+
+	if guidance, ok := globalMap["light_background_guidance"].(string); ok {
+		config.LightBackgroundGuidance = strings.TrimSpace(guidance)
+	} else {
+		config.LightBackgroundGuidance = "Design for a light background aesthetic."
+	}
+
+	return config
 }
 
 // extractGlobalInstructions extracts the global_instructions section
@@ -625,4 +699,61 @@ func (m *Manager) SelectRandomColorMood(moods []string) string {
 		return "balanced and harmonious"
 	}
 	return moods[rand.Intn(len(moods))]
+}
+
+// GetNegativePrompts returns all negative prompts from global config
+func (m *Manager) GetNegativePrompts() []string {
+	if m.globalConfig == nil {
+		return nil
+	}
+	return m.globalConfig.NegativePrompts
+}
+
+// SelectRandomPositivePrompts selects 0, 1, or 2 positive prompts randomly
+func (m *Manager) SelectRandomPositivePrompts() []string {
+	if m.globalConfig == nil || len(m.globalConfig.PositivePrompts) == 0 {
+		return nil
+	}
+
+	// Randomly select 0, 1, or 2 prompts
+	numToSelect := rand.Intn(3) // 0, 1, or 2
+
+	if numToSelect == 0 {
+		return nil
+	}
+
+	return m.SelectRandomStyles(m.globalConfig.PositivePrompts, numToSelect)
+}
+
+// GetCandidateCount returns the number of image candidates to generate
+func (m *Manager) GetCandidateCount() int {
+	if m.globalConfig == nil || m.globalConfig.CandidateCount < 1 {
+		return 1
+	}
+	return m.globalConfig.CandidateCount
+}
+
+// GetBackgroundGuidance returns background guidance based on the configured mode.
+// If mode is "random", it randomly selects between dark and light.
+// If mode is "dark" or "light", it returns the corresponding guidance.
+func (m *Manager) GetBackgroundGuidance() string {
+	if m.globalConfig == nil {
+		return "Design for a dark background aesthetic."
+	}
+
+	mode := m.globalConfig.BackgroundMode
+	switch mode {
+	case "light":
+		return m.globalConfig.LightBackgroundGuidance
+	case "dark":
+		return m.globalConfig.DarkBackgroundGuidance
+	case "random":
+		fallthrough
+	default:
+		// 50/50 chance for dark or light
+		if rand.Intn(2) == 0 {
+			return m.globalConfig.DarkBackgroundGuidance
+		}
+		return m.globalConfig.LightBackgroundGuidance
+	}
 }

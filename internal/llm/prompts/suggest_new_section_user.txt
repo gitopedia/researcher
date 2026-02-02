@@ -1,16 +1,18 @@
 Domain: {{.Domain}}
 Category: {{.Category}}
-Topic: {{.Topic}}
+Article Title: {{.Topic}}
 
 Existing sections in the article:
 {{.ExistingSections}}
 
-Suggest a new section to add. The section MUST be specifically about "{{.Topic}}" - not about general {{.Category}} concepts.
+Suggest a new section to add. The section MUST be specifically about "{{.Topic}}" - not about general {{.Domain}} or {{.Category}} concepts.
+
+IMPORTANT: You are writing an article about "{{.Topic}}" specifically. The Domain ({{.Domain}}) and Category ({{.Category}}) are just for classification - they are NOT the subject of the article. Stay focused on "{{.Topic}}".
 
 Respond with JSON:
 {
-  "section_title": "Proposed Section Title (must be about {{.Topic}} specifically)",
+  "section_title": "Proposed Section Title (must be directly about {{.Topic}})",
   "insert_after": "Name of existing section to insert after",
-  "search_query": "{{.Domain}} {{.Category}} {{.Topic}} [specific aspect of {{.Topic}} to search]",
+  "search_query": "{{.Topic}} [specific aspect of {{.Topic}} to search]",
   "rationale": "Brief explanation of why this section adds value to the {{.Topic}} article"
 }

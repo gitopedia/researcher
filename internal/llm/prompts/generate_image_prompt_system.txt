@@ -29,7 +29,5 @@ Output Requirements:
 - Focus on creating an image that would work as a header/banner (wide aspect ratio, visually striking)
 - Avoid text, words, or letters in the image description - pure visual elements only
 - The image should be abstract or symbolic rather than photorealistic
-- ALWAYS design for a DARK BACKGROUND - use deep blacks, dark blues, or dark grays as the base
-- Light elements (white, bright colors, glowing effects) should stand out against the dark background
-- Think "dark mode UI" aesthetic - the image will be displayed on dark-themed pages
+- {{.BackgroundGuidance}}
 

@@ -402,6 +402,8 @@ func (a *Agent) mergeReadyPRs(ctx context.Context) error {
 			log.Printf("PR #%d is ready to merge!", pr.Number)
 
 			// Step 1: Organize incoming articles before merge
+			// Note: This may have already run during research finalization (before image gen),
+			// but running again ensures cleanup and handles any edge cases
 			log.Printf("Organizing articles for PR #%d...", pr.Number)
 			if err := a.organizeIncomingArticles(pr); err != nil {
 				slog.Error("Failed to organize articles", "pr", pr.Number, "error", err)

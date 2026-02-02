@@ -127,14 +127,15 @@ type VisualElementsRequest struct {
 
 // ImagePromptRequest contains the input for image prompt generation
 type ImagePromptRequest struct {
-	Topic             string
-	Domain            string
-	Category          string
-	ArticleSummary    string
-	ExtractedElements *VisualElements
-	ColorMood         string
-	ArtisticStyles    []string
-	CategoryGuidance  string
+	Topic              string
+	Domain             string
+	Category           string
+	ArticleSummary     string
+	ExtractedElements  *VisualElements
+	ColorMood          string
+	ArtisticStyles     []string
+	CategoryGuidance   string
+	BackgroundGuidance string
 }
 
 // ImagePromptResult contains the generated image prompt and metadata
