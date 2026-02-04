@@ -112,9 +112,13 @@ func (a *Agent) organizeIncomingArticles(pr *github.PRInfo) error {
 		_, _, existsErr := a.gh.GetFile(branchName, targetPath)
 		isNew := existsErr != nil
 
+		// Update header image reference in content before moving
+		// Change from ![Header](slug_header.png) to ![Header](_img/slug_header.avif)
+		updatedContent := updateHeaderImageReference(article.Content, article.ArticleSlug)
+
 		// Create the file at the new location
 		if err := a.gh.CreateFile(branchName, targetPath,
-			fmt.Sprintf("Move article: %s", article.Article), article.Content); err != nil {
+			fmt.Sprintf("Move article: %s", article.Article), updatedContent); err != nil {
 			slog.Error("Failed to create article at target", "path", targetPath, "error", err)
 			continue
 		}
@@ -198,6 +202,47 @@ func extractFrontmatterField(frontmatter, field string) string {
 		return strings.TrimSpace(matches[1])
 	}
 	return ""
+}
+
+// updateHeaderImageReference updates header image references in article content
+// Changes from ![Header](slug_header.png) to ![Header](_img/slug_header.avif)
+func updateHeaderImageReference(content, articleSlug string) string {
+	// Pattern to match header image references with various formats
+	// Matches: ![Header](slug_header.png), ![Header](slug_header.avif), ![Header](_img/slug_header.png), etc.
+	headerPattern := regexp.MustCompile(`!\[Header\]\(([^)]+)\)`)
+	
+	return headerPattern.ReplaceAllStringFunc(content, func(match string) string {
+		// Extract the current path
+		submatch := headerPattern.FindStringSubmatch(match)
+		if len(submatch) < 2 {
+			return match
+		}
+		
+		currentPath := submatch[1]
+		
+		// If already in correct format (_img/ and .avif), keep it
+		if strings.HasPrefix(currentPath, "_img/") && strings.HasSuffix(currentPath, ".avif") {
+			return match
+		}
+		
+		// Extract the base filename (without path and extension)
+		baseName := filepath.Base(currentPath)
+		baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
+		
+		// If baseName doesn't match the article slug pattern, try to extract it
+		if !strings.Contains(baseName, articleSlug) {
+			// Use the article slug directly
+			baseName = articleSlug + "_header"
+		}
+		
+		// Ensure it ends with _header
+		if !strings.HasSuffix(baseName, "_header") {
+			baseName = baseName + "_header"
+		}
+		
+		// Return the corrected reference
+		return fmt.Sprintf("![Header](_img/%s.avif)", baseName)
+	})
 }
 
 // extractGithubIssueIDs extracts the github_issue_ids array from frontmatter
@@ -392,12 +437,9 @@ func (a *Agent) updateDomainIndex(branchName string, domain *DomainIndex) error 
 	indexPath := fmt.Sprintf("Compendium/%s/index.md", domain.Slug)
 	existingContent, sha, _ := a.gh.GetFile(branchName, indexPath)
 
-	// Check if header image exists
-	headerImagePath := fmt.Sprintf("Compendium/%s/_img/%s_header.png", domain.Slug, domain.Slug)
-	hasHeaderImage := false
-	if _, _, err := a.gh.GetFile(branchName, headerImagePath); err == nil {
-		hasHeaderImage = true
-	}
+	// Check if header image exists (check both .avif and .png)
+	headerImagePathBase := fmt.Sprintf("Compendium/%s/_img/%s_header", domain.Slug, domain.Slug)
+	hasHeaderImage := a.imageExistsAnyFormat(branchName, headerImagePathBase)
 
 	// Collect categories
 	var categoryList []string
@@ -417,9 +459,9 @@ func (a *Agent) updateDomainIndex(branchName string, domain *DomainIndex) error 
 	}
 	sb.WriteString("---\n\n")
 
-	// Add header image if it exists
+	// Add header image if it exists (always use .avif extension for published content)
 	if hasHeaderImage {
-		sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.png)\n\n", domain.Slug))
+		sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.avif)\n\n", domain.Slug))
 	}
 
 	sb.WriteString(fmt.Sprintf("# %s\n\n", domain.Name))
@@ -443,12 +485,9 @@ func (a *Agent) updateCategoryIndex(branchName string, domain *DomainIndex, cate
 	indexPath := fmt.Sprintf("Compendium/%s/%s/index.md", domain.Slug, category.Slug)
 	existingContent, sha, _ := a.gh.GetFile(branchName, indexPath)
 
-	// Check if header image exists
-	headerImagePath := fmt.Sprintf("Compendium/%s/%s/_img/%s_header.png", domain.Slug, category.Slug, category.Slug)
-	hasHeaderImage := false
-	if _, _, err := a.gh.GetFile(branchName, headerImagePath); err == nil {
-		hasHeaderImage = true
-	}
+	// Check if header image exists (check both .avif and .png)
+	headerImagePathBase := fmt.Sprintf("Compendium/%s/%s/_img/%s_header", domain.Slug, category.Slug, category.Slug)
+	hasHeaderImage := a.imageExistsAnyFormat(branchName, headerImagePathBase)
 
 	// Collect topics
 	var topicList []string
@@ -470,9 +509,9 @@ func (a *Agent) updateCategoryIndex(branchName string, domain *DomainIndex, cate
 	}
 	sb.WriteString("---\n\n")
 
-	// Add header image if it exists
+	// Add header image if it exists (always use .avif extension for published content)
 	if hasHeaderImage {
-		sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.png)\n\n", category.Slug))
+		sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.avif)\n\n", category.Slug))
 	}
 
 	sb.WriteString(fmt.Sprintf("# %s\n\n", category.Name))
@@ -496,12 +535,9 @@ func (a *Agent) updateTopicIndex(branchName string, domain *DomainIndex, categor
 	indexPath := fmt.Sprintf("Compendium/%s/%s/%s/index.md", domain.Slug, category.Slug, topic.Slug)
 	existingContent, sha, _ := a.gh.GetFile(branchName, indexPath)
 
-	// Check if header image exists
-	headerImagePath := fmt.Sprintf("Compendium/%s/%s/%s/_img/%s_header.png", domain.Slug, category.Slug, topic.Slug, topic.Slug)
-	hasHeaderImage := false
-	if _, _, err := a.gh.GetFile(branchName, headerImagePath); err == nil {
-		hasHeaderImage = true
-	}
+	// Check if header image exists (check both .avif and .png)
+	headerImagePathBase := fmt.Sprintf("Compendium/%s/%s/%s/_img/%s_header", domain.Slug, category.Slug, topic.Slug, topic.Slug)
+	hasHeaderImage := a.imageExistsAnyFormat(branchName, headerImagePathBase)
 
 	// Sort articles
 	sort.Slice(topic.Articles, func(i, j int) bool {
@@ -523,9 +559,9 @@ func (a *Agent) updateTopicIndex(branchName string, domain *DomainIndex, categor
 	}
 	sb.WriteString("---\n\n")
 
-	// Add header image if it exists
+	// Add header image if it exists (always use .avif extension for published content)
 	if hasHeaderImage {
-		sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.png)\n\n", topic.Slug))
+		sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.avif)\n\n", topic.Slug))
 	}
 
 	sb.WriteString(fmt.Sprintf("# %s\n\n", topic.Name))

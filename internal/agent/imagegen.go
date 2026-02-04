@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -206,6 +207,35 @@ func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
 			default:
 			}
 
+			// Calculate output path for this candidate
+			candidatePath := strings.TrimSuffix(p.OutputPath, ".png") + fmt.Sprintf("_%d.png", candidateIdx)
+			candidatePromptPath := strings.TrimSuffix(p.PromptPath, ".txt") + fmt.Sprintf("_%d.txt", candidateIdx)
+
+			// Check if this candidate image already exists - skip if so
+			if a.fileExists(branchName, candidatePath) {
+				log.Printf("[Prompt Generation] Skipping candidate %d for '%s' - image already exists", candidateIdx, p.Topic)
+				continue
+			}
+
+			// Check if prompt already exists - if so, reuse it instead of regenerating
+			existingPrompt, _, promptErr := a.gh.GetFile(branchName, candidatePromptPath)
+			if promptErr == nil && existingPrompt != "" {
+				// Extract the prompt text from the existing file
+				promptText := extractPromptText(existingPrompt)
+				if promptText != "" {
+					log.Printf("[Prompt Generation] Reusing existing prompt %d for '%s'", candidateIdx, p.Topic)
+					allCandidates = append(allCandidates, GeneratedCandidate{
+						Topic:        p.Topic,
+						CandidateIdx: candidateIdx,
+						PromptText:   promptText,
+						OutputPath:   candidatePath,
+						ImageType:    p.ImageType,
+						NegativeText: negativePromptText,
+					})
+					continue
+				}
+			}
+
 			// Randomly select styles and color mood for this candidate
 			numStyles := 1
 			if len(availableStyles) > 2 {
@@ -237,9 +267,6 @@ func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
 				continue
 			}
 
-			// Calculate output path for this candidate
-			candidatePath := strings.TrimSuffix(p.OutputPath, ".png") + fmt.Sprintf("_%d.png", candidateIdx)
-
 			allCandidates = append(allCandidates, GeneratedCandidate{
 				Topic:        p.Topic,
 				CandidateIdx: candidateIdx,
@@ -253,7 +280,6 @@ func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
 				candidateIdx, candidateCount, p.Topic, selectedStyles, colorMood)
 
 			// Save the unique prompt to debug folder
-			candidatePromptPath := strings.TrimSuffix(p.PromptPath, ".txt") + fmt.Sprintf("_%d.txt", candidateIdx)
 			candidatePromptContent := fmt.Sprintf("# Unique Prompt %d for: %s\n", candidateIdx, p.Topic)
 			candidatePromptContent += fmt.Sprintf("# Styles: %v\n", selectedStyles)
 			candidatePromptContent += fmt.Sprintf("# Color Mood: %s\n", colorMood)
@@ -376,20 +402,57 @@ func (a *Agent) findPendingImagePrompts(branchName string) ([]PendingImagePrompt
 			// Extract the actual prompt (after metadata comments)
 			promptText := extractPromptText(headerPromptContent)
 			if promptText != "" {
-				// Check if image already exists
+				// Try to find the article - first in _incoming, then in organized location
 				articlePath := filepath.Join("Compendium/_incoming", articleDir+".md")
 				outputPath := filepath.Join("Compendium/_incoming", articleDir+"_header.png")
+				isOrganized := false
 
 				// Read domain/category and full content from article frontmatter
-				domain, category := "", ""
+				domain, category, topic := "", "", ""
 				articleContent, _, articleErr := a.gh.GetFile(branchName, articlePath)
-				if articleErr == nil {
-					domain = extractFrontmatterField(articleContent, "domain")
-					category = extractFrontmatterField(articleContent, "category")
+				
+				if articleErr != nil {
+					// Article not in _incoming, try to find it in organized location
+					organizedPath, orgDomain, orgCategory, orgTopic := a.findOrganizedArticle(branchName, articleDir)
+					if organizedPath != "" {
+						articlePath = organizedPath
+						articleContent, _, articleErr = a.gh.GetFile(branchName, articlePath)
+						if articleErr == nil {
+							domain = orgDomain
+							category = orgCategory
+							topic = orgTopic
+							isOrganized = true
+							// For organized articles, output goes to _img directory in the topic folder
+							topicPath := filepath.Dir(articlePath)
+							outputPath = filepath.Join(topicPath, "_img", articleDir+"_header.png")
+						}
+					}
 				}
 
-				_, _, err = a.gh.GetFile(branchName, outputPath)
-				if err != nil {
+				if articleErr == nil {
+					if domain == "" {
+						domain = extractFrontmatterField(articleContent, "domain")
+					}
+					if category == "" {
+						category = extractFrontmatterField(articleContent, "category")
+					}
+					if topic == "" {
+						topic = extractFrontmatterField(articleContent, "topic")
+					}
+				}
+
+				// Check if image already exists (check both .png and .avif)
+				imageExists := false
+				if isOrganized {
+					topicPath := filepath.Dir(articlePath)
+					imagePathBase := filepath.Join(topicPath, "_img", articleDir+"_header")
+					imageExists = a.imageExistsAnyFormat(branchName, imagePathBase)
+				} else {
+					_, _, err = a.gh.GetFile(branchName, outputPath)
+					imageExists = err == nil
+				}
+
+				if !imageExists {
 					// Image doesn't exist, add to pending
 					pending = append(pending, PendingImagePrompt{
 						Topic:          articleDir,
@@ -523,12 +586,12 @@ func (a *Agent) findPendingIndexImagePrompts(branchName string) ([]PendingIndexI
 			domainName = domainDir
 		}
 
-		// Check if domain header image exists (check both staging and final locations)
-		domainFinalPath := filepath.Join(domainPath, "_img", domainDir+"_header.png")
+		// Check if domain header image exists (check both staging and final locations, and both .png and .avif)
+		domainFinalPathBase := filepath.Join(domainPath, "_img", domainDir+"_header")
 		domainStagingPath := filepath.Join("Compendium/_incoming/indexes/domains", domainDir+"_header.png")
-		_, _, finalErr := a.gh.GetFile(branchName, domainFinalPath)
-		_, _, stagingErr := a.gh.GetFile(branchName, domainStagingPath)
-		if finalErr != nil && stagingErr != nil {
+		domainImageExists := a.imageExistsAnyFormat(branchName, domainFinalPathBase) ||
+			a.fileExists(branchName, domainStagingPath)
+		if !domainImageExists {
 			// Image doesn't exist in either location - get child categories
 			categories, _ := a.gh.ListDirectory(branchName, domainPath)
 			var childItems []string
@@ -545,7 +608,7 @@ func (a *Agent) findPendingIndexImagePrompts(branchName string) ([]PendingIndexI
 				ChildItems: childItems,
 				PromptPath: filepath.Join("Compendium/_debug/indexes", domainDir, "header_image_prompt.txt"),
 				OutputPath: domainStagingPath,
-				FinalPath:  domainFinalPath,
+				FinalPath:  domainFinalPathBase + ".png",
 				IndexPath:  domainIndexPath,
 			})
 		}
@@ -575,12 +638,12 @@ func (a *Agent) findPendingIndexImagePrompts(branchName string) ([]PendingIndexI
 				categoryName = categoryDir
 			}
 
-			// Check if category header image exists (check both staging and final locations)
-			categoryFinalPath := filepath.Join(categoryPath, "_img", categoryDir+"_header.png")
+			// Check if category header image exists (check both staging and final locations, and both .png and .avif)
+			categoryFinalPathBase := filepath.Join(categoryPath, "_img", categoryDir+"_header")
 			categoryStagingPath := filepath.Join("Compendium/_incoming/indexes/categories", domainDir+"--"+categoryDir+"_header.png")
-			_, _, catFinalErr := a.gh.GetFile(branchName, categoryFinalPath)
-			_, _, catStagingErr := a.gh.GetFile(branchName, categoryStagingPath)
-			if catFinalErr != nil && catStagingErr != nil {
+			categoryImageExists := a.imageExistsAnyFormat(branchName, categoryFinalPathBase) ||
+				a.fileExists(branchName, categoryStagingPath)
+			if !categoryImageExists {
 				// Image doesn't exist in either location - get child topics
 				topics, _ := a.gh.ListDirectory(branchName, categoryPath)
 				var childItems []string
@@ -599,7 +662,7 @@ func (a *Agent) findPendingIndexImagePrompts(branchName string) ([]PendingIndexI
 					ChildItems:   childItems,
 					PromptPath:   filepath.Join("Compendium/_debug/indexes", domainDir, categoryDir, "header_image_prompt.txt"),
 					OutputPath:   categoryStagingPath,
-					FinalPath:    categoryFinalPath,
+					FinalPath:    categoryFinalPathBase + ".png",
 					IndexPath:    categoryIndexPath,
 				})
 			}
@@ -629,12 +692,12 @@ func (a *Agent) findPendingIndexImagePrompts(branchName string) ([]PendingIndexI
 					topicName = topicDir
 				}
 
-				// Check if topic header image exists (check both staging and final locations)
-				topicFinalPath := filepath.Join(topicPath, "_img", topicDir+"_header.png")
+				// Check if topic header image exists (check both staging and final locations, and both .png and .avif)
+				topicFinalPathBase := filepath.Join(topicPath, "_img", topicDir+"_header")
 				topicStagingPath := filepath.Join("Compendium/_incoming/indexes/topics", domainDir+"--"+categoryDir+"--"+topicDir+"_header.png")
-				_, _, topicFinalErr := a.gh.GetFile(branchName, topicFinalPath)
-				_, _, topicStagingErr := a.gh.GetFile(branchName, topicStagingPath)
-				if topicFinalErr != nil && topicStagingErr != nil {
+				topicImageExists := a.imageExistsAnyFormat(branchName, topicFinalPathBase) ||
+					a.fileExists(branchName, topicStagingPath)
+				if !topicImageExists {
 					// Image doesn't exist in either location - get child articles
 					articles, _ := a.gh.ListDirectory(branchName, topicPath)
 					var childItems []string
@@ -655,7 +718,7 @@ func (a *Agent) findPendingIndexImagePrompts(branchName string) ([]PendingIndexI
 						ChildItems:   childItems,
 						PromptPath:   filepath.Join("Compendium/_debug/indexes", domainDir, categoryDir, topicDir, "header_image_prompt.txt"),
 						OutputPath:   topicStagingPath,
-						FinalPath:    topicFinalPath,
+						FinalPath:    topicFinalPathBase + ".png",
 						IndexPath:    topicIndexPath,
 					})
 				}
@@ -760,13 +823,13 @@ func (a *Agent) findIndexImagesFromIncoming(branchName string) ([]PendingIndexIm
 
 	// Check domains
 	for _, info := range domains {
-		domainFinalPath := filepath.Join("Compendium", info.DomainSlug, "_img", info.DomainSlug+"_header.png")
+		domainFinalPathBase := filepath.Join("Compendium", info.DomainSlug, "_img", info.DomainSlug+"_header")
 		domainStagingPath := filepath.Join("Compendium/_incoming/indexes/domains", info.DomainSlug+"_header.png")
 
-		_, _, finalErr := a.gh.GetFile(branchName, domainFinalPath)
-		_, _, stagingErr := a.gh.GetFile(branchName, domainStagingPath)
+		domainImageExists := a.imageExistsAnyFormat(branchName, domainFinalPathBase) ||
+			a.fileExists(branchName, domainStagingPath)
 
-		if finalErr != nil && stagingErr != nil {
+		if !domainImageExists {
 			// Collect child categories for this domain
 			var childItems []string
 			for _, cat := range categories {
@@ -782,7 +845,7 @@ func (a *Agent) findIndexImagesFromIncoming(branchName string) ([]PendingIndexIm
 				ChildItems: childItems,
 				PromptPath: filepath.Join("Compendium/_debug/indexes", info.DomainSlug, "header_image_prompt.txt"),
 				OutputPath: domainStagingPath,
-				FinalPath:  domainFinalPath,
+				FinalPath:  domainFinalPathBase + ".png",
 			})
 			log.Printf("[Index Discovery] Found new domain needing image: %s", info.Domain)
 		}
@@ -790,13 +853,13 @@ func (a *Agent) findIndexImagesFromIncoming(branchName string) ([]PendingIndexIm
 
 	// Check categories
 	for _, info := range categories {
-		categoryFinalPath := filepath.Join("Compendium", info.DomainSlug, info.CategorySlug, "_img", info.CategorySlug+"_header.png")
+		categoryFinalPathBase := filepath.Join("Compendium", info.DomainSlug, info.CategorySlug, "_img", info.CategorySlug+"_header")
 		categoryStagingPath := filepath.Join("Compendium/_incoming/indexes/categories", info.DomainSlug+"--"+info.CategorySlug+"_header.png")
 
-		_, _, finalErr := a.gh.GetFile(branchName, categoryFinalPath)
-		_, _, stagingErr := a.gh.GetFile(branchName, categoryStagingPath)
+		categoryImageExists := a.imageExistsAnyFormat(branchName, categoryFinalPathBase) ||
+			a.fileExists(branchName, categoryStagingPath)
 
-		if finalErr != nil && stagingErr != nil {
+		if !categoryImageExists {
 			// Collect child topics for this category
 			var childItems []string
 			for _, top := range topics {
@@ -814,7 +877,7 @@ func (a *Agent) findIndexImagesFromIncoming(branchName string) ([]PendingIndexIm
 				ChildItems:   childItems,
 				PromptPath:   filepath.Join("Compendium/_debug/indexes", info.DomainSlug, info.CategorySlug, "header_image_prompt.txt"),
 				OutputPath:   categoryStagingPath,
-				FinalPath:    categoryFinalPath,
+				FinalPath:    categoryFinalPathBase + ".png",
 			})
 			log.Printf("[Index Discovery] Found new category needing image: %s > %s", info.Domain, info.Category)
 		}
@@ -822,13 +885,13 @@ func (a *Agent) findIndexImagesFromIncoming(branchName string) ([]PendingIndexIm
 
 	// Check topics
 	for _, info := range topics {
-		topicFinalPath := filepath.Join("Compendium", info.DomainSlug, info.CategorySlug, info.TopicSlug, "_img", info.TopicSlug+"_header.png")
+		topicFinalPathBase := filepath.Join("Compendium", info.DomainSlug, info.CategorySlug, info.TopicSlug, "_img", info.TopicSlug+"_header")
 		topicStagingPath := filepath.Join("Compendium/_incoming/indexes/topics", info.DomainSlug+"--"+info.CategorySlug+"--"+info.TopicSlug+"_header.png")
 
-		_, _, finalErr := a.gh.GetFile(branchName, topicFinalPath)
-		_, _, stagingErr := a.gh.GetFile(branchName, topicStagingPath)
+		topicImageExists := a.imageExistsAnyFormat(branchName, topicFinalPathBase) ||
+			a.fileExists(branchName, topicStagingPath)
 
-		if finalErr != nil && stagingErr != nil {
+		if !topicImageExists {
 			pending = append(pending, PendingIndexImagePrompt{
 				IndexType:    "topic",
 				Name:         info.Topic,
@@ -840,7 +903,7 @@ func (a *Agent) findIndexImagesFromIncoming(branchName string) ([]PendingIndexIm
 				ChildItems:   info.Articles,
 				PromptPath:   filepath.Join("Compendium/_debug/indexes", info.DomainSlug, info.CategorySlug, info.TopicSlug, "header_image_prompt.txt"),
 				OutputPath:   topicStagingPath,
-				FinalPath:    topicFinalPath,
+				FinalPath:    topicFinalPathBase + ".png",
 			})
 			log.Printf("[Index Discovery] Found new topic needing image: %s > %s > %s", info.Domain, info.Category, info.Topic)
 		}
@@ -1181,31 +1244,30 @@ func (a *Agent) insertHeaderImageInMarkdown(branchName, articlePath, imagePath s
 	}
 
 	// Compute relative path from article to image
-	// For index files, images are in _img/ subdirectory: _img/<slug>_header.png
-	// For article files, images are alongside: <slug>_header.png
-	articleDir := filepath.Dir(articlePath)
-	imageDir := filepath.Dir(imagePath)
+	// For index files, images are in _img/ subdirectory: _img/<slug>_header.avif
+	// For article files, images are in _img/ subdirectory: _img/<slug>_header.avif
 	imageFilename := filepath.Base(imagePath)
+	
+	// Extract slug from image filename (e.g., "quantum-mechanics_header.png" -> "quantum-mechanics")
+	slug := strings.TrimSuffix(imageFilename, filepath.Ext(imageFilename))
+	slug = strings.TrimSuffix(slug, "_header")
+	slug = strings.TrimSuffix(slug, "-medium")
+	
+	// Always use _img/ directory and .avif extension for the markdown reference
+	imageRef := fmt.Sprintf("_img/%s_header.avif", slug)
 
-	var imageRef string
-	if articleDir == imageDir {
-		// Image is in same directory as article
-		imageRef = imageFilename
-	} else {
-		// Image is in a subdirectory (e.g., _img/)
-		relPath, err := filepath.Rel(articleDir, imagePath)
-		if err != nil {
-			imageRef = imageFilename
-		} else {
-			// Convert Windows backslashes to forward slashes for markdown
-			imageRef = strings.ReplaceAll(relPath, "\\", "/")
-		}
+	// Check if any header image reference already exists (any extension, any path format)
+	// This prevents duplicate insertions
+	headerPattern := regexp.MustCompile(`!\[Header\]\([^)]+\)`)
+	if headerPattern.MatchString(content) {
+		log.Printf("[Header Image] Header reference already present in %s, skipping insertion", articlePath)
+		return nil
 	}
 
-	// Check if image is already present (check both with and without _img/ prefix)
-	if strings.Contains(content, fmt.Sprintf("![Header](%s)", imageRef)) ||
-		strings.Contains(content, fmt.Sprintf("![Header](%s)", imageFilename)) {
-		log.Printf("[Header Image] Already present in %s, skipping insertion", articlePath)
+	// Also check for header image in _img directory (with any extension)
+	imgDirPattern := regexp.MustCompile(`!\[Header\]\(_img/[^)]+\)`)
+	if imgDirPattern.MatchString(content) {
+		log.Printf("[Header Image] Header image in _img/ already present in %s, skipping insertion", articlePath)
 		return nil
 	}
 
@@ -1234,69 +1296,299 @@ func (a *Agent) insertHeaderImageInMarkdown(branchName, articlePath, imagePath s
 		newContentBuilder.WriteString(line)
 		newContentBuilder.WriteString("\n")
 		if i == frontmatterEnd {
-			// Insert image reference after the frontmatter
+			// Insert image reference after the frontmatter (using _img/ and .avif)
 			newContentBuilder.WriteString(fmt.Sprintf("\n![Header](%s)\n", imageRef))
 		}
 	}
 
 	newContent := strings.TrimSuffix(newContentBuilder.String(), "\n")
+	
+	// Log the image path for debugging
+	log.Printf("[Header Image] Inserting reference %s into %s (source: %s)", imageRef, articlePath, imagePath)
+	
 	return a.gh.UpdateFile(branchName, articlePath, fmt.Sprintf("Add header image to %s", filepath.Base(articlePath)), newContent, sha)
+}
+
+// hasExistingHeaderImage checks if a markdown file already has a header image reference
+func hasExistingHeaderImage(content string) bool {
+	headerPattern := regexp.MustCompile(`!\[Header\]\([^)]+\)`)
+	return headerPattern.MatchString(content)
 }
 
 // BackfillImagePrompts generates image prompts for existing articles that don't have them
 func (a *Agent) BackfillImagePrompts(ctx context.Context, branchName string) error {
 	log.Println("[Backfill] Starting image prompt backfill...")
 
-	// List incoming articles
+	backfilledCount := 0
+
+	// First, check incoming articles
 	incomingPath := "Compendium/_incoming"
 	files, err := a.gh.ListDirectory(branchName, incomingPath)
+	if err == nil {
+		for _, file := range files {
+			if !strings.HasSuffix(file, ".md") {
+				continue
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			articleName := strings.TrimSuffix(file, ".md")
+
+			// Check if prompt already exists
+			promptPath := filepath.Join("Compendium/_debug/articles", articleName, "header_image_prompt.txt")
+			if _, _, err := a.gh.GetFile(branchName, promptPath); err == nil {
+				log.Printf("[Backfill] Prompt already exists for %s, skipping", articleName)
+				continue
+			}
+
+			// Get article content to determine category
+			articlePath := filepath.Join(incomingPath, file)
+			content, _, err := a.gh.GetFile(branchName, articlePath)
+			if err != nil {
+				slog.Warn("Failed to read article", "file", file, "error", err)
+				continue
+			}
+
+			// Extract category from frontmatter
+			category, subcategory := extractCategoryFromFrontmatter(content)
+
+			log.Printf("[Backfill] Generating prompt for %s (category: %s/%s)...", articleName, category, subcategory)
+
+			if err := a.generateHeaderImagePrompt(ctx, articleName, branchName, category, subcategory); err != nil {
+				slog.Error("Failed to generate prompt", "article", articleName, "error", err)
+				continue
+			}
+
+			backfilledCount++
+		}
+	}
+
+	// Second, scan organized articles in Compendium/<domain>/<category>/<topic>/*.md
+	log.Println("[Backfill] Scanning organized articles...")
+	organizedCount, err := a.backfillOrganizedArticles(ctx, branchName)
 	if err != nil {
-		return fmt.Errorf("failed to list incoming articles: %w", err)
+		slog.Warn("Error scanning organized articles", "error", err)
 	}
-
-	backfilledCount := 0
-	for _, file := range files {
-		if !strings.HasSuffix(file, ".md") {
-			continue
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		articleName := strings.TrimSuffix(file, ".md")
-
-		// Check if prompt already exists
-		promptPath := filepath.Join("Compendium/_debug/articles", articleName, "header_image_prompt.txt")
-		if _, _, err := a.gh.GetFile(branchName, promptPath); err == nil {
-			log.Printf("[Backfill] Prompt already exists for %s, skipping", articleName)
-			continue
-		}
-
-		// Get article content to determine category
-		articlePath := filepath.Join(incomingPath, file)
-		content, _, err := a.gh.GetFile(branchName, articlePath)
-		if err != nil {
-			slog.Warn("Failed to read article", "file", file, "error", err)
-			continue
-		}
-
-		// Extract category from frontmatter
-		category, subcategory := extractCategoryFromFrontmatter(content)
-
-		log.Printf("[Backfill] Generating prompt for %s (category: %s/%s)...", articleName, category, subcategory)
-
-		if err := a.generateHeaderImagePrompt(ctx, articleName, branchName, category, subcategory); err != nil {
-			slog.Error("Failed to generate prompt", "article", articleName, "error", err)
-			continue
-		}
-
-		backfilledCount++
-	}
+	backfilledCount += organizedCount
 
 	log.Printf("[Backfill] Completed: %d prompts generated", backfilledCount)
+	return nil
+}
+
+// backfillOrganizedArticles scans organized articles and generates prompts for those missing them
+func (a *Agent) backfillOrganizedArticles(ctx context.Context, branchName string) (int, error) {
+	backfilledCount := 0
+
+	// List domains
+	domains, err := a.gh.ListDirectory(branchName, "Compendium")
+	if err != nil {
+		return 0, fmt.Errorf("failed to list Compendium: %w", err)
+	}
+
+	for _, domainDir := range domains {
+		// Skip special directories
+		if strings.HasPrefix(domainDir, "_") || domainDir == "index.md" {
+			continue
+		}
+
+		domainPath := filepath.Join("Compendium", domainDir)
+		categories, err := a.gh.ListDirectory(branchName, domainPath)
+		if err != nil {
+			continue
+		}
+
+		for _, categoryDir := range categories {
+			if strings.HasPrefix(categoryDir, "_") || categoryDir == "index.md" || categoryDir == "img" {
+				continue
+			}
+
+			categoryPath := filepath.Join(domainPath, categoryDir)
+			topics, err := a.gh.ListDirectory(branchName, categoryPath)
+			if err != nil {
+				continue
+			}
+
+			for _, topicDir := range topics {
+				if strings.HasPrefix(topicDir, "_") || topicDir == "index.md" || topicDir == "img" {
+					continue
+				}
+
+				topicPath := filepath.Join(categoryPath, topicDir)
+				articles, err := a.gh.ListDirectory(branchName, topicPath)
+				if err != nil {
+					continue
+				}
+
+				for _, articleFile := range articles {
+					if !strings.HasSuffix(articleFile, ".md") || articleFile == "index.md" {
+						continue
+					}
+
+					select {
+					case <-ctx.Done():
+						return backfilledCount, ctx.Err()
+					default:
+					}
+
+					articleSlug := strings.TrimSuffix(articleFile, ".md")
+
+					// Check if prompt already exists
+					promptPath := filepath.Join("Compendium/_debug/articles", articleSlug, "header_image_prompt.txt")
+					if _, _, err := a.gh.GetFile(branchName, promptPath); err == nil {
+						continue // Prompt already exists
+					}
+
+					// Check if image already exists (in _img directory)
+					imagePathBase := filepath.Join(topicPath, "_img", articleSlug+"_header")
+					if a.imageExistsAnyFormat(branchName, imagePathBase) {
+						continue // Image already exists
+					}
+
+					// Get article content
+					articlePath := filepath.Join(topicPath, articleFile)
+					content, _, err := a.gh.GetFile(branchName, articlePath)
+					if err != nil {
+						slog.Warn("Failed to read organized article", "path", articlePath, "error", err)
+						continue
+					}
+
+					// Extract domain and category from frontmatter
+					domain := extractFrontmatterField(content, "domain")
+					category := extractFrontmatterField(content, "category")
+					if domain == "" {
+						domain = domainDir
+					}
+					if category == "" {
+						category = categoryDir
+					}
+
+					log.Printf("[Backfill] Generating prompt for organized article %s (domain: %s, category: %s)...", articleSlug, domain, category)
+
+					// Generate prompt using the organized article path
+					if err := a.generateHeaderImagePromptForOrganizedArticle(ctx, articleSlug, branchName, domain, category, articlePath); err != nil {
+						slog.Error("Failed to generate prompt for organized article", "article", articleSlug, "error", err)
+						continue
+					}
+
+					backfilledCount++
+				}
+			}
+		}
+	}
+
+	return backfilledCount, nil
+}
+
+// generateHeaderImagePromptForOrganizedArticle generates an image prompt for an organized article
+func (a *Agent) generateHeaderImagePromptForOrganizedArticle(ctx context.Context, articleSlug, branchName, domain, category, articlePath string) error {
+	articleTitle := cleanTopic(articleSlug)
+
+	log.Printf("[Image Prompt] Generating header image prompt for organized article '%s' (%s > %s)", articleTitle, domain, category)
+
+	// Load the article content from its organized location
+	articleContent, _, err := a.gh.GetFile(branchName, articlePath)
+	if err != nil {
+		return fmt.Errorf("failed to load article: %w", err)
+	}
+
+	// Step 1: Extract article-specific visual elements using LLM
+	log.Printf("[Image Prompt] Extracting visual elements from article...")
+	visualReq := llm.VisualElementsRequest{
+		Topic:          articleTitle,
+		Domain:         domain,
+		Category:       category,
+		ArticleContent: articleContent,
+	}
+	visualElements, err := a.llm.ExtractVisualElements(ctx, visualReq)
+	if err != nil {
+		slog.Warn("Failed to extract visual elements, using defaults", "error", err)
+		visualElements = &llm.VisualElements{}
+	}
+
+	// Extract article summary for additional context
+	summary := extractArticleSummary(articleContent, 500)
+
+	// Get config directory path
+	configDir := getEnvOrDefault("CONFIG_DIR", "config")
+
+	// Load style configuration
+	styleMgr := styles.NewManager(configDir)
+	if err := styleMgr.Load(); err != nil {
+		return fmt.Errorf("failed to load style config: %w", err)
+	}
+
+	// Resolve category-based configuration (for styles and colors)
+	resolved := styleMgr.ResolveAll("header", strings.ToLower(domain), strings.ToLower(category))
+
+	// Select 1-2 random artistic styles from config
+	numStyles := 1
+	if len(resolved.ArtisticStyles) > 2 {
+		numStyles = 2
+	}
+	selectedStyles := styleMgr.SelectRandomStyles(resolved.ArtisticStyles, numStyles)
+
+	// Select a random color mood from config
+	colorMood := styleMgr.SelectRandomColorMood(resolved.ColorMoods)
+
+	// Step 2: Generate the image prompt with structured elements
+	req := llm.ImagePromptRequest{
+		Topic:             articleTitle,
+		Domain:            domain,
+		Category:          category,
+		ArticleSummary:    summary,
+		ExtractedElements: visualElements,
+		ColorMood:         colorMood,
+		ArtisticStyles:    selectedStyles,
+		CategoryGuidance:  resolved.Guidance,
+	}
+
+	result, err := a.llm.GenerateImagePrompt(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to generate image prompt: %w", err)
+	}
+
+	// Save the prompt to the debug folder
+	debugDir := debugBasePath(articleSlug)
+	promptPath := fmt.Sprintf("%s/header_image_prompt.txt", debugDir)
+	promptContent := fmt.Sprintf("# Header Image Prompt for: %s\n", articleTitle)
+	promptContent += fmt.Sprintf("# Domain > Category: %s > %s\n", domain, category)
+	promptContent += fmt.Sprintf("# Styles: %s\n", strings.Join(selectedStyles, ", "))
+	promptContent += fmt.Sprintf("# Color Mood: %s\n", colorMood)
+	promptContent += fmt.Sprintf("# Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
+	promptContent += fmt.Sprintf("# Model: %s\n", result.Model)
+	promptContent += fmt.Sprintf("# Source: %s (organized)\n", articlePath)
+	promptContent += fmt.Sprintf("# Extracted Elements:\n")
+	if len(visualElements.KeyConcepts) > 0 {
+		promptContent += fmt.Sprintf("#   Key Concepts: %s\n", strings.Join(visualElements.KeyConcepts, ", "))
+	}
+	if len(visualElements.SpecificPhenomena) > 0 {
+		promptContent += fmt.Sprintf("#   Phenomena: %s\n", strings.Join(visualElements.SpecificPhenomena, ", "))
+	}
+	if len(visualElements.IconicImagery) > 0 {
+		promptContent += fmt.Sprintf("#   Iconic Imagery: %s\n", strings.Join(visualElements.IconicImagery, ", "))
+	}
+	if len(visualElements.NotableFigures) > 0 {
+		promptContent += fmt.Sprintf("#   Notable Figures: %s\n", strings.Join(visualElements.NotableFigures, ", "))
+	}
+	if len(visualElements.MathElements) > 0 {
+		promptContent += fmt.Sprintf("#   Math Elements: %s\n", strings.Join(visualElements.MathElements, ", "))
+	}
+	if result.Thinking != "" {
+		promptContent += fmt.Sprintf("# LLM Reasoning:\n#   %s\n", strings.ReplaceAll(result.Thinking, "\n", "\n#   "))
+	}
+	promptContent += "\n"
+	promptContent += result.Prompt
+
+	if err := a.gh.CreateFile(branchName, promptPath, fmt.Sprintf("Add header image prompt for %s", articleTitle), promptContent); err != nil {
+		return fmt.Errorf("failed to save image prompt: %w", err)
+	}
+
+	log.Printf("[Image Prompt] Saved prompt to %s (%d chars)", promptPath, len(result.Prompt))
+
 	return nil
 }
 
@@ -1334,6 +1626,54 @@ func extractCategoryFromFrontmatter(content string) (category, subcategory strin
 	}
 
 	return category, subcategory
+}
+
+// findOrganizedArticle searches for an article in the organized Compendium structure
+// Returns the path, domain, category, and topic if found
+func (a *Agent) findOrganizedArticle(branchName, articleSlug string) (path, domain, category, topic string) {
+	// List domains
+	domains, err := a.gh.ListDirectory(branchName, "Compendium")
+	if err != nil {
+		return "", "", "", ""
+	}
+
+	for _, domainDir := range domains {
+		if strings.HasPrefix(domainDir, "_") || domainDir == "index.md" {
+			continue
+		}
+
+		domainPath := filepath.Join("Compendium", domainDir)
+		categories, err := a.gh.ListDirectory(branchName, domainPath)
+		if err != nil {
+			continue
+		}
+
+		for _, categoryDir := range categories {
+			if strings.HasPrefix(categoryDir, "_") || categoryDir == "index.md" || categoryDir == "img" {
+				continue
+			}
+
+			categoryPath := filepath.Join(domainPath, categoryDir)
+			topics, err := a.gh.ListDirectory(branchName, categoryPath)
+			if err != nil {
+				continue
+			}
+
+			for _, topicDir := range topics {
+				if strings.HasPrefix(topicDir, "_") || topicDir == "index.md" || topicDir == "img" {
+					continue
+				}
+
+				// Check if article exists in this topic
+				articlePath := filepath.Join(categoryPath, topicDir, articleSlug+".md")
+				if _, _, err := a.gh.GetFile(branchName, articlePath); err == nil {
+					return articlePath, domainDir, categoryDir, topicDir
+				}
+			}
+		}
+	}
+
+	return "", "", "", ""
 }
 
 // runDockerComposeCmd runs a docker-compose command in the configured directory
@@ -1562,5 +1902,22 @@ func (a *Agent) stopComfyUI() {
 	if err := a.runDockerComposeCmd(stopCmd); err != nil {
 		slog.Warn("Failed to stop ComfyUI", "error", err)
 	}
+}
+
+// imageExistsAnyFormat checks if an image exists with any common extension (.png, .avif, .jpg, .webp)
+func (a *Agent) imageExistsAnyFormat(branchName, pathWithoutExt string) bool {
+	extensions := []string{".png", ".avif", ".jpg", ".jpeg", ".webp"}
+	for _, ext := range extensions {
+		if a.fileExists(branchName, pathWithoutExt+ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// fileExists checks if a file exists at the given path
+func (a *Agent) fileExists(branchName, path string) bool {
+	_, _, err := a.gh.GetFile(branchName, path)
+	return err == nil
 }
 

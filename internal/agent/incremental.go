@@ -1294,7 +1294,18 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 	// Extract the current section content from the article
 	currentSectionContent := extractSectionContent(articleContent, selectedSection.Title)
 	if currentSectionContent == "" {
-		actionLog.WriteString("- **Warning:** Could not extract section content\n")
+		// This usually happens when the heading in markdown doesn't exactly match the extracted title
+		// (case differences, punctuation, etc.). Fall back to the content returned by ExtractSections.
+		if strings.TrimSpace(selectedSection.Content) != "" {
+			currentSectionContent = strings.TrimSpace(selectedSection.Content)
+			actionLog.WriteString("- **Warning:** Could not extract section content by heading match; using extracted section content instead\n")
+		} else {
+			actionLog.WriteString("- **Warning:** Could not extract section content (empty)\n")
+		}
+	}
+	if strings.TrimSpace(currentSectionContent) == "" {
+		actionLog.WriteString("- **Error:** No section content available for comparison; skipping improvement\n")
+		return fmt.Errorf("no section content available for comparison")
 	}
 
 	// Generate search query using deterministic template (more reliable than LLM)
@@ -1327,6 +1338,10 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 	result.SourceTitle = sourceInfo.Title
 	result.SourceURL = sourceInfo.URL
 	actionLog.WriteString(fmt.Sprintf("- **Selected source:** [%s](%s)\n", sourceInfo.Title, sourceInfo.URL))
+	if strings.TrimSpace(sourceInfo.Summary) == "" {
+		actionLog.WriteString("- **Error:** Selected source summary is empty; cannot improve section\n")
+		return fmt.Errorf("selected source summary is empty")
+	}
 
 	// Merge the current section with new information
 	log.Printf("[Mode B] Merging section content")

@@ -15,6 +15,13 @@ bin/
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# Node dependencies (dashboard + any accidental installs)
+node_modules/
+
+# If someone runs npm in the repo root by accident, don’t track these
+/package.json
+/package-lock.json
+
 # IDEs
 .idea/
 .vscode/

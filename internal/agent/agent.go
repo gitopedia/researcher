@@ -191,6 +191,19 @@ func (a *Agent) Run(ctx context.Context) error {
 		log.Printf("Bot identity: %s", botUsername)
 	}
 
+	// CHECK: If we're on a research branch, only work on that specific issue
+	currentBranch, err := a.gh.GetCurrentBranch()
+	if err == nil && strings.HasPrefix(currentBranch, "research/topic-") {
+		// Extract issue number from branch name: research/topic-{number}-{timestamp}
+		parts := strings.Split(currentBranch, "-")
+		if len(parts) >= 2 {
+			if issueNum, parseErr := strconv.Atoi(parts[1]); parseErr == nil && issueNum > 0 {
+				log.Printf("On research branch %s, processing issue #%d only", currentBranch, issueNum)
+				return a.runForSpecificIssue(ctx, issueNum, botUsername, currentBranch)
+			}
+		}
+	}
+
 	// STEP 1: Cleanup - start with a clean slate
 	log.Println("Performing cleanup before starting work...")
 	if err := a.performCleanup(botUsername); err != nil {
@@ -328,6 +341,132 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	log.Println("No work to do (no available topics, no managed PRs to update)")
+	return nil
+}
+
+// runForSpecificIssue processes a specific issue when we're already on a research branch.
+// This is used when the dashboard creates a branch for a specific issue and then runs research.
+func (a *Agent) runForSpecificIssue(ctx context.Context, issueNum int, botUsername, branchName string) error {
+	log.Printf("Running research for specific issue #%d on branch %s", issueNum, branchName)
+
+	// Fetch the specific issue
+	issue, err := a.gh.GetIssue(issueNum)
+	if err != nil {
+		return fmt.Errorf("failed to get issue #%d: %w", issueNum, err)
+	}
+
+	log.Printf("Processing topic: %s", issue.GetTitle())
+
+	// Process the topic using the existing branch (don't create a new one)
+	// We use processTopicOnExistingBranch instead of processTopicWithIterations
+	// since we already have a branch created
+	return a.processTopicOnExistingBranch(ctx, issue, branchName)
+}
+
+// processTopicOnExistingBranch processes a topic issue on an already-created branch.
+// This is similar to processTopicWithIterations but doesn't create a new branch.
+func (a *Agent) processTopicOnExistingBranch(ctx context.Context, issue *gh.Issue, branchName string) error {
+	issueNum := issue.GetNumber()
+	topicTitle := issue.GetTitle()
+
+	minImprovements := 10
+	if v := os.Getenv("IMPROVEMENTS_PER_NEW_ARTICLE"); v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+			minImprovements = i
+		}
+	}
+
+	maxAttempts := minImprovements * 2
+	if v := os.Getenv("MAX_IMPROVEMENT_ATTEMPTS"); v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+			maxAttempts = i
+		}
+	}
+
+	log.Printf("Starting processing for topic #%d: %s on existing branch %s",
+		issueNum, topicTitle, branchName)
+
+	// Track failed sources to avoid retrying them in this run
+	failedSources := make(map[string]bool)
+
+	// Process articles from the issue body
+	articles := github.ParseArticlesFromBody(issue.GetBody())
+	log.Printf("Found %d articles in topic issue #%d", len(articles), issueNum)
+
+	// Count incomplete articles
+	var incompleteArticles []github.ResearchArticle
+	for _, article := range articles {
+		if !article.Completed {
+			incompleteArticles = append(incompleteArticles, article)
+		}
+	}
+
+	if len(incompleteArticles) == 0 {
+		log.Printf("All articles in topic #%d are already completed", issueNum)
+		// Still run image generation in case there are missing images
+		goto generateImages
+	}
+
+	log.Printf("Found %d incomplete articles to process", len(incompleteArticles))
+
+	// Process each incomplete article
+	for _, article := range incompleteArticles {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		log.Printf("Processing NEW article: '%s'", article.Name)
+
+		// Create the article using the existing processNewArticle function
+		if err := a.processNewArticle(ctx, issue, article.Name, branchName, failedSources); err != nil {
+			slog.Warn("Failed to create article", "article", article.Name, "error", err)
+			continue
+		}
+
+		// Mark article as complete in the issue
+		if err := a.checkOffArticle(issueNum, article.Name); err != nil {
+			slog.Warn("Failed to check off article", "article", article.Name, "error", err)
+		}
+
+		// Run improvement iterations on the newly created article
+		log.Printf("Running improvements on new article '%s' (min: %d successes, max: %d attempts)",
+			article.Name, minImprovements, maxAttempts)
+
+		successCount := 0
+		for attempt := 1; attempt <= maxAttempts && successCount < minImprovements; attempt++ {
+			log.Printf("[Improvement %d/%d attempts, %d/%d successes] Improving '%s'",
+				attempt, maxAttempts, successCount, minImprovements, article.Name)
+
+			_, err := a.improveArticle(ctx, issue, article.Name, branchName, failedSources)
+			if err != nil {
+				slog.Warn("Failed to improve article", "article", article.Name, "attempt", attempt, "error", err)
+				continue
+			}
+			successCount++
+		}
+
+		if successCount < minImprovements {
+			log.Printf("Warning: Only achieved %d/%d successful improvements for '%s'",
+				successCount, minImprovements, article.Name)
+		}
+
+		// Generate image prompt for this article
+		domain, category, _ := extractCategoryContext(issue.GetTitle())
+		if err := a.generateHeaderImagePrompt(ctx, article.Name, branchName, domain, category); err != nil {
+			slog.Warn("Failed to generate image prompt", "article", article.Name, "error", err)
+		}
+	}
+
+generateImages:
+	// Generate images from prompts
+	log.Println("Generating images from prompts...")
+	if err := a.GenerateImages(ctx, branchName); err != nil {
+		slog.Warn("Failed to generate images", "error", err)
+	}
+
+	log.Printf("Completed processing for topic #%d on branch %s", issueNum, branchName)
 	return nil
 }
 

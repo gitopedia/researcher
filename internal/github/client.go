@@ -24,6 +24,7 @@ type Client struct {
 	repo        string
 	tokenExpiry time.Time
 	useAppAuth  bool
+	authNone    bool // no token/app configured; allow read-only unauthenticated calls where possible
 }
 
 func NewClient(ctx context.Context) (*Client, error) {
@@ -36,6 +37,8 @@ func NewClient(ctx context.Context) (*Client, error) {
 	// Check if using GitHub App auth
 	c.useAppAuth = os.Getenv("GITHUB_APP_ID") != ""
 
+	// Initialize an authenticated client if configured; otherwise fall back to unauthenticated (read-only) client.
+	// This lets the dashboard list/view issues for public repos without requiring local secrets.
 	if err := c.refreshClient(); err != nil {
 		return nil, err
 	}
@@ -58,14 +61,22 @@ func (c *Client) refreshClient() error {
 		// GitHub App tokens expire after 1 hour, refresh after 45 minutes to be safe
 		c.tokenExpiry = time.Now().Add(45 * time.Minute)
 		log.Printf("GitHub App token refreshed, expires in 45 minutes")
+		c.authNone = false
 	} else {
 		// Fall back to PAT
 		token = os.Getenv("GITHUB_TOKEN")
 		if token == "" {
-			return fmt.Errorf("either GITHUB_APP_ID or GITHUB_TOKEN environment variable must be set")
+			// No auth configured - create an unauthenticated client (read-only for public repos).
+			c.client = github.NewClient(nil)
+			c.tokenExpiry = time.Now().Add(24 * time.Hour)
+			c.useAppAuth = false
+			c.authNone = true
+			log.Printf("GitHub auth not configured (GITHUB_APP_ID/GITHUB_TOKEN missing). Using unauthenticated GitHub client (read-only).")
+			return nil
 		}
 		// PATs don't expire during runtime
 		c.tokenExpiry = time.Now().Add(24 * time.Hour)
+		c.authNone = false
 	}
 
 	ts := oauth2.StaticTokenSource(
@@ -79,6 +90,9 @@ func (c *Client) refreshClient() error {
 
 // ensureValidToken refreshes the token if it's expired or about to expire
 func (c *Client) ensureValidToken() error {
+	if c.authNone {
+		return nil
+	}
 	if c.useAppAuth && time.Now().After(c.tokenExpiry) {
 		log.Println("Token expired, refreshing...")
 		return c.refreshClient()
@@ -88,6 +102,9 @@ func (c *Client) ensureValidToken() error {
 
 // ForceRefreshToken forces a token refresh, useful after 401 errors
 func (c *Client) ForceRefreshToken() error {
+	if c.authNone {
+		return nil
+	}
 	if c.useAppAuth {
 		log.Println("Forcing token refresh...")
 		c.tokenExpiry = time.Time{} // Expire immediately
@@ -296,6 +313,9 @@ func (c *Client) ListAllOpenIssues() ([]*github.Issue, error) {
 }
 
 func (c *Client) CreateBranch(baseBranch, newBranch string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -345,6 +365,9 @@ func (c *Client) ListBranches() ([]*github.Branch, error) {
 }
 
 func (c *Client) DeleteBranch(branchName string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -355,6 +378,9 @@ func (c *Client) DeleteBranch(branchName string) error {
 }
 
 func (c *Client) CreateFile(branch, path, message, content string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -379,6 +405,9 @@ func (c *Client) CreateFile(branch, path, message, content string) error {
 }
 
 func (c *Client) UpdateFile(branch, path, message, content, sha string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	opts := &github.RepositoryContentFileOptions{
 		Message: github.String(message),
 		Content: []byte(content),
@@ -390,6 +419,9 @@ func (c *Client) UpdateFile(branch, path, message, content, sha string) error {
 }
 
 func (c *Client) CreatePullRequest(title, body, head, base string) (*github.PullRequest, error) {
+	if c.authNone {
+		return nil, fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	newPR := &github.NewPullRequest{
 		Title: github.String(title),
 		Body:  github.String(body),
@@ -402,6 +434,9 @@ func (c *Client) CreatePullRequest(title, body, head, base string) (*github.Pull
 }
 
 func (c *Client) CommentOnIssue(issueNumber int, body string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	comment := &github.IssueComment{
 		Body: github.String(body),
 	}
@@ -450,6 +485,9 @@ func (c *Client) ListAllFiles(path string) ([]string, error) {
 }
 
 func (c *Client) CreateIssue(title, body string, labels []string) (*github.Issue, error) {
+	if c.authNone {
+		return nil, fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	req := &github.IssueRequest{
 		Title:  github.String(title),
 		Body:   github.String(body),
@@ -539,6 +577,9 @@ func (c *Client) GetPRStatus(prNumber int) (*PRStatus, error) {
 }
 
 func (c *Client) MergePR(prNumber int, commitMessage string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	opts := &github.PullRequestOptions{
 		CommitTitle: commitMessage,
 		MergeMethod: "squash",
@@ -548,6 +589,9 @@ func (c *Client) MergePR(prNumber int, commitMessage string) error {
 }
 
 func (c *Client) ClosePR(prNumber int) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -564,6 +608,9 @@ func (c *Client) CommentOnPR(prNumber int, body string) error {
 }
 
 func (c *Client) CloseIssue(issueNumber int) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	state := "closed"
 	req := &github.IssueRequest{
 		State: &state,
@@ -573,6 +620,9 @@ func (c *Client) CloseIssue(issueNumber int) error {
 }
 
 func (c *Client) ReopenIssue(issueNumber int) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -670,6 +720,9 @@ func (c *Client) GetFailedCILogs(prNumber int) (string, error) {
 // UpdatePRBranch updates the PR branch by merging the base branch (main) into it.
 // This resolves conflicts when the PR is behind the base branch.
 func (c *Client) UpdatePRBranch(prNumber int) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -755,6 +808,9 @@ func (c *Client) ListFilesInBranch(branch, path string) ([]string, error) {
 }
 
 func (c *Client) DeleteFile(branch, path, message, sha string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	opts := &github.RepositoryContentFileOptions{
 		Message: github.String(message),
 		SHA:     github.String(sha),
@@ -788,6 +844,9 @@ func (c *Client) ListDirectory(branch, path string) ([]string, error) {
 
 // AddBinaryFile adds a binary file (e.g., an image) to the repository
 func (c *Client) AddBinaryFile(branch, path, message string, content []byte) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return err
 	}
@@ -905,6 +964,9 @@ func (c *Client) MarkPRReady(prNumber int) error {
 }
 
 func (c *Client) AddLabel(issueNumber int, label string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return err
 	}
@@ -913,6 +975,9 @@ func (c *Client) AddLabel(issueNumber int, label string) error {
 }
 
 func (c *Client) RemoveLabel(issueNumber int, label string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return err
 	}
@@ -942,6 +1007,9 @@ func (c *Client) HasLabel(issueNumber int, label string) (bool, error) {
 
 // GetAuthenticatedUsername returns the username of the authenticated user/bot
 func (c *Client) GetAuthenticatedUsername() (string, error) {
+	if c.authNone {
+		return "", fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return "", err
 	}
@@ -966,6 +1034,9 @@ func (c *Client) GetIssue(issueNumber int) (*github.Issue, error) {
 
 // AddAssignees adds assignees to an issue
 func (c *Client) AddAssignees(issueNumber int, assignees []string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return err
 	}
@@ -978,6 +1049,9 @@ func (c *Client) AddAssignees(issueNumber int, assignees []string) error {
 
 // RemoveAssignees removes assignees from an issue
 func (c *Client) RemoveAssignees(issueNumber int, assignees []string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return err
 	}
@@ -996,6 +1070,30 @@ func (c *Client) IsLocal() bool {
 func (c *Client) GetTopicIssues() ([]*github.Issue, error) {
 	if err := c.ensureValidToken(); err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	// If unauthenticated, fall back to REST API (GraphQL requires auth)
+	if c.authNone {
+		opts := &github.IssueListByRepoOptions{
+			State:  "open",
+			Labels: []string{"research topic"},
+			ListOptions: github.ListOptions{
+				PerPage: 100,
+			},
+		}
+		var allIssues []*github.Issue
+		for {
+			issues, resp, err := c.client.Issues.ListByRepo(c.ctx, c.owner, c.repo, opts)
+			if err != nil {
+				return nil, err
+			}
+			allIssues = append(allIssues, issues...)
+			if resp.NextPage == 0 {
+				break
+			}
+			opts.Page = resp.NextPage
+		}
+		return allIssues, nil
 	}
 
 	// GraphQL query to get issues by label
@@ -1128,6 +1226,9 @@ func (c *Client) GetTopicIssues() ([]*github.Issue, error) {
 
 // UpdateIssueBody updates the body content of an issue
 func (c *Client) UpdateIssueBody(issueNumber int, body string) error {
+	if c.authNone {
+		return fmt.Errorf("GitHub auth not configured (set GITHUB_TOKEN or GitHub App env vars)")
+	}
 	if err := c.ensureValidToken(); err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}

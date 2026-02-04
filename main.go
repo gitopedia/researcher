@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gitopedia/researcher/internal/agent"
+	"github.com/gitopedia/researcher/internal/api"
 	"github.com/gitopedia/researcher/internal/logging"
 	"github.com/joho/godotenv"
 )
@@ -25,6 +27,7 @@ func main() {
 	backfillImages := flag.Bool("backfill-images", false, "Generate image prompts and images for existing articles on current branch")
 	generateImages := flag.Bool("generate-images", false, "Only generate images from existing prompts (skip prompt generation)")
 	organizeBranch := flag.String("organize", "", "Organize articles from _incoming on specified branch (e.g., research/topic-121-...)")
+	serverMode := flag.Bool("server", false, "Start the dashboard API server (web UI mode)")
 	flag.Parse()
 
 	// Initialize structured, colorized logging using Go's standard library slog,
@@ -42,6 +45,50 @@ func main() {
 	}
 
 	log.Printf("Gitopedia Researcher v%s", agent.Version)
+
+	// Handle server mode - start API server for dashboard
+	if *serverMode {
+		if *repoPath == "" {
+			log.Fatal("--server mode requires --repo-path to specify the gitopedia repository")
+		}
+
+		log.Println("Starting in server mode (Dashboard API)...")
+		log.Printf("Repository path: %s", *repoPath)
+
+		server, err := api.NewServer(*repoPath)
+		if err != nil {
+			log.Fatalf("Failed to create API server: %v", err)
+		}
+
+		// Create context for graceful shutdown
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Handle shutdown signals
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigChan
+			log.Println("Shutdown signal received, stopping server...")
+			cancel()
+			
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer shutdownCancel()
+			
+			if err := server.Stop(shutdownCtx); err != nil {
+				log.Printf("Error during shutdown: %v", err)
+			}
+		}()
+
+		// Start server (blocks until shutdown)
+		if err := server.Start(ctx); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+
+		log.Println("Server stopped gracefully")
+		logging.Close()
+		return
+	}
+
 	if *mergeOnly {
 		log.Println("Starting in merge-only mode...")
 	} else {
