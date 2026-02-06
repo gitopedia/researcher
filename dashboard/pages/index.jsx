@@ -1,6 +1,7 @@
 import { useStatus } from '../hooks/useStatus';
 import StatusCard from '../components/StatusCard';
 import ServiceToggle from '../components/ServiceToggle';
+import ProgressBar from '../components/ProgressBar';
 import * as api from '../lib/api';
 
 function formatBytes(bytes) {
@@ -9,26 +10,6 @@ function formatBytes(bytes) {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-function ProgressBar({ value, max, color = 'var(--accent-blue)' }) {
-  const percent = max ? (value / max) * 100 : 0;
-  return (
-    <div style={{
-      height: 6,
-      backgroundColor: 'var(--bg-secondary)',
-      borderRadius: 3,
-      overflow: 'hidden',
-    }}>
-      <div style={{
-        height: '100%',
-        width: `${Math.min(percent, 100)}%`,
-        backgroundColor: color,
-        borderRadius: 3,
-        transition: 'width 0.3s ease',
-      }} />
-    </div>
-  );
 }
 
 export default function Dashboard() {

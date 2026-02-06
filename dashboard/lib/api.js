@@ -34,6 +34,10 @@ export const startResearcher = (config) => fetchAPI('/researcher/start', {
 export const pauseResearcher = () => fetchAPI('/researcher/pause', { method: 'POST' });
 export const resumeResearcher = () => fetchAPI('/researcher/resume', { method: 'POST' });
 export const stopResearcher = () => fetchAPI('/researcher/stop', { method: 'POST' });
+export const forceStopResearcher = () => fetchAPI('/researcher/stop', {
+  method: 'POST',
+  body: JSON.stringify({ force: true }),
+});
 
 // Service control
 export const startDocker = () => fetchAPI('/services/docker/start', { method: 'POST' });

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -40,6 +41,9 @@ type ArticleMetadata struct {
 	Searches       []SearchRecord  `json:"searches"`
 	SourcesUsed    []SourceRecord  `json:"sources_used"`
 	SourcesSkipped []SkippedSource `json:"sources_skipped"`
+	// SourcesAttempted tracks URLs that were tried (even if rejected/failed) so we can
+	// skip them in future runs for the same article.
+	SourcesAttempted []AttemptedSource `json:"sources_attempted,omitempty"`
 }
 
 // SearchRecord tracks a search query and its results
@@ -52,17 +56,75 @@ type SearchRecord struct {
 
 // SourceRecord tracks a source that was used
 type SourceRecord struct {
-	URL    string `json:"url"`
-	Domain string `json:"domain"`
-	Title  string `json:"title"`
+	URL          string `json:"url"`
+	CanonicalURL string `json:"canonical_url,omitempty"`
+	Domain       string `json:"domain"`
+	Title        string `json:"title"`
 }
 
 // SkippedSource tracks a source that was skipped
 type SkippedSource struct {
-	URL        string `json:"url"`
-	Domain     string `json:"domain"`
-	Reason     string `json:"reason"`
-	DetectedBy string `json:"detected_by"` // "global_list" or "llm"
+	URL          string `json:"url"`
+	CanonicalURL string `json:"canonical_url,omitempty"`
+	Domain       string `json:"domain"`
+	Reason       string `json:"reason"`
+	DetectedBy   string `json:"detected_by"` // "global_list" or "llm"
+}
+
+// AttemptedSource tracks a source URL that was attempted for this article.
+// This is used to avoid repeatedly paying fetch + LLM costs for the same URLs across runs.
+type AttemptedSource struct {
+	URL          string     `json:"url"`
+	CanonicalURL string     `json:"canonical_url"`
+	Domain       string     `json:"domain"`
+	Status       string     `json:"status"`               // e.g. rejected_not_relevant, fetch_failed_timeout, used
+	Reason       string     `json:"reason,omitempty"`     // human-readable reason
+	AttemptCount int        `json:"attempt_count"`        // number of attempts recorded
+	FirstSeen    time.Time  `json:"first_seen"`           // UTC
+	LastSeen     time.Time  `json:"last_seen"`            // UTC
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"` // UTC; if set, allow retry after this time
+}
+
+func splitFrontMatter(content string) (frontMatter string, body string) {
+	// Minimal YAML frontmatter splitter: expects YAML frontmatter delimited by lines containing only "---".
+	// If it can't find it, returns empty frontmatter and the full content as body.
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return "", content
+	}
+	dashes := 0
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "---" {
+			dashes++
+			if dashes == 2 {
+				fm := strings.Join(lines[:i+1], "\n")
+				rest := ""
+				if i+1 < len(lines) {
+					rest = strings.Join(lines[i+1:], "\n")
+				}
+				return fm + "\n", rest
+			}
+		}
+	}
+	return "", content
+}
+
+func isNoRelevantContentMiniArticle(s string) bool {
+	t := strings.TrimSpace(s)
+	return t == "NO_RELEVANT_CONTENT" || t == "NOT_RELEVANT"
+}
+
+func isSentinelOnlyArticle(content string) bool {
+	_, body := splitFrontMatter(content)
+	b := strings.TrimSpace(body)
+	if b == "" {
+		return true
+	}
+	// Common failure mode: mini-article is only the sentinel, plus an auto-added References section.
+	if strings.HasPrefix(b, "NO_RELEVANT_CONTENT") && !strings.Contains(b, "## Overview") {
+		return true
+	}
+	return false
 }
 
 // loadArticleMetadata loads metadata for an article from the .meta folder
@@ -75,10 +137,11 @@ func (a *Agent) loadArticleMetadata(branchName, slug string) (*ArticleMetadata, 
 		if err != nil {
 			// Return empty metadata if file doesn't exist
 			return &ArticleMetadata{
-				ArticleSlug:    slug,
-				Searches:       []SearchRecord{},
-				SourcesUsed:    []SourceRecord{},
-				SourcesSkipped: []SkippedSource{},
+				ArticleSlug:      slug,
+				Searches:         []SearchRecord{},
+				SourcesUsed:      []SourceRecord{},
+				SourcesSkipped:   []SkippedSource{},
+				SourcesAttempted: []AttemptedSource{},
 			}, nil
 		}
 	}
@@ -108,8 +171,9 @@ func (a *Agent) saveArticleMetadata(branchName string, meta *ArticleMetadata) er
 
 // isSourceAlreadyUsed checks if a URL has already been used for this article
 func (meta *ArticleMetadata) isSourceAlreadyUsed(url string) bool {
+	canon := canonicalizeURL(url)
 	for _, s := range meta.SourcesUsed {
-		if s.URL == url {
+		if s.URL == url || (canon != "" && (s.CanonicalURL == canon || canonicalizeURL(s.URL) == canon)) {
 			return true
 		}
 	}
@@ -119,26 +183,138 @@ func (meta *ArticleMetadata) isSourceAlreadyUsed(url string) bool {
 // addSourceUsed adds a source to the used list
 func (meta *ArticleMetadata) addSourceUsed(url, domain, title string) {
 	meta.SourcesUsed = append(meta.SourcesUsed, SourceRecord{
-		URL:    url,
-		Domain: domain,
-		Title:  title,
+		URL:          url,
+		CanonicalURL: canonicalizeURL(url),
+		Domain:       domain,
+		Title:        title,
 	})
 }
 
 // addSourceSkipped adds a source to the skipped list
 func (meta *ArticleMetadata) addSourceSkipped(url, domain, reason, detectedBy string) {
+	canon := canonicalizeURL(url)
 	// Check if already in list
 	for _, s := range meta.SourcesSkipped {
-		if s.URL == url {
+		if s.URL == url || (canon != "" && (s.CanonicalURL == canon || canonicalizeURL(s.URL) == canon)) {
 			return
 		}
 	}
 	meta.SourcesSkipped = append(meta.SourcesSkipped, SkippedSource{
-		URL:        url,
-		Domain:     domain,
-		Reason:     reason,
-		DetectedBy: detectedBy,
+		URL:          url,
+		CanonicalURL: canon,
+		Domain:       domain,
+		Reason:       reason,
+		DetectedBy:   detectedBy,
 	})
+}
+
+// isSourceAlreadyAttempted returns true if we've already attempted this URL and the attempt is still skippable.
+func (meta *ArticleMetadata) isSourceAlreadyAttempted(url string) bool {
+	canon := canonicalizeURL(url)
+	if canon == "" {
+		return false
+	}
+	now := time.Now().UTC()
+	for _, a := range meta.SourcesAttempted {
+		if a.CanonicalURL != canon {
+			continue
+		}
+		// If there's an expiry and it's in the past, allow retry.
+		if a.ExpiresAt != nil && now.After(*a.ExpiresAt) {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func (meta *ArticleMetadata) addSourceAttempted(rawURL, domain, status, reason string, expiresAt *time.Time) {
+	canon := canonicalizeURL(rawURL)
+	if canon == "" {
+		return
+	}
+	now := time.Now().UTC()
+	for i := range meta.SourcesAttempted {
+		if meta.SourcesAttempted[i].CanonicalURL != canon {
+			continue
+		}
+		meta.SourcesAttempted[i].LastSeen = now
+		meta.SourcesAttempted[i].AttemptCount++
+		meta.SourcesAttempted[i].Status = status
+		meta.SourcesAttempted[i].Reason = reason
+		meta.SourcesAttempted[i].Domain = domain
+		meta.SourcesAttempted[i].URL = rawURL
+		meta.SourcesAttempted[i].ExpiresAt = expiresAt
+		return
+	}
+	meta.SourcesAttempted = append(meta.SourcesAttempted, AttemptedSource{
+		URL:          rawURL,
+		CanonicalURL: canon,
+		Domain:       domain,
+		Status:       status,
+		Reason:       reason,
+		AttemptCount: 1,
+		FirstSeen:    now,
+		LastSeen:     now,
+		ExpiresAt:    expiresAt,
+	})
+}
+
+func canonicalizeURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	u.Fragment = ""
+	u.Host = strings.ToLower(u.Host)
+	if u.Scheme != "" {
+		u.Scheme = strings.ToLower(u.Scheme)
+	}
+
+	// Drop common tracking parameters
+	q := u.Query()
+	for k := range q {
+		kl := strings.ToLower(k)
+		if strings.HasPrefix(kl, "utm_") || kl == "gclid" || kl == "fbclid" || kl == "mc_cid" || kl == "mc_eid" {
+			q.Del(k)
+		}
+	}
+	u.RawQuery = q.Encode()
+
+	// Normalize trailing slash (keep root '/')
+	if u.Path != "/" {
+		u.Path = strings.TrimRight(u.Path, "/")
+	}
+	return u.String()
+}
+
+func attemptStatusFromFetchErr(err error) (status string, expiresAt *time.Time) {
+	if err == nil {
+		return "fetch_failed", nil
+	}
+	msg := strings.ToLower(err.Error())
+	now := time.Now().UTC()
+	// Timeouts are often transient; allow retry after a few days.
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "timeout") {
+		t := now.Add(7 * 24 * time.Hour)
+		return "fetch_failed_timeout", &t
+	}
+	// Forbidden is usually persistent but could change; retry after longer.
+	if strings.Contains(msg, "403") || strings.Contains(msg, "forbidden") {
+		t := now.Add(30 * 24 * time.Hour)
+		return "fetch_failed_403", &t
+	}
+	// 5xx are typically transient; retry after a short period.
+	if strings.Contains(msg, " 500") || strings.Contains(msg, " 502") || strings.Contains(msg, " 503") || strings.Contains(msg, " 504") ||
+		strings.Contains(msg, "internal server error") || strings.Contains(msg, "bad gateway") || strings.Contains(msg, "service unavailable") || strings.Contains(msg, "gateway timeout") {
+		t := now.Add(3 * 24 * time.Hour)
+		return "fetch_failed_5xx", &t
+	}
+	return "fetch_failed", nil
 }
 
 // addSearch adds a search record (skips if same query+page already exists)
@@ -172,18 +348,29 @@ func (a *Agent) findUsableSource(ctx context.Context, query, slug, branchName st
 	if err != nil {
 		log.Printf("Warning: Failed to load article metadata: %v", err)
 		meta = &ArticleMetadata{
-			ArticleSlug:    slug,
-			Searches:       []SearchRecord{},
-			SourcesUsed:    []SourceRecord{},
-			SourcesSkipped: []SkippedSource{},
+			ArticleSlug:      slug,
+			Searches:         []SearchRecord{},
+			SourcesUsed:      []SourceRecord{},
+			SourcesSkipped:   []SkippedSource{},
+			SourcesAttempted: []AttemptedSource{},
 		}
+	}
+	if a.attemptCache == nil {
+		a.attemptCache = NewAttemptCache()
+	}
+	a.attemptCache.SeedFromMeta(slug, meta)
+	if a.perf == nil {
+		a.perf = NewPerfTracker()
 	}
 
 	maxPages := 5 // Maximum pages to search
 
 	for page := 0; page < maxPages; page++ {
 		log.Printf("Searching for: %s (page %d)", query, page)
+		searchStart := time.Now()
 		results, err := a.search.SearchPage(query, page)
+		a.perf.Inc(slug, "search.calls", 1)
+		a.perf.AddDur(slug, "search.time", time.Since(searchStart))
 		if err != nil {
 			if page == 0 {
 				return nil, fmt.Errorf("search failed: %w", err)
@@ -201,13 +388,17 @@ func (a *Agent) findUsableSource(ctx context.Context, query, slug, branchName st
 
 		usableSourceFound := false
 		for _, r := range results {
+			a.perf.Inc(slug, "results.seen", 1)
 			if strings.HasSuffix(r.Href, ".pdf") {
 				log.Printf("Skipping PDF source: %s", r.Href)
 				continue
 			}
 
+			canonURL := canonicalizeURL(r.Href)
+
 			// Skip sources that have already failed in this run
-			if failedSources != nil && failedSources[r.Href] {
+			if failedSources != nil && failedSources[canonURL] {
+				a.perf.Inc(slug, "skip.failed", 1)
 				log.Printf("Skipping previously failed source: %s", r.Href)
 				continue
 			}
@@ -216,6 +407,7 @@ func (a *Agent) findUsableSource(ctx context.Context, query, slug, branchName st
 
 			// 1. Check global ignore list first (no LLM call needed)
 			if a.isDomainIgnored(domain) {
+				a.perf.Inc(slug, "skip.ignored_domain", 1)
 				log.Printf("Skipping globally ignored domain: %s", domain)
 				meta.addSourceSkipped(r.Href, domain, "encyclopedia", "global_list")
 				continue
@@ -223,7 +415,21 @@ func (a *Agent) findUsableSource(ctx context.Context, query, slug, branchName st
 
 			// 2. Check if source is already used for this article
 			if meta.isSourceAlreadyUsed(r.Href) {
+				a.perf.Inc(slug, "skip.used", 1)
 				log.Printf("Skipping already-used source: %s", r.Href)
+				continue
+			}
+
+			// 2b. Check if source was already attempted for this article (persisted)
+			if meta.isSourceAlreadyAttempted(r.Href) {
+				a.perf.Inc(slug, "skip.attempted", 1)
+				log.Printf("Skipping already-attempted source: %s", r.Href)
+				continue
+			}
+			// 2c. Check run-level cache (covers attempts not yet persisted)
+			if a.attemptCache.IsAttempted(slug, canonURL) {
+				a.perf.Inc(slug, "skip.attempted", 1)
+				log.Printf("Skipping already-attempted source (run cache): %s", r.Href)
 				continue
 			}
 
@@ -239,15 +445,25 @@ func (a *Agent) findUsableSource(ctx context.Context, query, slug, branchName st
 
 			// 4. Fetch and summarize content
 			log.Printf("Checking source: %s", r.Href)
+			fetchStart := time.Now()
 			content, err := a.search.FetchContent(r.Href)
+			a.perf.AddDur(slug, "fetch.time", time.Since(fetchStart))
 			if err != nil {
+				a.perf.Inc(slug, "fetch.err", 1)
+				status, exp := attemptStatusFromFetchErr(err)
+				meta.addSourceAttempted(r.Href, domain, status, err.Error(), exp)
+				a.attemptCache.MarkAttempted(slug, canonURL)
 				log.Printf("Failed to fetch content from %s: %v", r.Href, err)
 				continue
 			}
+			a.perf.Inc(slug, "fetch.ok", 1)
 
 			// We found a usable source!
 			meta.addSourceUsed(r.Href, domain, r.Title)
+			meta.addSourceAttempted(r.Href, domain, "used", "Selected for use", nil)
+			a.attemptCache.MarkAttempted(slug, canonURL)
 			usableSourceFound = true
+			a.perf.RecordURL(canonURL, domain)
 
 			return &SourceSearchResult{
 				Source: SourceInfo{
@@ -277,18 +493,29 @@ func (a *Agent) findUsableSourceWithSummary(ctx context.Context, topic, query, s
 	if err != nil {
 		log.Printf("Warning: Failed to load article metadata: %v", err)
 		meta = &ArticleMetadata{
-			ArticleSlug:    slug,
-			Searches:       []SearchRecord{},
-			SourcesUsed:    []SourceRecord{},
-			SourcesSkipped: []SkippedSource{},
+			ArticleSlug:      slug,
+			Searches:         []SearchRecord{},
+			SourcesUsed:      []SourceRecord{},
+			SourcesSkipped:   []SkippedSource{},
+			SourcesAttempted: []AttemptedSource{},
 		}
+	}
+	if a.attemptCache == nil {
+		a.attemptCache = NewAttemptCache()
+	}
+	a.attemptCache.SeedFromMeta(slug, meta)
+	if a.perf == nil {
+		a.perf = NewPerfTracker()
 	}
 
 	maxPages := 5
 
 	for page := 0; page < maxPages; page++ {
 		log.Printf("Searching for: %s (page %d)", query, page)
+		searchStart := time.Now()
 		results, err := a.search.SearchPage(query, page)
+		a.perf.Inc(slug, "search.calls", 1)
+		a.perf.AddDur(slug, "search.time", time.Since(searchStart))
 		if err != nil {
 			if page == 0 {
 				return nil, fmt.Errorf("search failed: %w", err)
@@ -304,11 +531,15 @@ func (a *Agent) findUsableSourceWithSummary(ctx context.Context, topic, query, s
 		meta.addSearch(query, len(results), page)
 
 		for _, r := range results {
+			a.perf.Inc(slug, "results.seen", 1)
 			if strings.HasSuffix(r.Href, ".pdf") {
 				continue
 			}
 
-			if failedSources != nil && failedSources[r.Href] {
+			canonURL := canonicalizeURL(r.Href)
+
+			if failedSources != nil && failedSources[canonURL] {
+				a.perf.Inc(slug, "skip.failed", 1)
 				log.Printf("Skipping previously failed source: %s", r.Href)
 				continue
 			}
@@ -317,6 +548,7 @@ func (a *Agent) findUsableSourceWithSummary(ctx context.Context, topic, query, s
 
 			// 1. Check global ignore list
 			if a.isDomainIgnored(domain) {
+				a.perf.Inc(slug, "skip.ignored_domain", 1)
 				log.Printf("Skipping globally ignored domain: %s", domain)
 				meta.addSourceSkipped(r.Href, domain, "encyclopedia", "global_list")
 				continue
@@ -324,7 +556,21 @@ func (a *Agent) findUsableSourceWithSummary(ctx context.Context, topic, query, s
 
 			// 2. Check if already used
 			if meta.isSourceAlreadyUsed(r.Href) {
+				a.perf.Inc(slug, "skip.used", 1)
 				log.Printf("Skipping already-used source: %s", r.Href)
+				continue
+			}
+
+			// 2b. Check if already attempted for this article
+			if meta.isSourceAlreadyAttempted(r.Href) {
+				a.perf.Inc(slug, "skip.attempted", 1)
+				log.Printf("Skipping already-attempted source: %s", r.Href)
+				continue
+			}
+			// 2c. Check run-level cache
+			if a.attemptCache.IsAttempted(slug, canonURL) {
+				a.perf.Inc(slug, "skip.attempted", 1)
+				log.Printf("Skipping already-attempted source (run cache): %s", r.Href)
 				continue
 			}
 
@@ -340,25 +586,45 @@ func (a *Agent) findUsableSourceWithSummary(ctx context.Context, topic, query, s
 
 			// 4. Fetch content
 			log.Printf("Checking source: %s", r.Href)
+			fetchStart := time.Now()
 			content, err := a.search.FetchContent(r.Href)
+			a.perf.AddDur(slug, "fetch.time", time.Since(fetchStart))
 			if err != nil {
+				a.perf.Inc(slug, "fetch.err", 1)
+				status, exp := attemptStatusFromFetchErr(err)
+				meta.addSourceAttempted(r.Href, domain, status, err.Error(), exp)
+				a.attemptCache.MarkAttempted(slug, canonURL)
 				log.Printf("Failed to fetch content from %s: %v", r.Href, err)
 				continue
 			}
+			a.perf.Inc(slug, "fetch.ok", 1)
 
 			// 5. Summarize and check relevance
+			sumStart := time.Now()
 			summary, err := a.llm.SummarizeSource(ctx, topic, r.Href, content)
+			a.perf.AddDur(slug, "summarize.time", time.Since(sumStart))
 			if err != nil {
+				a.perf.Inc(slug, "summarize.err", 1)
+				meta.addSourceAttempted(r.Href, domain, "summarize_failed", err.Error(), nil)
+				a.attemptCache.MarkAttempted(slug, canonURL)
 				log.Printf("Failed to summarize source %s: %v", r.Href, err)
 				continue
 			}
+			a.perf.Inc(slug, "summarize.ok", 1)
 
 			if !summary.Relevant {
+				a.perf.Inc(slug, "summarize.rejected", 1)
+				meta.addSourceAttempted(r.Href, domain, "rejected_not_relevant", summary.Reason, nil)
+				a.attemptCache.MarkAttempted(slug, canonURL)
 				log.Printf("Source rejected: %s - Reason: %s", r.Href, summary.Reason)
 				continue
 			}
 
+			a.perf.Inc(slug, "summarize.relevant", 1)
 			meta.addSourceUsed(r.Href, domain, r.Title)
+			meta.addSourceAttempted(r.Href, domain, "used", "Relevant and selected", nil)
+			a.attemptCache.MarkAttempted(slug, canonURL)
+			a.perf.RecordURL(canonURL, domain)
 			log.Printf("Found relevant source: %s", r.Title)
 
 			return &SourceSearchResult{
@@ -421,30 +687,63 @@ func (a *Agent) processNewTopic(ctx context.Context, issue *gh.Issue) error {
 
 	// 2. Search for source with global ignore list, metadata tracking, and pagination
 	query := articleTitle + " explained"
-	searchResult, err := a.findUsableSourceWithSummary(ctx, articleTitle, query, slug, branchName, nil)
-	if err != nil {
-		return err
+	failedSources := make(map[string]bool)
+	var searchResult *SourceSearchResult
+	var sourceInfo SourceInfo
+	var miniArticle string
+
+	maxMiniAttempts := getEnvInt("MAX_MINI_ARTICLE_ATTEMPTS", 5)
+	for attempt := 1; attempt <= maxMiniAttempts; attempt++ {
+		var err error
+		searchResult, err = a.findUsableSourceWithSummary(ctx, articleTitle, query, slug, branchName, failedSources)
+		if err != nil {
+			return err
+		}
+		sourceInfo = searchResult.Source
+
+		log.Printf("Generating mini-article from source... (attempt %d/%d)", attempt, maxMiniAttempts)
+		miniArticle, err = a.llm.GenerateMiniArticle(ctx, articleTitle, sourceInfo.Title, sourceInfo.Summary)
+		if err != nil {
+			if failedSources != nil {
+				if canon := canonicalizeURL(sourceInfo.URL); canon != "" {
+					failedSources[canon] = true
+				} else {
+					failedSources[sourceInfo.URL] = true
+				}
+			}
+			log.Printf("Marking source as failed (mini-article error): %s", sourceInfo.URL)
+			if attempt == maxMiniAttempts {
+				return fmt.Errorf("failed to generate mini article after %d attempts: %w", maxMiniAttempts, err)
+			}
+			continue
+		}
+		if isNoRelevantContentMiniArticle(miniArticle) {
+			if failedSources != nil {
+				if canon := canonicalizeURL(sourceInfo.URL); canon != "" {
+					failedSources[canon] = true
+				} else {
+					failedSources[sourceInfo.URL] = true
+				}
+			}
+			log.Printf("Marking source as failed (mini-article sentinel output): %s", sourceInfo.URL)
+			if attempt == maxMiniAttempts {
+				return fmt.Errorf("failed to generate a relevant mini-article after %d attempts", maxMiniAttempts)
+			}
+			continue
+		}
+		break
 	}
 
-	sourceInfo := searchResult.Source
-
 	// Save article metadata
-	if searchResult.Metadata != nil {
+	if searchResult != nil && searchResult.Metadata != nil {
 		if saveErr := a.saveArticleMetadata(branchName, searchResult.Metadata); saveErr != nil {
 			slog.Warn("Failed to save article metadata", "error", saveErr)
 		}
 	}
 
-	// 3. Save Source
+	// 3. Save Source (only after we have a valid mini-article)
 	if err := a.saveSourceSummary(sourceInfo, articleTitle, slug, branchName); err != nil {
 		return fmt.Errorf("failed to save source: %w", err)
-	}
-
-	// 4. Generate Mini Article (Overview)
-	log.Printf("Generating mini-article from source...")
-	miniArticle, err := a.llm.GenerateMiniArticle(ctx, articleTitle, sourceInfo.Title, sourceInfo.Summary)
-	if err != nil {
-		return fmt.Errorf("failed to generate mini article: %w", err)
 	}
 
 	// 5. Create Article File
@@ -474,6 +773,13 @@ iterations: 0
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
+
+	// Save debug seed materials so we always have traceability even if improvements never land.
+	seedTs := time.Now().Format("20060102-150405")
+	a.saveDebugText(branchName, fmt.Sprintf("%s/seed-article-%s.md", debugBasePath(slug), seedTs), "Save seed article", cleanedMiniArticle)
+	a.saveDebugText(branchName, fmt.Sprintf("%s/seed-source-%s.md", debugBasePath(slug), seedTs), "Save seed source",
+		fmt.Sprintf("Title: %s\nURL: %s\n\nSummary chars: %d\n", sourceInfo.Title, sourceInfo.URL, len(sourceInfo.Summary)))
+
 	fullContent := frontMatter + cleanedMiniArticle + fmt.Sprintf("\n\n## References\n\n[^1]: [%s](%s)", sourceInfo.Title, sourceInfo.URL)
 
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
@@ -570,6 +876,16 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 	var improvementResults []*ImprovementResult
 	var errors []string
 
+	// Reset run-level attempt cache for this topic run.
+	a.attemptCache = NewAttemptCache()
+	a.perf = NewPerfTracker()
+	defer func() {
+		if a.perf != nil {
+			a.perf.LogAllArticles()
+			a.perf.LogRun()
+		}
+	}()
+
 	// Track failed sources to avoid retrying them in this run
 	failedSources := make(map[string]bool)
 
@@ -634,10 +950,18 @@ func (a *Agent) processTopicWithIterations(ctx context.Context, issue *gh.Issue,
 					// Continue trying more improvements even if one fails
 					continue
 				}
-				successCount++
-				if result != nil {
-					improvementResults = append(improvementResults, result)
+				// Only count an improvement if it actually changed the article.
+				// Some improvement paths intentionally return nil (or Success=false) to indicate "no-op" (e.g., Mode A found no valuable new sections).
+				if result == nil {
+					log.Printf("[New Article Improvement] No-op improvement for '%s' (attempt %d): no changes applied", article.Name, attempt)
+					continue
 				}
+				improvementResults = append(improvementResults, result)
+				if !result.Success {
+					log.Printf("[New Article Improvement] No-op improvement for '%s' (attempt %d): Success=false", article.Name, attempt)
+					continue
+				}
+				successCount++
 			}
 			if successCount < minImprovements {
 				log.Printf("Warning: Only achieved %d/%d successful improvements for '%s' after %d attempts", successCount, minImprovements, article.Name, maxAttempts)
@@ -933,13 +1257,20 @@ func (a *Agent) processNewArticle(ctx context.Context, issue *gh.Issue, articleN
 	// Generate Mini Article (Overview)
 	log.Printf("Generating mini-article from source...")
 	miniArticle, err := a.llm.GenerateMiniArticle(ctx, articleTitle, sourceInfo.Title, sourceInfo.Summary)
-	if err != nil {
+	if err != nil || isNoRelevantContentMiniArticle(miniArticle) {
 		// Mark this source as failed so we don't retry it
 		if failedSources != nil {
-			failedSources[sourceInfo.URL] = true
+			if canon := canonicalizeURL(sourceInfo.URL); canon != "" {
+				failedSources[canon] = true
+			} else {
+				failedSources[sourceInfo.URL] = true
+			}
 		}
 		log.Printf("Marking source as failed: %s", sourceInfo.URL)
-		return fmt.Errorf("failed to generate mini article: %w", err)
+		if err != nil {
+			return fmt.Errorf("failed to generate mini article: %w", err)
+		}
+		return fmt.Errorf("mini-article generation returned sentinel output (NO_RELEVANT_CONTENT)")
 	}
 
 	// Create Article File
@@ -969,6 +1300,13 @@ iterations: 0
 
 	// Strip any hallucinated references section before adding the real one
 	cleanedMiniArticle := stripReferencesSection(miniArticle)
+
+	// Save debug seed materials so we always have traceability even if improvements never land.
+	seedTs := time.Now().Format("20060102-150405")
+	a.saveDebugText(branchName, fmt.Sprintf("%s/seed-article-%s.md", debugBasePath(slug), seedTs), "Save seed article", cleanedMiniArticle)
+	a.saveDebugText(branchName, fmt.Sprintf("%s/seed-source-%s.md", debugBasePath(slug), seedTs), "Save seed source",
+		fmt.Sprintf("Title: %s\nURL: %s\n\nSummary chars: %d\n", sourceInfo.Title, sourceInfo.URL, len(sourceInfo.Summary)))
+
 	fullContent := frontMatter + cleanedMiniArticle + fmt.Sprintf("\n\n## References\n\n[^1]: [%s](%s)", sourceInfo.Title, sourceInfo.URL)
 
 	articlePath := fmt.Sprintf("Compendium/_incoming/%s.md", slug)
@@ -1004,6 +1342,64 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 			result.ErrorMessage = fmt.Sprintf("failed to load article %s: %v", articlePath, err)
 			return result, fmt.Errorf("failed to load article %s: %w", articlePath, err)
 		}
+	}
+
+	// Auto-repair: if the article is just NO_RELEVANT_CONTENT, regenerate it from a new source.
+	if isSentinelOnlyArticle(articleContent) {
+		log.Printf("[Improvement] Article '%s' is NO_RELEVANT_CONTENT; regenerating from a new source", topic)
+		query := topic + " explained"
+
+		var searchResult *SourceSearchResult
+		var sourceInfo SourceInfo
+		var miniArticle string
+		maxMiniAttempts := getEnvInt("MAX_MINI_ARTICLE_ATTEMPTS", 5)
+		for attempt := 1; attempt <= maxMiniAttempts; attempt++ {
+			var err error
+			searchResult, err = a.findUsableSourceWithSummary(ctx, topic, query, slug, branchName, failedSources)
+			if err != nil {
+				return result, err
+			}
+			sourceInfo = searchResult.Source
+
+			log.Printf("Generating mini-article for regeneration... (attempt %d/%d)", attempt, maxMiniAttempts)
+			miniArticle, err = a.llm.GenerateMiniArticle(ctx, topic, sourceInfo.Title, sourceInfo.Summary)
+			if err != nil || isNoRelevantContentMiniArticle(miniArticle) {
+				if failedSources != nil {
+					if canon := canonicalizeURL(sourceInfo.URL); canon != "" {
+						failedSources[canon] = true
+					} else {
+						failedSources[sourceInfo.URL] = true
+					}
+				}
+				log.Printf("Marking source as failed (regeneration): %s", sourceInfo.URL)
+				if attempt == maxMiniAttempts {
+					if err != nil {
+						return result, fmt.Errorf("failed to regenerate article: %w", err)
+					}
+					return result, fmt.Errorf("failed to regenerate article: mini-article returned NO_RELEVANT_CONTENT")
+				}
+				continue
+			}
+			break
+		}
+
+		// Save source summary for traceability
+		if err := a.saveSourceSummary(sourceInfo, topic, slug, branchName); err != nil {
+			slog.Warn("Failed to save source summary during regeneration", "error", err)
+		}
+
+		fm, _ := splitFrontMatter(articleContent)
+		cleanedMini := stripReferencesSection(miniArticle)
+		updated := fm + "\n" + cleanedMini + fmt.Sprintf("\n\n## References\n\n[^1]: [%s](%s)", sourceInfo.Title, sourceInfo.URL)
+		if err := a.gh.UpdateFile(branchName, articlePath, "Regenerate article content", updated, articleSHA); err != nil {
+			return result, fmt.Errorf("failed to update article during regeneration: %w", err)
+		}
+
+		result.Mode = "Regenerate Article"
+		result.Success = true
+		result.SourceTitle = sourceInfo.Title
+		result.SourceURL = sourceInfo.URL
+		return result, nil
 	}
 
 	// Extract sections from existing article
@@ -1045,8 +1441,6 @@ func (a *Agent) improveArticle(ctx context.Context, issue *gh.Issue, articleName
 		result.ErrorMessage = err.Error()
 		return result, err
 	}
-
-	result.Success = true
 	return result, nil
 }
 
@@ -1102,7 +1496,13 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	newArticle, err := a.llm.GenerateMiniArticle(ctx, topic, sourceInfo.Title, sourceInfo.Summary)
 	if err != nil {
 		// Mark this source as failed so we don't retry it
-		failedSources[sourceInfo.URL] = true
+		if failedSources != nil {
+			if canon := canonicalizeURL(sourceInfo.URL); canon != "" {
+				failedSources[canon] = true
+			} else {
+				failedSources[sourceInfo.URL] = true
+			}
+		}
 		log.Printf("[Mode A] Marking source as failed: %s", sourceInfo.URL)
 		actionLog.WriteString(fmt.Sprintf("- **Error:** Failed to generate mini-article: %v\n", err))
 		return fmt.Errorf("failed to generate mini-article: %w", err)
@@ -1146,6 +1546,7 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 			actionLog.WriteString(fmt.Sprintf("- **Result:** No valuable new sections to add\n"))
 			actionLog.WriteString(fmt.Sprintf("- **Reason:** %s\n", comparison.Reason))
 			log.Printf("[Mode A] No new sections to add: %s", comparison.Reason)
+			result.Success = false
 			return nil
 		}
 	}
@@ -1215,6 +1616,7 @@ func (a *Agent) improveModeAddSection(ctx context.Context, topic, slug, branchNa
 	result.SectionName = strings.Join(addedSections, ", ")
 	actionLog.WriteString(fmt.Sprintf("\n### Result\n\n- **Success:** Added %d section(s) to article: %s\n", len(addedSections), result.SectionName))
 	log.Printf("[Mode A] Successfully added %d section(s) to article '%s': %v", len(addedSections), topic, addedSections)
+	result.Success = true
 	return nil
 }
 
@@ -1254,7 +1656,8 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 
 	if len(existingSections) == 0 {
 		actionLog.WriteString("- **Result:** No sections found to improve\n")
-		return fmt.Errorf("no sections found to improve")
+		result.Success = false
+		return nil
 	}
 
 	// Filter to level 2 sections (H2), excluding References
@@ -1276,14 +1679,16 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 
 	if len(eligibleSections) == 0 {
 		actionLog.WriteString("- **Result:** No suitable sections to improve\n")
-		return fmt.Errorf("no suitable sections to improve")
+		result.Success = false
+		return nil
 	}
 
 	// Use weighted selection - bias toward shorter sections that need improvement
 	selected := selectSectionWeighted(eligibleSections)
 	if selected == nil {
 		actionLog.WriteString("- **Result:** Failed to select section\n")
-		return fmt.Errorf("failed to select section")
+		result.Success = false
+		return nil
 	}
 	selectedSection := *selected
 
@@ -1305,7 +1710,8 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 	}
 	if strings.TrimSpace(currentSectionContent) == "" {
 		actionLog.WriteString("- **Error:** No section content available for comparison; skipping improvement\n")
-		return fmt.Errorf("no section content available for comparison")
+		result.Success = false
+		return nil
 	}
 
 	// Generate search query using deterministic template (more reliable than LLM)
@@ -1373,7 +1779,8 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 	if score.Score < 7 || score.Recommendation != "accept" {
 		actionLog.WriteString(fmt.Sprintf("\n- **Result:** Improvement rejected (score too low)\n"))
 		log.Printf("[Mode B] Improvement rejected: score=%d, recommendation=%s", score.Score, score.Recommendation)
-		return fmt.Errorf("improvement rejected: score %d/10", score.Score)
+		result.Success = false
+		return nil
 	}
 
 	// Replace the section in the article
@@ -1396,6 +1803,7 @@ func (a *Agent) improveModeImproveSection(ctx context.Context, topic, slug, bran
 
 	actionLog.WriteString(fmt.Sprintf("\n### Result\n\n- **Success:** Improved section '%s'\n", selectedSection.Title))
 	log.Printf("[Mode B] Successfully improved section '%s' in article '%s'", selectedSection.Title, topic)
+	result.Success = true
 	return nil
 }
 

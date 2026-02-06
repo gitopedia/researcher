@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useStatus } from '../hooks/useStatus';
 import StatusCard from '../components/StatusCard';
 import * as api from '../lib/api';
+import { parseIssueChecklist, parseRunProgress } from '../lib/runProgress';
+import ProgressBar from '../components/ProgressBar';
 
 export default function ResearcherPage() {
   const { researcherStatus, refresh } = useStatus();
@@ -27,6 +29,10 @@ export default function ResearcherPage() {
   const [createModal, setCreateModal] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [creating, setCreating] = useState(false);
+
+  // Run progress (derived from logs + issue checklist)
+  const [runProgress, setRunProgress] = useState(null);
+  const [runProgressError, setRunProgressError] = useState(null);
 
   // Load branch and config data
   const loadBranchData = useCallback(async () => {
@@ -201,6 +207,41 @@ export default function ResearcherPage() {
 
   const isIdle = researcherStatus?.state === 'idle';
   const isOnMain = branch?.isMain;
+  const isRunActive = researcherStatus?.state === 'running' || researcherStatus?.state === 'paused';
+
+  // Poll researcher logs while a run is active, then derive progress counters.
+  useEffect(() => {
+    if (!isRunActive) {
+      setRunProgress(null);
+      setRunProgressError(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const fetchProgress = async () => {
+      try {
+        const res = await api.getResearcherLogs(1200);
+        if (cancelled) return;
+
+        const parsed = parseRunProgress(res?.text || '');
+        const checklist = parseIssueChecklist(branchIssue?.issue?.body || '');
+        setRunProgress({ parsed, checklist, logPath: res?.path || '' });
+        setRunProgressError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setRunProgressError(e.message);
+      }
+    };
+
+    // Fetch immediately and then every 2s (same cadence as Logs page)
+    fetchProgress();
+    const t = setInterval(fetchProgress, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [isRunActive, branchIssue?.issue?.body]);
 
   return (
     <div>
@@ -492,6 +533,206 @@ export default function ResearcherPage() {
         >
           {researcherStatus?.state === 'running' || researcherStatus?.state === 'paused' ? (
             <div>
+              {/* Run Progress */}
+              <div style={{
+                padding: '12px 16px',
+                backgroundColor: 'var(--bg-secondary)',
+                borderRadius: 8,
+                marginBottom: 16,
+                border: '1px solid var(--border-color)',
+              }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'baseline',
+                  marginBottom: 10,
+                }}>
+                  <div style={{
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    color: 'var(--text-primary)',
+                  }}>
+                    Run Progress
+                  </div>
+                  {runProgress?.logPath && (
+                    <div style={{
+                      fontSize: '0.72rem',
+                      color: 'var(--text-muted)',
+                      fontFamily: 'JetBrains Mono, monospace',
+                      maxWidth: 220,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      textAlign: 'right',
+                    }}>
+                      {runProgress.logPath}
+                    </div>
+                  )}
+                </div>
+
+                {runProgressError && (
+                  <div style={{
+                    fontSize: '0.8rem',
+                    color: 'var(--accent-red)',
+                    marginBottom: 10,
+                  }}>
+                    Failed to read logs: {runProgressError}
+                  </div>
+                )}
+
+                {(() => {
+                  const parsed = runProgress?.parsed;
+                  const checklist = runProgress?.checklist;
+                  const imageGen = parsed?.imageGen;
+                  const improvement = parsed?.improvement;
+                  const topicIteration = parsed?.topicIteration;
+
+                  const showImageProgress = Boolean(imageGen);
+
+                  const currentArticleName =
+                    (improvement?.article) ||
+                    (parsed?.currentArticle?.name) ||
+                    null;
+
+                  const articleDone = checklist?.done ?? null;
+                  const articleTotal = checklist?.total ?? null;
+
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {/* Image processing indicators (Phase 2 only) */}
+                      {showImageProgress ? (
+                        <>
+                          <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            fontSize: '0.8rem',
+                          }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>
+                              Images generated
+                            </span>
+                            <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                              {imageGen?.current != null && imageGen?.total != null
+                                ? `${imageGen.current} / ${imageGen.total}`
+                                : 'In progress…'}
+                            </span>
+                          </div>
+                          {imageGen?.current != null && imageGen?.total != null && imageGen.total > 0 && (
+                            <ProgressBar
+                              value={imageGen.current}
+                              max={imageGen.total}
+                              color="var(--accent-purple)"
+                            />
+                          )}
+
+                          {imageGen?.topic && (
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                              {imageGen.topic}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {/* Topic iteration loop (when available) */}
+                          {topicIteration && topicIteration.total > 0 && (
+                            <>
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                fontSize: '0.8rem',
+                              }}>
+                                <span style={{ color: 'var(--text-secondary)' }}>
+                                  Topic iterations
+                                </span>
+                                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                                  {topicIteration.current} / {topicIteration.total}
+                                </span>
+                              </div>
+                              <ProgressBar
+                                value={topicIteration.current}
+                                max={topicIteration.total}
+                                color="var(--accent-blue)"
+                              />
+                            </>
+                          )}
+
+                          {/* Article checklist progress (best-effort from issue body) */}
+                          {articleTotal && articleTotal > 0 && (
+                            <>
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                fontSize: '0.8rem',
+                              }}>
+                                <span style={{ color: 'var(--text-secondary)' }}>
+                                  Articles complete
+                                </span>
+                                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                                  {articleDone} / {articleTotal}
+                                </span>
+                              </div>
+                              <ProgressBar
+                                value={articleDone}
+                                max={articleTotal}
+                                color="var(--accent-green)"
+                              />
+                            </>
+                          )}
+
+                          {/* Current improvement attempts/successes */}
+                          {improvement && (
+                            <div style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1fr auto',
+                              gap: 8,
+                              alignItems: 'center',
+                              fontSize: '0.8rem',
+                            }}>
+                              <div style={{ color: 'var(--text-secondary)' }}>
+                                Improvement attempts
+                              </div>
+                              <div style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                                {improvement.attempt} / {improvement.maxAttempts}
+                              </div>
+                              <div style={{ gridColumn: '1 / -1' }}>
+                                <ProgressBar
+                                  value={improvement.attempt}
+                                  max={improvement.maxAttempts}
+                                  color="var(--accent-yellow)"
+                                />
+                              </div>
+
+                              <div style={{ color: 'var(--text-secondary)' }}>
+                                Improvement successes
+                              </div>
+                              <div style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                                {improvement.successes} / {improvement.minSuccesses}
+                              </div>
+                              <div style={{ gridColumn: '1 / -1' }}>
+                                <ProgressBar
+                                  value={Math.min(improvement.successes, improvement.minSuccesses)}
+                                  max={improvement.minSuccesses}
+                                  color="var(--accent-green)"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {currentArticleName && (
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                              Current: {currentArticleName}
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        {parsed?.lastEvent || researcherStatus.currentStep || 'In progress…'}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
               <div style={{
                 padding: '12px 16px',
                 backgroundColor: 'var(--bg-secondary)',
@@ -606,7 +847,7 @@ export default function ResearcherPage() {
                     if (!ok) return;
                     setLoading(true);
                     try {
-                      await api.stopResearcher();
+                      await api.forceStopResearcher();
                       await refresh();
                       setError(null);
                     } catch (e) {

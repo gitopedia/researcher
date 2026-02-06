@@ -68,6 +68,27 @@ func (s *Server) handleResearcherStart(w http.ResponseWriter, r *http.Request) {
 		config.Mode = ModeFull
 	}
 
+	// Ensure Ollama is running before starting a run (the run will otherwise fail/stall on LLM calls).
+	// Only attempt this when LLM_BASE_URL points at the local Ollama port.
+	baseURL := os.Getenv("LLM_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:11434/v1"
+	}
+	if strings.Contains(baseURL, "localhost:11434") || strings.Contains(baseURL, "127.0.0.1:11434") || strings.Contains(baseURL, "[::1]:11434") {
+		oll := s.status.GetOllamaStatus()
+		if !oll.Running {
+			log.Printf("[Dashboard] Ollama not running, attempting auto-start...")
+			_ = StartOllama()
+			// Re-check after short delay
+			time.Sleep(1 * time.Second)
+			oll2 := s.status.GetOllamaStatus()
+			if !oll2.Running {
+				respondError(w, http.StatusServiceUnavailable, "Ollama is not running and could not be started. Start it from Dashboard > Services (or install/start native Ollama).")
+				return
+			}
+		}
+	}
+
 	if err := s.runner.Start(config); err != nil {
 		respondError(w, http.StatusConflict, err.Error())
 		return
@@ -93,6 +114,18 @@ func (s *Server) handleResearcherResume(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleResearcherStop(w http.ResponseWriter, r *http.Request) {
+	// Optional: allow force stop (kills subprocess immediately)
+	var req struct {
+		Force bool `json:"force"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if req.Force {
+		res := s.runner.ForceStop()
+		respondJSON(w, http.StatusOK, res)
+		return
+	}
+
 	if err := s.runner.Stop(); err != nil {
 		respondError(w, http.StatusConflict, err.Error())
 		return
@@ -706,6 +739,11 @@ type FinalizeResult struct {
 	Converted []string `json:"converted"`
 	Deleted   []string `json:"deleted"`
 	Errors    []string `json:"errors"`
+
+	Committed     bool     `json:"committed,omitempty"`
+	CommitHash    string   `json:"commitHash,omitempty"`
+	CommitMessage string   `json:"commitMessage,omitempty"`
+	StagedFiles   []string `json:"stagedFiles,omitempty"`
 }
 
 func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
@@ -753,6 +791,35 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	// Clean up the selections file after finalization
 	selectionsPath := s.getSelectionsPath()
 	os.Remove(selectionsPath)
+
+	// Auto-commit finalize changes (local only)
+	// Default: enabled, but can be disabled by setting DASHBOARD_AUTO_COMMIT_FINALIZE_IMAGES=0/false.
+	autoCommit := true
+	if v := strings.TrimSpace(os.Getenv("DASHBOARD_AUTO_COMMIT_FINALIZE_IMAGES")); v != "" {
+		switch strings.ToLower(v) {
+		case "0", "false", "no", "off":
+			autoCommit = false
+		}
+	}
+	if autoCommit && s.gitMgr != nil {
+		msg := fmt.Sprintf("Finalize images (%d renamed, %d converted, %d deleted)", len(result.Renamed), len(result.Converted), len(result.Deleted))
+		committed, hash, staged, cerr := s.gitMgr.StageAndCommit(CommitOptions{
+			Paths: []string{
+				filepath.Join("Compendium", "_incoming"),
+				filepath.Join("Compendium", "_debug", "image_selections.json"),
+			},
+			Message:    msg,
+			SkipOnMain: true,
+		})
+		if cerr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("Auto-commit failed: %v", cerr))
+		} else if committed {
+			result.Committed = true
+			result.CommitHash = hash
+			result.CommitMessage = msg
+			result.StagedFiles = staged
+		}
+	}
 	
 	respondJSON(w, http.StatusOK, result)
 }

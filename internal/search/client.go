@@ -2,7 +2,9 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -20,6 +22,7 @@ type Client struct {
 	apiBaseURL         string
 	maxChars           int
 	maxResultsPerQuery int
+	protectedDomains   *ProtectedDomains
 }
 
 type Result struct {
@@ -44,11 +47,22 @@ func NewClient() *Client {
 		}
 	}
 
+	protectedPath := os.Getenv("PROTECTED_DOMAINS_FILE")
+	if protectedPath == "" {
+		protectedPath = "protected_domains.json"
+	}
+	pd, err := LoadProtectedDomains(protectedPath)
+	if err != nil {
+		log.Printf("Warning: failed to load protected domains from %s: %v", protectedPath, err)
+		pd = NewProtectedDomains(protectedPath)
+	}
+
 	return &Client{
 		httpClient:         &http.Client{Timeout: 10 * time.Second},
 		apiBaseURL:         "https://api.duckduckgo.com/",
 		maxChars:           maxChars,
 		maxResultsPerQuery: maxResultsPerQuery,
+		protectedDomains:   pd,
 	}
 }
 
@@ -187,7 +201,15 @@ func (c *Client) SearchPage(query string, page int) ([]Result, error) {
 }
 
 func (c *Client) FetchContent(targetURL string) (string, error) {
+	const minAcceptableExtractedChars = 800
+
 	log.Printf("Fetching content (headless): %s", targetURL)
+
+	parsed, _ := url.Parse(targetURL)
+	domain := ""
+	if parsed != nil {
+		domain = parsed.Hostname()
+	}
 
 	// Create allocator options
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -207,7 +229,14 @@ func (c *Client) FetchContent(targetURL string) (string, error) {
 	defer cancelCtx()
 
 	// Set a timeout for the entire operation
-	ctx, cancelTimeout := context.WithTimeout(ctx, 45*time.Second)
+	headlessTimeout := 45 * time.Second
+	if domain != "" && c.protectedDomains != nil && c.protectedDomains.IsProtected(domain) {
+		// Keep quality as much as possible while avoiding repeated 45s stalls on known-problem domains.
+		// Try a short headless attempt, then fall back to HTTP quickly.
+		headlessTimeout = 10 * time.Second
+		log.Printf("Domain %s is protected; using shorter headless timeout (%v)", domain, headlessTimeout)
+	}
+	ctx, cancelTimeout := context.WithTimeout(ctx, headlessTimeout)
 	defer cancelTimeout()
 
 	var htmlContent string
@@ -218,10 +247,89 @@ func (c *Client) FetchContent(targetURL string) (string, error) {
 		chromedp.Sleep(2*time.Second),
 		chromedp.OuterHTML("html", &htmlContent),
 	)
+	var headlessText string
+	var headlessErr error
 	if err != nil {
-		return "", fmt.Errorf("headless fetch failed: %w", err)
+		// Record timeouts so we can avoid repeatedly paying the full headless timeout for this domain.
+		if domain != "" && c.protectedDomains != nil && errors.Is(err, context.DeadlineExceeded) {
+			c.protectedDomains.RecordTimeout(domain)
+		}
+		headlessErr = fmt.Errorf("headless fetch failed: %w", err)
+	} else {
+		if extracted, err := c.extractReadableTextFromHTML(htmlContent); err != nil {
+			headlessErr = err
+		} else {
+			headlessText = extracted
+		}
 	}
 
+	if len(strings.TrimSpace(headlessText)) >= minAcceptableExtractedChars {
+		return headlessText, nil
+	}
+	if headlessErr != nil {
+		log.Printf("Headless fetch failed for %s: %v; attempting HTTP fallback", targetURL, headlessErr)
+	} else {
+		log.Printf("Headless extraction too short for %s (%d chars); attempting HTTP fallback",
+			targetURL, len(strings.TrimSpace(headlessText)))
+	}
+
+	httpHTML, httpErr := c.fetchHTMLHTTP(targetURL)
+	if httpErr == nil {
+		httpText, err := c.extractReadableTextFromHTML(httpHTML)
+		if err == nil && strings.TrimSpace(httpText) != "" {
+			return httpText, nil
+		}
+		if err != nil {
+			httpErr = err
+		} else {
+			httpErr = fmt.Errorf("HTTP fallback produced empty extracted text")
+		}
+	}
+
+	// Prefer returning the headless error when headless failed outright; otherwise return the HTTP error.
+	if headlessErr != nil {
+		return "", headlessErr
+	}
+	return "", httpErr
+}
+
+func (c *Client) fetchHTMLHTTP(targetURL string) (string, error) {
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		return "", err
+	}
+	// Use a realistic browser UA; some sites serve JS shells to "HeadlessChrome".
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+	// Use a slightly longer timeout than the search client default (content pages can be slower).
+	client := c.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
+	} else if client.Timeout < 20*time.Second {
+		client = &http.Client{Timeout: 20 * time.Second}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("HTTP fallback bad status: %s", resp.Status)
+	}
+
+	// Guardrail: cap HTML read size.
+	const maxHTMLBytes = 5 * 1024 * 1024
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxHTMLBytes))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) extractReadableTextFromHTML(htmlContent string) (string, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		return "", err
@@ -238,32 +346,40 @@ func (c *Client) FetchContent(targetURL string) (string, error) {
 	// Also remove by class names commonly used for references
 	doc.Find(".reflist, .references, .citation, .navbox, .sidebar, .infobox, .toc, #toc").Remove()
 
-	// Extract readable text (paragraphs and headers)
-	var textBuilder strings.Builder
-	// Expanded selector to capture more structure, but exclude nav/footer elements
-	doc.Find("article, .mw-parser-output, main, .content, #content, #bodyContent").First().Find("h1, h2, h3, h4, p, li").Each(func(i int, s *goquery.Selection) {
-		// Skip items inside reference lists or navigation
-		if s.ParentsFiltered(".reflist, .references, .navbox, .sidebar, nav, footer, .toc").Length() > 0 {
-			return
-		}
-		// Normalize whitespace
-		text := strings.Join(strings.Fields(s.Text()), " ")
-		if len(text) > 20 { // Filter out very short snippets/nav items
-			textBuilder.WriteString(text + "\n\n")
+	extractFromRoot := func(root *goquery.Selection) string {
+		var b strings.Builder
+		root.Find("h1, h2, h3, h4, p, li").Each(func(i int, s *goquery.Selection) {
+			// Skip items inside reference lists or navigation
+			if s.ParentsFiltered(".reflist, .references, .navbox, .sidebar, nav, footer, .toc").Length() > 0 {
+				return
+			}
+			// Normalize whitespace
+			text := strings.Join(strings.Fields(s.Text()), " ")
+			if len(text) > 20 { // Filter out very short snippets/nav items
+				b.WriteString(text + "\n\n")
+			}
+		})
+		return b.String()
+	}
+
+	// Many modern sites have multiple candidate "content" containers; picking `.First()` can land on
+	// a cookie banner or navigation block. Try all candidates and keep the largest extraction.
+	candidateSelector := "article, main, .content, #content, #bodyContent, .entry-content, .post-content, .post-body, .article-content, .page-content"
+	best := ""
+	doc.Find(candidateSelector).Each(func(i int, root *goquery.Selection) {
+		txt := extractFromRoot(root)
+		if len(txt) > len(best) {
+			best = txt
 		}
 	})
 
-	// Fallback: if the above selectors found nothing, use the whole body
-	if textBuilder.Len() == 0 {
-		doc.Find("h1, h2, h3, p, li").Each(func(i int, s *goquery.Selection) {
-			text := strings.Join(strings.Fields(s.Text()), " ")
-			if len(text) > 20 {
-				textBuilder.WriteString(text + "\n\n")
-			}
-		})
+	// Fallback: if no candidate containers produced anything, use the whole document.
+	if strings.TrimSpace(best) == "" {
+		best = extractFromRoot(doc.Selection)
 	}
 
-	text := textBuilder.String()
+	text := best
+
 	// Limit to a large but bounded size to avoid pathological pages.
 	// We now rely on an LLM summarization step to compress this further,
 	// so this cap just protects against extremely large documents.

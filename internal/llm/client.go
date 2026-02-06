@@ -22,28 +22,28 @@ import (
 var promptsFS embed.FS
 
 type Client struct {
-	client                            *openai.Client
-	httpClient                        *http.Client
-	modelGenerateArticle              string
-	modelSuggestTopics                string
-	modelSummarizePlain               string
-	modelSummarizeJSON                string
-	thinkMode                         string // "false", "true", "low", "medium", "high"
-	ollamaBaseUrl                     string
-	generateArticleSystemTemplate     *template.Template
-	generateArticleUserTemplate       *template.Template
-	suggestTopicsSystemTemplate       *template.Template
-	suggestTopicsUserTemplate         *template.Template
-	summarizeSourceSystemTemplate     *template.Template
-	summarizeSourceUserTemplate       *template.Template
-	convertSummarySystemTemplate      *template.Template
-	convertSummaryUserTemplate        *template.Template
-	addReferencesSystemTemplate       *template.Template
-	addReferencesUserTemplate         *template.Template
-	generateMiniArticleSystemTemplate *template.Template
-	generateMiniArticleUserTemplate   *template.Template
-	checkRelevanceSystemTemplate      *template.Template
-	checkRelevanceUserTemplate        *template.Template
+	client                                   *openai.Client
+	httpClient                               *http.Client
+	modelGenerateArticle                     string
+	modelSuggestTopics                       string
+	modelSummarizePlain                      string
+	modelSummarizeJSON                       string
+	thinkMode                                string // "false", "true", "low", "medium", "high"
+	ollamaBaseUrl                            string
+	generateArticleSystemTemplate            *template.Template
+	generateArticleUserTemplate              *template.Template
+	suggestTopicsSystemTemplate              *template.Template
+	suggestTopicsUserTemplate                *template.Template
+	summarizeSourceSystemTemplate            *template.Template
+	summarizeSourceUserTemplate              *template.Template
+	convertSummarySystemTemplate             *template.Template
+	convertSummaryUserTemplate               *template.Template
+	addReferencesSystemTemplate              *template.Template
+	addReferencesUserTemplate                *template.Template
+	generateMiniArticleSystemTemplate        *template.Template
+	generateMiniArticleUserTemplate          *template.Template
+	checkRelevanceSystemTemplate             *template.Template
+	checkRelevanceUserTemplate               *template.Template
 	checkRedundancySystemTemplate            *template.Template
 	checkRedundancyUserTemplate              *template.Template
 	integrateContentSystemTemplate           *template.Template
@@ -52,20 +52,20 @@ type Client struct {
 	extractVisualElementsUserTemplate        *template.Template
 	generateImagePromptSystemTemplate        *template.Template
 	generateImagePromptUserTemplate          *template.Template
-	evaluateSectionImageSystemTemplate           *template.Template
-	evaluateSectionImageUserTemplate             *template.Template
-	generateSectionImagePromptSystemTemplate     *template.Template
-	generateSectionImagePromptUserTemplate       *template.Template
-	isEncyclopediaSourceSystemTemplate           *template.Template
-	isEncyclopediaSourceUserTemplate             *template.Template
-	extractSectionsSystemTemplate                *template.Template
-	extractSectionsUserTemplate                  *template.Template
-	suggestNewSectionSystemTemplate              *template.Template
-	suggestNewSectionUserTemplate                *template.Template
-	compareSectionsSystemTemplate                *template.Template
-	compareSectionsUserTemplate                  *template.Template
-	orderSectionsSystemTemplate  *template.Template
-	orderSectionsUserTemplate    *template.Template
+	evaluateSectionImageSystemTemplate       *template.Template
+	evaluateSectionImageUserTemplate         *template.Template
+	generateSectionImagePromptSystemTemplate *template.Template
+	generateSectionImagePromptUserTemplate   *template.Template
+	isEncyclopediaSourceSystemTemplate       *template.Template
+	isEncyclopediaSourceUserTemplate         *template.Template
+	extractSectionsSystemTemplate            *template.Template
+	extractSectionsUserTemplate              *template.Template
+	suggestNewSectionSystemTemplate          *template.Template
+	suggestNewSectionUserTemplate            *template.Template
+	compareSectionsSystemTemplate            *template.Template
+	compareSectionsUserTemplate              *template.Template
+	orderSectionsSystemTemplate              *template.Template
+	orderSectionsUserTemplate                *template.Template
 	mergeSectionSystemTemplate               *template.Template
 	mergeSectionUserTemplate                 *template.Template
 	scoreImprovementSystemTemplate           *template.Template
@@ -113,7 +113,9 @@ func NewClient() (*Client, error) {
 		apiKey = "ollama" // Default for Ollama
 	}
 	if baseUrl == "" {
-		baseUrl = "http://localhost:11434/v1"
+		// Use explicit IPv4 loopback to avoid environments where "localhost" resolves to ::1
+		// but Ollama is only listening on 127.0.0.1.
+		baseUrl = "http://127.0.0.1:11434/v1"
 	}
 
 	// Configure HTTP client with 15 minute timeout for large models
@@ -423,28 +425,28 @@ func NewClient() (*Client, error) {
 	}
 
 	return &Client{
-		client:                            openai.NewClientWithConfig(config),
-		httpClient:                        httpClient,
-		modelGenerateArticle:              modelGenerateArticle,
-		modelSuggestTopics:                modelSuggestTopics,
-		modelSummarizePlain:               modelSummarizePlain,
-		modelSummarizeJSON:                modelSummarizeJSON,
-		thinkMode:                         thinkMode,
-		ollamaBaseUrl:                     ollamaBaseUrl,
-		generateArticleSystemTemplate:     generateArticleSystem,
-		generateArticleUserTemplate:       generateArticleUser,
-		suggestTopicsSystemTemplate:       suggestTopicsSystem,
-		suggestTopicsUserTemplate:         suggestTopicsUser,
-		summarizeSourceSystemTemplate:     summarizeSourceSystem,
-		summarizeSourceUserTemplate:       summarizeSourceUser,
-		convertSummarySystemTemplate:      convertSummarySystem,
-		convertSummaryUserTemplate:        convertSummaryUser,
-		addReferencesSystemTemplate:       addReferencesSystem,
-		addReferencesUserTemplate:         addReferencesUser,
-		generateMiniArticleSystemTemplate: generateMiniArticleSystem,
-		generateMiniArticleUserTemplate:   generateMiniArticleUser,
-		checkRelevanceSystemTemplate:      checkRelevanceSystem,
-		checkRelevanceUserTemplate:        checkRelevanceUser,
+		client:                                   openai.NewClientWithConfig(config),
+		httpClient:                               httpClient,
+		modelGenerateArticle:                     modelGenerateArticle,
+		modelSuggestTopics:                       modelSuggestTopics,
+		modelSummarizePlain:                      modelSummarizePlain,
+		modelSummarizeJSON:                       modelSummarizeJSON,
+		thinkMode:                                thinkMode,
+		ollamaBaseUrl:                            ollamaBaseUrl,
+		generateArticleSystemTemplate:            generateArticleSystem,
+		generateArticleUserTemplate:              generateArticleUser,
+		suggestTopicsSystemTemplate:              suggestTopicsSystem,
+		suggestTopicsUserTemplate:                suggestTopicsUser,
+		summarizeSourceSystemTemplate:            summarizeSourceSystem,
+		summarizeSourceUserTemplate:              summarizeSourceUser,
+		convertSummarySystemTemplate:             convertSummarySystem,
+		convertSummaryUserTemplate:               convertSummaryUser,
+		addReferencesSystemTemplate:              addReferencesSystem,
+		addReferencesUserTemplate:                addReferencesUser,
+		generateMiniArticleSystemTemplate:        generateMiniArticleSystem,
+		generateMiniArticleUserTemplate:          generateMiniArticleUser,
+		checkRelevanceSystemTemplate:             checkRelevanceSystem,
+		checkRelevanceUserTemplate:               checkRelevanceUser,
 		checkRedundancySystemTemplate:            checkRedundancySystem,
 		checkRedundancyUserTemplate:              checkRedundancyUser,
 		integrateContentSystemTemplate:           integrateContentSystem,
@@ -455,32 +457,32 @@ func NewClient() (*Client, error) {
 		generateImagePromptUserTemplate:          generateImagePromptUser,
 		evaluateSectionImageSystemTemplate:       evaluateSectionImageSystem,
 		evaluateSectionImageUserTemplate:         evaluateSectionImageUser,
-		generateSectionImagePromptSystemTemplate:     generateSectionImagePromptSystem,
-		generateSectionImagePromptUserTemplate:       generateSectionImagePromptUser,
-		isEncyclopediaSourceSystemTemplate:           isEncyclopediaSourceSystem,
-		isEncyclopediaSourceUserTemplate:             isEncyclopediaSourceUser,
-		extractSectionsSystemTemplate:                extractSectionsSystem,
-		extractSectionsUserTemplate:                  extractSectionsUser,
-		suggestNewSectionSystemTemplate:              suggestNewSectionSystem,
-		suggestNewSectionUserTemplate:                suggestNewSectionUser,
-		compareSectionsSystemTemplate:                compareSectionsSystem,
-		compareSectionsUserTemplate:                  compareSectionsUser,
-		orderSectionsSystemTemplate:  orderSectionsSystem,
-		orderSectionsUserTemplate:    orderSectionsUser,
-		mergeSectionSystemTemplate:              mergeSectionSystem,
-		mergeSectionUserTemplate:                mergeSectionUser,
-		scoreImprovementSystemTemplate:          scoreImprovementSystem,
-		scoreImprovementUserTemplate:            scoreImprovementUser,
-		extractConceptsSystemTemplate:           extractConceptsSystem,
-		extractConceptsUserTemplate:             extractConceptsUser,
-		mapConceptToSectionSystemTemplate:       mapConceptToSectionSystem,
-		mapConceptToSectionUserTemplate:         mapConceptToSectionUser,
-		rewriteSectionWithConceptSystemTemplate: rewriteSectionWithConceptSystem,
-		rewriteSectionWithConceptUserTemplate:   rewriteSectionWithConceptUser,
-		generateNewSectionSystemTemplate:        generateNewSectionSystem,
-		generateNewSectionUserTemplate:          generateNewSectionUser,
-		generateIndexImagePromptSystemTemplate:  generateIndexImagePromptSystem,
-		generateIndexImagePromptUserTemplate:    generateIndexImagePromptUser,
+		generateSectionImagePromptSystemTemplate: generateSectionImagePromptSystem,
+		generateSectionImagePromptUserTemplate:   generateSectionImagePromptUser,
+		isEncyclopediaSourceSystemTemplate:       isEncyclopediaSourceSystem,
+		isEncyclopediaSourceUserTemplate:         isEncyclopediaSourceUser,
+		extractSectionsSystemTemplate:            extractSectionsSystem,
+		extractSectionsUserTemplate:              extractSectionsUser,
+		suggestNewSectionSystemTemplate:          suggestNewSectionSystem,
+		suggestNewSectionUserTemplate:            suggestNewSectionUser,
+		compareSectionsSystemTemplate:            compareSectionsSystem,
+		compareSectionsUserTemplate:              compareSectionsUser,
+		orderSectionsSystemTemplate:              orderSectionsSystem,
+		orderSectionsUserTemplate:                orderSectionsUser,
+		mergeSectionSystemTemplate:               mergeSectionSystem,
+		mergeSectionUserTemplate:                 mergeSectionUser,
+		scoreImprovementSystemTemplate:           scoreImprovementSystem,
+		scoreImprovementUserTemplate:             scoreImprovementUser,
+		extractConceptsSystemTemplate:            extractConceptsSystem,
+		extractConceptsUserTemplate:              extractConceptsUser,
+		mapConceptToSectionSystemTemplate:        mapConceptToSectionSystem,
+		mapConceptToSectionUserTemplate:          mapConceptToSectionUser,
+		rewriteSectionWithConceptSystemTemplate:  rewriteSectionWithConceptSystem,
+		rewriteSectionWithConceptUserTemplate:    rewriteSectionWithConceptUser,
+		generateNewSectionSystemTemplate:         generateNewSectionSystem,
+		generateNewSectionUserTemplate:           generateNewSectionUser,
+		generateIndexImagePromptSystemTemplate:   generateIndexImagePromptSystem,
+		generateIndexImagePromptUserTemplate:     generateIndexImagePromptUser,
 	}, nil
 }
 
@@ -856,6 +858,35 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	// Log input content length for debugging
 	log.Printf("SummarizeSource: Received %d chars of input content for %s", len(content), urlStr)
 
+	// Pre-filter generic web cruft before sending to the LLM.
+	// This reduces token load without changing acceptance criteria.
+	filtered := PreFilterContent(content)
+	if filtered != "" && filtered != content {
+		log.Printf("SummarizeSource: PreFilterContent reduced input from %d -> %d chars for %s", len(content), len(filtered), urlStr)
+	}
+
+	// If extraction yielded almost nothing, do not ask the LLM to "summarize" it.
+	// This commonly happens when a site blocks headless browsers or serves a JS shell/consent page.
+	const minExtractedCharsForSummarization = 800
+	// Prefer filtered content when it is sufficiently large; otherwise fall back to the original to avoid
+	// accidentally rejecting a page due to over-aggressive filtering.
+	contentForLLM := content
+	if len(strings.TrimSpace(filtered)) >= minExtractedCharsForSummarization {
+		contentForLLM = filtered
+	}
+	trimmedContentLen := len(strings.TrimSpace(contentForLLM))
+	if trimmedContentLen < minExtractedCharsForSummarization {
+		return SourceSummary{
+			Model:       c.modelSummarizePlain,
+			Language:    detectLanguage(content),
+			Raw:         "",
+			Step1Output: "",
+			Relevant:    false,
+			Summary:     "",
+			Reason:      fmt.Sprintf("Insufficient extracted content (%d chars)", trimmedContentLen),
+		}, nil
+	}
+
 	// Step 1: Summarize content to plain text
 	var plain string
 
@@ -867,7 +898,7 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	data := map[string]interface{}{
 		"Topic":   topic,
 		"URL":     urlStr,
-		"Content": content,
+		"Content": contentForLLM,
 	}
 	var userBuf bytes.Buffer
 	if err := c.summarizeSourceUserTemplate.Execute(&userBuf, data); err != nil {
@@ -909,6 +940,20 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	}
 
 	log.Printf("Stage 1: Completed LLM plain-text summarization (model: %s), output length: %d chars", c.modelSummarizePlain, len(plain))
+
+	// Hard-stop sentinel handling: if the model explicitly indicated irrelevance, trust it.
+	// Downstream JSON conversion sometimes mis-classifies this.
+	if strings.EqualFold(strings.TrimSpace(plain), "NOT_RELEVANT") {
+		return SourceSummary{
+			Model:       c.modelSummarizePlain,
+			Language:    detectLanguage(content),
+			Raw:         plain,
+			Step1Output: plain,
+			Relevant:    false,
+			Summary:     "",
+			Reason:      "Model returned NOT_RELEVANT",
+		}, nil
+	}
 
 	summary := SourceSummary{
 		Model:       c.modelSummarizePlain,
@@ -961,18 +1006,36 @@ func (c *Client) SummarizeSource(ctx context.Context, topic, urlStr, content str
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &converted); err != nil {
 		log.Printf("Warning: Failed to parse step 2 JSON: %v. Falling back to plain text. Raw JSON: %.200s...", err, rawJSON)
-		// Fallback: treat plain text as summary and assume relevant
-		summary.Summary = plain
-		summary.Relevant = true
-		summary.Reason = "Fallback from plain text summarization"
-	} else {
-		// Check if summary is empty even after successful JSON parse
-		if strings.TrimSpace(converted.Summary) == "" {
-			log.Printf("Warning: JSON conversion produced empty summary (relevant=%v, reason=%q). Falling back to plain text (plain length: %d chars)",
-				converted.Relevant, converted.Reason, len(plain))
+		// Fallback: treat plain text as summary, but never mark relevant if it is empty or the sentinel.
+		if strings.EqualFold(strings.TrimSpace(plain), "NOT_RELEVANT") || strings.TrimSpace(plain) == "" {
+			summary.Summary = ""
+			summary.Relevant = false
+			summary.Reason = "Step 2 JSON parse failed and Step 1 contained no usable content"
+		} else {
 			summary.Summary = plain
 			summary.Relevant = true
-			summary.Reason = "Fallback: JSON conversion produced empty summary"
+			summary.Reason = "Fallback from plain text summarization (step 2 JSON parse failed)"
+		}
+	} else {
+		// If the model says it's not relevant, honor that regardless of summary contents.
+		if !converted.Relevant {
+			summary.Relevant = false
+			summary.Reason = converted.Reason
+			summary.Summary = ""
+		} else if strings.TrimSpace(converted.Summary) == "" {
+			// Check if summary is empty even after successful JSON parse
+			log.Printf("Warning: JSON conversion produced empty summary (relevant=%v, reason=%q). Falling back to plain text (plain length: %d chars)",
+				converted.Relevant, converted.Reason, len(plain))
+			// Only fall back to plain text if it contains real content.
+			if strings.EqualFold(strings.TrimSpace(plain), "NOT_RELEVANT") || strings.TrimSpace(plain) == "" {
+				summary.Summary = ""
+				summary.Relevant = false
+				summary.Reason = "Empty summary and Step 1 contained no usable content"
+			} else {
+				summary.Summary = plain
+				summary.Relevant = true
+				summary.Reason = "Fallback: JSON conversion produced empty summary"
+			}
 		} else {
 			summary.Relevant = converted.Relevant
 			summary.Reason = converted.Reason
@@ -2011,9 +2074,9 @@ func (c *Client) RewriteSectionWithConcept(ctx context.Context, topic, sectionCo
 	}
 
 	data := map[string]interface{}{
-		"Topic":          topic,
-		"CurrentSection": sectionContent,
-		"ConceptName":    concept.Name,
+		"Topic":              topic,
+		"CurrentSection":     sectionContent,
+		"ConceptName":        concept.Name,
 		"ConceptDescription": concept.Description,
 		"SourceEvidence":     concept.SourceEvidence,
 	}

@@ -39,6 +39,11 @@ type Agent struct {
 	search         search.Searcher
 	llm            llm.Generator
 	ignoredDomains map[string]bool // Global list of encyclopedia domains to skip
+	// attemptCache is reset per topic run; used to avoid repeated URL attempts within a run
+	// even before metadata is persisted back to the repo.
+	attemptCache *AttemptCache
+	// perf is reset per topic run; collects aggregated timings/counters for reporting.
+	perf *PerfTracker
 }
 
 func debugBasePath(slug string) string {
@@ -385,6 +390,16 @@ func (a *Agent) processTopicOnExistingBranch(ctx context.Context, issue *gh.Issu
 
 	log.Printf("Starting processing for topic #%d: %s on existing branch %s",
 		issueNum, topicTitle, branchName)
+
+	// Reset run-level attempt cache for this topic run.
+	a.attemptCache = NewAttemptCache()
+	a.perf = NewPerfTracker()
+	defer func() {
+		if a.perf != nil {
+			a.perf.LogAllArticles()
+			a.perf.LogRun()
+		}
+	}()
 
 	// Track failed sources to avoid retrying them in this run
 	failedSources := make(map[string]bool)

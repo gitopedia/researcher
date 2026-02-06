@@ -20,9 +20,9 @@ import (
 type RunState string
 
 const (
-	StateIdle    RunState = "idle"
-	StateRunning RunState = "running"
-	StatePaused  RunState = "paused"
+	StateIdle     RunState = "idle"
+	StateRunning  RunState = "running"
+	StatePaused   RunState = "paused"
 	StateStopping RunState = "stopping"
 )
 
@@ -37,25 +37,32 @@ const (
 
 // ResearchRunner manages research run execution with start/stop/pause support
 type ResearchRunner struct {
-	mu           sync.RWMutex
-	state        RunState
-	mode         RunMode
-	currentStep  string
-	progress     int // 0-100
-	startTime    *time.Time
-	pid          int
-	
+	mu          sync.RWMutex
+	state       RunState
+	mode        RunMode
+	currentStep string
+	progress    int // 0-100
+	startTime   *time.Time
+	pid         int
+
 	// Control channels
-	pauseCh      chan struct{}
-	resumeCh     chan struct{}
-	stopCh       chan struct{}
-	
+	pauseCh  chan struct{}
+	resumeCh chan struct{}
+	stopCh   chan struct{}
+
 	// Process management
-	cmd          *exec.Cmd
-	cancelFunc   context.CancelFunc
-	
-	repoPath     string
-	broadcastFn  func(StatusUpdate)
+	cmd        *exec.Cmd
+	cancelFunc context.CancelFunc
+
+	repoPath    string
+	broadcastFn func(StatusUpdate)
+}
+
+type StopResult struct {
+	Status        string `json:"status"`
+	KilledPIDs    []int  `json:"killedPids,omitempty"`
+	RemainingPIDs []int  `json:"remainingPids,omitempty"`
+	Message       string `json:"message,omitempty"`
 }
 
 type runnerPIDFile struct {
@@ -216,7 +223,7 @@ func (r *ResearchRunner) Start(config RunConfig) error {
 	// Build command based on mode
 	args := []string{"run", "."}
 	args = append(args, "--once")
-	
+
 	if r.repoPath != "" {
 		args = append(args, "--repo-path", r.repoPath)
 	}
@@ -350,18 +357,37 @@ func (r *ResearchRunner) Stop() error {
 	defer r.mu.Unlock()
 
 	if r.state == StateIdle {
+		var killed int
+		var errs []string
+
 		// If backend restarted, we may still have an orphaned process recorded on disk.
 		if pf, ok := r.readPIDFile(); ok {
-			_ = killPIDTree(pf.PID)
+			if err := killPIDTree(pf.PID); err != nil {
+				errs = append(errs, fmt.Sprintf("failed to kill pid from pidfile (%d): %v", pf.PID, err))
+			} else {
+				killed++
+			}
 			r.clearPIDFile()
-			r.currentStep = "Stopped orphaned run"
 			r.pid = 0
-			return nil
 		}
 
 		// Extra safety: if PID file is missing/outdated, try to find and kill stray researcher runs.
-		if killed := r.killOrphanedResearchRunsUnlocked(); killed > 0 {
-			r.currentStep = fmt.Sprintf("Stopped %d orphaned run(s)", killed)
+		killed += r.killOrphanedResearchRunsUnlocked()
+
+		// Verify no orphaned runs remain. If they do, surface an error so UI can display it.
+		remaining := r.findOrphanedResearchRunsUnlocked()
+		if len(remaining) > 0 {
+			errs = append(errs, fmt.Sprintf("still running: %v", remaining))
+		}
+
+		if killed > 0 {
+			r.currentStep = fmt.Sprintf("Stopped %d run(s)", killed)
+		} else if len(errs) == 0 {
+			r.currentStep = "No run to stop"
+		}
+
+		if len(errs) > 0 {
+			return fmt.Errorf("%s", strings.Join(errs, "; "))
 		}
 		return nil
 	}
@@ -378,11 +404,11 @@ func (r *ResearchRunner) Stop() error {
 		time.Sleep(5 * time.Second)
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		
+
 		if r.cmd != nil && r.cmd.Process != nil {
 			log.Printf("[Runner] Forcefully terminating process PID %d", r.cmd.Process.Pid)
 			_ = killPIDTree(r.cmd.Process.Pid)
-			
+
 			// Update state after killing
 			r.state = StateIdle
 			r.currentStep = "Stopped by user"
@@ -394,6 +420,76 @@ func (r *ResearchRunner) Stop() error {
 
 	log.Println("[Runner] Stopping...")
 	return nil
+}
+
+// ForceStop immediately kills the active run process (if any) and any orphaned dashboard runs.
+// This is used when the run is stuck (e.g. waiting on network/ollama) or the backend lost state.
+func (r *ResearchRunner) ForceStop() StopResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var killed []int
+
+	// Kill PID recorded on disk (if present)
+	if pf, ok := r.readPIDFile(); ok {
+		_ = killPIDTree(pf.PID)
+		killed = append(killed, pf.PID)
+		r.clearPIDFile()
+		r.pid = 0
+	}
+
+	// Kill active command PID (if any)
+	if r.cmd != nil && r.cmd.Process != nil {
+		_ = killPIDTree(r.cmd.Process.Pid)
+		killed = append(killed, r.cmd.Process.Pid)
+	}
+
+	// Cancel context as well (best-effort)
+	if r.cancelFunc != nil {
+		r.cancelFunc()
+	}
+
+	// Kill any other orphaned dashboard runs
+	_ = r.killOrphanedResearchRunsUnlocked()
+
+	remaining := r.findOrphanedResearchRunsUnlocked()
+
+	// Update visible state
+	if len(remaining) == 0 {
+		r.state = StateIdle
+		r.mode = ""
+		r.currentStep = "Force-stopped"
+		r.progress = 0
+		r.startTime = nil
+	} else {
+		r.state = StateStopping
+		r.currentStep = fmt.Sprintf("Force-stop attempted; %d process(es) still running", len(remaining))
+	}
+
+	r.broadcast("researcher", r.getStatusUnlocked())
+
+	return StopResult{
+		Status:        "force-stopped",
+		KilledPIDs:    uniqueInts(killed),
+		RemainingPIDs: remaining,
+		Message:       r.currentStep,
+	}
+}
+
+func uniqueInts(in []int) []int {
+	seen := make(map[int]bool)
+	var out []int
+	for _, v := range in {
+		if v <= 0 {
+			continue
+		}
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
 }
 
 func killPIDTree(pid int) error {
@@ -423,22 +519,47 @@ func (r *ResearchRunner) killOrphanedResearchRunsUnlocked() int {
 		return 0
 	}
 
-	// Use PowerShell to find go.exe processes whose command line matches our repo path and dashboard run pattern.
-	// Then taskkill each PID with /T to kill process tree.
-	ps := fmt.Sprintf(`$repo=%q; `+
-		`$pids=Get-CimInstance Win32_Process | Where-Object { `+
-		`$_.Name -eq 'go.exe' -and $_.CommandLine -match 'go run \. --once' -and $_.CommandLine -like ('*' + $repo + '*') } `+
-		`| Select-Object -ExpandProperty ProcessId; `+
-		`$k=0; foreach($p in $pids){ try{ taskkill /F /T /PID $p | Out-Null; $k++ }catch{} }; `+
-		`Write-Output $k`, r.repoPath)
+	// First, find candidate PIDs via PowerShell. Then kill each PID via taskkill from Go.
+	// (Doing the kill in PowerShell can falsely "succeed" because taskkill failures don't always throw.)
+	pids := r.findOrphanedResearchRunsUnlocked()
+	killed := 0
+	for _, pid := range pids {
+		if err := killPIDTree(pid); err != nil {
+			log.Printf("[Runner] Failed to kill orphaned run pid=%d: %v", pid, err)
+			continue
+		}
+		killed++
+	}
+	return killed
+}
 
+// findOrphanedResearchRunsUnlocked returns PIDs of likely orphaned dashboard runs.
+// Must be called with r.mu held.
+func (r *ResearchRunner) findOrphanedResearchRunsUnlocked() []int {
+	if runtime.GOOS != "windows" || r.repoPath == "" {
+		return nil
+	}
+	repo2 := strings.ReplaceAll(r.repoPath, `\`, `/`)
+	// Match both go.exe and temp researcher.exe; require --once and --repo-path for this repo.
+	ps := fmt.Sprintf(`$repo=%q; $repo2=%q; `+
+		`Get-CimInstance Win32_Process | Where-Object { `+
+		`( $_.Name -eq 'go.exe' -or $_.Name -eq 'researcher.exe' ) -and `+
+		// NOTE: --once starts with '-' (a non-word character), so regex word-boundaries (\b) do NOT match it.
+		// Use explicit whitespace / start/end checks instead.
+		`$_.CommandLine -match '(?i)(^|\s)--once(\s|$)' -and `+
+		`( $_.CommandLine -like ('*--repo-path ' + $repo + '*') -or $_.CommandLine -like ('*--repo-path ' + $repo2 + '*') ) } `+
+		`| Select-Object -ExpandProperty ProcessId`, r.repoPath, repo2)
 	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput()
 	if err != nil {
-		log.Printf("[Runner] Failed to kill orphaned runs via PowerShell: %v (%s)", err, string(out))
-		return 0
+		return nil
 	}
-	n, _ := strconv.Atoi(strings.TrimSpace(string(out)))
-	return n
+	var pids []int
+	for _, f := range strings.Fields(string(out)) {
+		if n, err := strconv.Atoi(strings.TrimSpace(f)); err == nil && n > 0 {
+			pids = append(pids, n)
+		}
+	}
+	return pids
 }
 
 // UpdateStep updates the current step (called by agent during execution)
@@ -486,7 +607,7 @@ func StartDocker() error {
 		if dockerPath == "" {
 			dockerPath = `C:\Program Files\Docker\Docker\Docker Desktop.exe`
 		}
-		
+
 		cmd := exec.Command(dockerPath)
 		return cmd.Start()
 	}
@@ -504,6 +625,11 @@ func StopDocker() error {
 
 // StartOllama starts the Ollama service
 func StartOllama() error {
+	// If something is already serving on the Ollama port, consider it started.
+	if runtime.GOOS == "windows" && isListening("127.0.0.1:11434") {
+		return nil
+	}
+
 	startCmd := os.Getenv("OLLAMA_START_CMD")
 	if startCmd == "" {
 		startCmd = "docker compose start ollama"
@@ -511,10 +637,44 @@ func StartOllama() error {
 
 	// Check if this is a native command (not docker compose)
 	if !strings.Contains(startCmd, "docker") && !strings.Contains(startCmd, "compose") {
-		return runNativeCmd(startCmd)
+		// Best-effort native start
+		_ = runNativeCmd(startCmd)
+		if runtime.GOOS == "windows" {
+			// If port still isn't up, try starting native Ollama directly.
+			if !isListening("127.0.0.1:11434") {
+				_ = startNativeOllamaWindows()
+			}
+			if waitForListening("127.0.0.1:11434", 12*time.Second) {
+				return nil
+			}
+		}
+		// Non-windows or still not up
+		if waitForListening("127.0.0.1:11434", 8*time.Second) {
+			return nil
+		}
+		return fmt.Errorf("failed to start ollama with native command")
 	}
 
-	return runDockerComposeCmd(startCmd)
+	// Try docker compose start (best-effort). Even if it errors, we may still be able to start native Ollama.
+	dockerErr := runDockerComposeCmd(startCmd)
+
+	// If port is up after docker compose, we're done.
+	if waitForListening("127.0.0.1:11434", 6*time.Second) {
+		return nil
+	}
+
+	// On Windows, fall back to native Ollama if docker didn't bring it up (common when using native install).
+	if runtime.GOOS == "windows" {
+		_ = startNativeOllamaWindows()
+		if waitForListening("127.0.0.1:11434", 12*time.Second) {
+			return nil
+		}
+	}
+
+	if dockerErr != nil {
+		return fmt.Errorf("failed to start ollama: %v", dockerErr)
+	}
+	return fmt.Errorf("failed to start ollama: port 11434 did not become available")
 }
 
 // StopOllama stops the Ollama service
@@ -622,6 +782,47 @@ func isListening(addr string) bool {
 	}
 	_ = c.Close()
 	return true
+}
+
+func waitForListening(addr string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if isListening(addr) {
+			return true
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return isListening(addr)
+}
+
+// startNativeOllamaWindows starts a native Windows Ollama server (not docker).
+// This attempts to launch `ollama.exe serve` detached.
+func startNativeOllamaWindows() error {
+	// Try PATH first
+	cmd := exec.Command("where.exe", "ollama")
+	out, err := cmd.CombinedOutput()
+	ollamaPath := ""
+	if err == nil {
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(lines) > 0 {
+			ollamaPath = strings.TrimSpace(lines[0])
+		}
+	}
+	if ollamaPath == "" {
+		// Default install location
+		ollamaPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Ollama", "ollama.exe")
+	}
+	if _, statErr := os.Stat(ollamaPath); statErr != nil {
+		return fmt.Errorf("native ollama.exe not found at %s", ollamaPath)
+	}
+
+	// Use PowerShell Start-Process to detach
+	ps := fmt.Sprintf(`Start-Process -FilePath %q -ArgumentList 'serve' -WindowStyle Hidden`, ollamaPath)
+	out2, err2 := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput()
+	if err2 != nil {
+		return fmt.Errorf("failed to start native ollama: %v (%s)", err2, string(out2))
+	}
+	return nil
 }
 
 // stopNativeOllamaWindows stops a native Windows Ollama process (not docker).

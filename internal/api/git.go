@@ -13,6 +13,16 @@ type GitManager struct {
 	repoPath string
 }
 
+// CommitOptions controls how commits are created.
+type CommitOptions struct {
+	// Paths is a list of repo-relative paths to stage. If empty, stages all changes.
+	Paths []string
+	// Message is the commit message to use.
+	Message string
+	// SkipOnMain skips committing when on main/master.
+	SkipOnMain bool
+}
+
 // BranchInfo contains information about the current git branch
 type BranchInfo struct {
 	Name     string `json:"name"`
@@ -147,4 +157,60 @@ func (g *GitManager) RunGit(args ...string) (string, error) {
 			strings.Join(args, " "), err, string(output))
 	}
 	return string(output), nil
+}
+
+// StageAndCommit stages changes and creates a local commit if there are staged changes.
+// Returns (committed, commitHash, stagedFiles, error).
+func (g *GitManager) StageAndCommit(opts CommitOptions) (bool, string, []string, error) {
+	if opts.Message == "" {
+		return false, "", nil, fmt.Errorf("commit message is required")
+	}
+
+	branch, err := g.GetBranchInfo()
+	if err == nil && opts.SkipOnMain && branch.IsMain {
+		return false, "", nil, nil
+	}
+
+	// Stage changes
+	if len(opts.Paths) == 0 {
+		if _, err := g.RunGit("add", "-A"); err != nil {
+			return false, "", nil, err
+		}
+	} else {
+		args := []string{"add", "-A", "--"}
+		args = append(args, opts.Paths...)
+		if _, err := g.RunGit(args...); err != nil {
+			return false, "", nil, err
+		}
+	}
+
+	// Check if anything is staged
+	stagedOut, err := g.RunGit("diff", "--cached", "--name-only")
+	if err != nil {
+		return false, "", nil, err
+	}
+	var stagedFiles []string
+	for _, line := range strings.Split(stagedOut, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		stagedFiles = append(stagedFiles, line)
+	}
+	if len(stagedFiles) == 0 {
+		return false, "", nil, nil
+	}
+
+	// Commit
+	if _, err := g.RunGit("commit", "-m", opts.Message); err != nil {
+		return false, "", stagedFiles, err
+	}
+
+	// Grab commit hash
+	hashOut, err := g.RunGit("rev-parse", "HEAD")
+	if err != nil {
+		// Commit succeeded; treat hash lookup failure as non-fatal.
+		return true, "", stagedFiles, nil
+	}
+	return true, strings.TrimSpace(hashOut), stagedFiles, nil
 }
