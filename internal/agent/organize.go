@@ -408,6 +408,10 @@ func (a *Agent) updateRootIndex(branchName string, domains map[string]*DomainInd
 	}
 	sort.Strings(domainList)
 
+	// Check if root header image exists
+	headerImagePathBase := "Compendium/_img/index_header"
+	hasHeaderImage := a.imageExistsAnyFormat(branchName, headerImagePathBase)
+
 	// Build content
 	var sb strings.Builder
 	sb.WriteString("---\n")
@@ -416,6 +420,12 @@ func (a *Agent) updateRootIndex(branchName string, domains map[string]*DomainInd
 		sb.WriteString(fmt.Sprintf("github_issue_ids: [%d]\n", rootIssueID))
 	}
 	sb.WriteString("---\n\n")
+
+	// Add header image if it exists (always use .avif extension for published content)
+	if hasHeaderImage {
+		sb.WriteString("![Header](_img/index_header.avif)\n\n")
+	}
+
 	sb.WriteString("# Encyclopedia\n\n")
 	sb.WriteString("## Domains\n\n")
 
@@ -485,9 +495,10 @@ func (a *Agent) updateCategoryIndex(branchName string, domain *DomainIndex, cate
 	indexPath := fmt.Sprintf("Compendium/%s/%s/index.md", domain.Slug, category.Slug)
 	existingContent, sha, _ := a.gh.GetFile(branchName, indexPath)
 
-	// Check if header image exists (check both .avif and .png)
-	headerImagePathBase := fmt.Sprintf("Compendium/%s/%s/_img/%s_header", domain.Slug, category.Slug, category.Slug)
-	hasHeaderImage := a.imageExistsAnyFormat(branchName, headerImagePathBase)
+	// Check if header image exists (simple naming preferred; compound kept for backward compatibility)
+	simplePathBase := fmt.Sprintf("Compendium/%s/%s/_img/%s_header", domain.Slug, category.Slug, category.Slug)
+	compoundPathBase := fmt.Sprintf("Compendium/%s/%s/_img/%s--%s_header", domain.Slug, category.Slug, domain.Slug, category.Slug)
+	hasHeaderImage := a.imageExistsAnyFormat(branchName, simplePathBase) || a.imageExistsAnyFormat(branchName, compoundPathBase)
 
 	// Collect topics
 	var topicList []string
@@ -510,8 +521,13 @@ func (a *Agent) updateCategoryIndex(branchName string, domain *DomainIndex, cate
 	sb.WriteString("---\n\n")
 
 	// Add header image if it exists (always use .avif extension for published content)
+	// Prefer simple slug-based naming to keep paths consistent.
 	if hasHeaderImage {
-		sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.avif)\n\n", category.Slug))
+		if a.imageExistsAnyFormat(branchName, simplePathBase) {
+			sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.avif)\n\n", category.Slug))
+		} else {
+			sb.WriteString(fmt.Sprintf("![Header](_img/%s--%s_header.avif)\n\n", domain.Slug, category.Slug))
+		}
 	}
 
 	sb.WriteString(fmt.Sprintf("# %s\n\n", category.Name))
@@ -535,9 +551,10 @@ func (a *Agent) updateTopicIndex(branchName string, domain *DomainIndex, categor
 	indexPath := fmt.Sprintf("Compendium/%s/%s/%s/index.md", domain.Slug, category.Slug, topic.Slug)
 	existingContent, sha, _ := a.gh.GetFile(branchName, indexPath)
 
-	// Check if header image exists (check both .avif and .png)
-	headerImagePathBase := fmt.Sprintf("Compendium/%s/%s/%s/_img/%s_header", domain.Slug, category.Slug, topic.Slug, topic.Slug)
-	hasHeaderImage := a.imageExistsAnyFormat(branchName, headerImagePathBase)
+	// Check if header image exists (simple naming preferred; compound kept for backward compatibility)
+	simplePathBase := fmt.Sprintf("Compendium/%s/%s/%s/_img/%s_header", domain.Slug, category.Slug, topic.Slug, topic.Slug)
+	compoundPathBase := fmt.Sprintf("Compendium/%s/%s/%s/_img/%s--%s--%s_header", domain.Slug, category.Slug, topic.Slug, domain.Slug, category.Slug, topic.Slug)
+	hasHeaderImage := a.imageExistsAnyFormat(branchName, simplePathBase) || a.imageExistsAnyFormat(branchName, compoundPathBase)
 
 	// Sort articles
 	sort.Slice(topic.Articles, func(i, j int) bool {
@@ -560,8 +577,13 @@ func (a *Agent) updateTopicIndex(branchName string, domain *DomainIndex, categor
 	sb.WriteString("---\n\n")
 
 	// Add header image if it exists (always use .avif extension for published content)
+	// Prefer simple slug-based naming to keep paths consistent.
 	if hasHeaderImage {
-		sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.avif)\n\n", topic.Slug))
+		if a.imageExistsAnyFormat(branchName, simplePathBase) {
+			sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.avif)\n\n", topic.Slug))
+		} else {
+			sb.WriteString(fmt.Sprintf("![Header](_img/%s--%s--%s_header.avif)\n\n", domain.Slug, category.Slug, topic.Slug))
+		}
 	}
 
 	sb.WriteString(fmt.Sprintf("# %s\n\n", topic.Name))
@@ -589,8 +611,8 @@ func (a *Agent) moveIncomingImages(branchName string, articles []ArticleInfo) er
 		targetDir := fmt.Sprintf("Compendium/%s/%s/%s",
 			article.DomainSlug, article.CategorySlug, article.TopicSlug)
 
-		// Move header image and its medium variant
-		for _, suffix := range []string{"_header.png", "_header-medium.png"} {
+		// Move header image and its medium variant (check both .png and .avif)
+		for _, suffix := range []string{"_header.png", "_header-medium.png", "_header.avif", "_header-medium.avif"} {
 			srcPath := fmt.Sprintf("Compendium/_incoming/%s%s", articleSlug, suffix)
 			dstPath := fmt.Sprintf("%s/%s%s", targetDir, articleSlug, suffix)
 
@@ -616,58 +638,115 @@ func (a *Agent) moveIncomingImages(branchName string, articles []ArticleInfo) er
 	}
 
 	// Move index images (domains, categories, topics)
+	// Handles both .png and .avif files (dashboard flow produces .avif after finalize)
 	indexFolders := []struct {
 		srcFolder string
-		parseFunc func(filename string) (dstPath string, ok bool)
+		parseFunc func(sourcePath string) (dstPath string, ok bool)
 	}{
 		{
 			srcFolder: "Compendium/_incoming/indexes/domains",
-			parseFunc: func(filename string) (string, bool) {
-				// Format: <domain>_header.png or <domain>_header-medium.png
-				slug := strings.TrimSuffix(strings.TrimSuffix(filename, ".png"), "_header")
-				slug = strings.TrimSuffix(slug, "-medium")
-				isMedium := strings.Contains(filename, "-medium")
-				suffix := "_header.png"
-				if isMedium {
-					suffix = "_header-medium.png"
+			parseFunc: func(sourcePath string) (string, bool) {
+				filename := filepath.Base(sourcePath)
+				// Format: <domain>_header.png/.avif or <domain>_header-medium.png/.avif
+				ext := filepath.Ext(filename)
+				if ext != ".png" && ext != ".avif" {
+					return "", false
 				}
-				return fmt.Sprintf("Compendium/%s/_img/%s%s", slug, slug, suffix), true
+				slug := strings.TrimSuffix(strings.TrimSuffix(filename, ext), "_header")
+				slug = strings.TrimSuffix(slug, "-medium")
+				// Keep original filename (preserves naming convention)
+				return fmt.Sprintf("Compendium/%s/_img/%s", slug, filename), true
 			},
 		},
 		{
 			srcFolder: "Compendium/_incoming/indexes/categories",
-			parseFunc: func(filename string) (string, bool) {
-				// Format: <domain>--<category>_header.png or <domain>--<category>_header-medium.png
-				base := strings.TrimSuffix(strings.TrimSuffix(filename, ".png"), "_header")
-				base = strings.TrimSuffix(base, "-medium")
-				parts := strings.SplitN(base, "--", 2)
-				if len(parts) != 2 {
+			parseFunc: func(sourcePath string) (string, bool) {
+				// Supports both:
+				// 1) Legacy flat format: <domain>--<category>_header.png/.avif
+				// 2) New nested format: <domain>/<category>_header.png/.avif
+				filename := filepath.Base(sourcePath)
+				ext := filepath.Ext(filename)
+				if ext != ".png" && ext != ".avif" {
 					return "", false
 				}
-				isMedium := strings.Contains(filename, "-medium")
-				suffix := "_header.png"
-				if isMedium {
-					suffix = "_header-medium.png"
+				base := strings.TrimSuffix(strings.TrimSuffix(filename, ext), "_header")
+				isMedium := strings.HasSuffix(base, "-medium")
+				base = strings.TrimSuffix(base, "-medium")
+
+				normalized := strings.ReplaceAll(sourcePath, "\\", "/")
+				const prefix = "Compendium/_incoming/indexes/categories/"
+				rel := strings.TrimPrefix(normalized, prefix)
+				relParts := strings.Split(rel, "/")
+
+				var domainSlug string
+				var categorySlug string
+				if len(relParts) >= 2 {
+					// New nested format
+					domainSlug = relParts[0]
+					categorySlug = strings.TrimSuffix(strings.TrimSuffix(relParts[len(relParts)-1], ext), "_header")
+					categorySlug = strings.TrimSuffix(categorySlug, "-medium")
+				} else {
+					// Legacy flat format fallback
+					parts := strings.SplitN(base, "--", 2)
+					if len(parts) != 2 {
+						return "", false
+					}
+					domainSlug = parts[0]
+					categorySlug = parts[1]
 				}
-				return fmt.Sprintf("Compendium/%s/%s/_img/%s%s", parts[0], parts[1], parts[1], suffix), true
+
+				finalName := categorySlug + "_header" + ext
+				if isMedium {
+					finalName = categorySlug + "_header-medium" + ext
+				}
+				return fmt.Sprintf("Compendium/%s/%s/_img/%s", domainSlug, categorySlug, finalName), true
 			},
 		},
 		{
 			srcFolder: "Compendium/_incoming/indexes/topics",
-			parseFunc: func(filename string) (string, bool) {
-				// Format: <domain>--<category>--<topic>_header.png or -medium variant
-				base := strings.TrimSuffix(strings.TrimSuffix(filename, ".png"), "_header")
-				base = strings.TrimSuffix(base, "-medium")
-				parts := strings.SplitN(base, "--", 3)
-				if len(parts) != 3 {
+			parseFunc: func(sourcePath string) (string, bool) {
+				// Supports both:
+				// 1) Legacy flat format: <domain>--<category>--<topic>_header.png/.avif
+				// 2) New nested format: <domain>/<category>/<topic>_header.png/.avif
+				filename := filepath.Base(sourcePath)
+				ext := filepath.Ext(filename)
+				if ext != ".png" && ext != ".avif" {
 					return "", false
 				}
-				isMedium := strings.Contains(filename, "-medium")
-				suffix := "_header.png"
-				if isMedium {
-					suffix = "_header-medium.png"
+				base := strings.TrimSuffix(strings.TrimSuffix(filename, ext), "_header")
+				isMedium := strings.HasSuffix(base, "-medium")
+				base = strings.TrimSuffix(base, "-medium")
+
+				normalized := strings.ReplaceAll(sourcePath, "\\", "/")
+				const prefix = "Compendium/_incoming/indexes/topics/"
+				rel := strings.TrimPrefix(normalized, prefix)
+				relParts := strings.Split(rel, "/")
+
+				var domainSlug string
+				var categorySlug string
+				var topicSlug string
+				if len(relParts) >= 3 {
+					// New nested format
+					domainSlug = relParts[0]
+					categorySlug = relParts[1]
+					topicSlug = strings.TrimSuffix(strings.TrimSuffix(relParts[len(relParts)-1], ext), "_header")
+					topicSlug = strings.TrimSuffix(topicSlug, "-medium")
+				} else {
+					// Legacy flat format fallback
+					parts := strings.SplitN(base, "--", 3)
+					if len(parts) != 3 {
+						return "", false
+					}
+					domainSlug = parts[0]
+					categorySlug = parts[1]
+					topicSlug = parts[2]
 				}
-				return fmt.Sprintf("Compendium/%s/%s/%s/_img/%s%s", parts[0], parts[1], parts[2], parts[2], suffix), true
+
+				finalName := topicSlug + "_header" + ext
+				if isMedium {
+					finalName = topicSlug + "_header-medium" + ext
+				}
+				return fmt.Sprintf("Compendium/%s/%s/%s/_img/%s", domainSlug, categorySlug, topicSlug, finalName), true
 			},
 		},
 	}
@@ -680,7 +759,7 @@ func (a *Agent) moveIncomingImages(branchName string, articles []ArticleInfo) er
 
 		for _, file := range files {
 			filename := filepath.Base(file)
-			dstPath, ok := folder.parseFunc(filename)
+			dstPath, ok := folder.parseFunc(file)
 			if !ok {
 				slog.Warn("Failed to parse index image filename", "file", file)
 				continue

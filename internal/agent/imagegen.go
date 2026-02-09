@@ -151,6 +151,9 @@ func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
 	var allCandidates []GeneratedCandidate
 
 	for _, p := range pending {
+		if err := a.waitIfPaused(ctx); err != nil {
+			return err
+		}
 		select {
 		case <-ctx.Done():
 			log.Println("[Image Generation] Cancelled during prompt generation")
@@ -326,6 +329,9 @@ func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
 	errorCount := 0
 
 	for _, candidate := range allCandidates {
+		if err := a.waitIfPaused(ctx); err != nil {
+			return err
+		}
 		select {
 		case <-ctx.Done():
 			log.Println("[Image Generation] Cancelled")
@@ -640,9 +646,11 @@ func (a *Agent) findPendingIndexImagePrompts(branchName string) ([]PendingIndexI
 
 			// Check if category header image exists (check both staging and final locations, and both .png and .avif)
 			categoryFinalPathBase := filepath.Join(categoryPath, "_img", categoryDir+"_header")
-			categoryStagingPath := filepath.Join("Compendium/_incoming/indexes/categories", domainDir+"--"+categoryDir+"_header.png")
+			categoryStagingPath := filepath.Join("Compendium/_incoming/indexes/categories", domainDir, categoryDir+"_header.png")
+			legacyCategoryStagingPath := filepath.Join("Compendium/_incoming/indexes/categories", domainDir+"--"+categoryDir+"_header.png")
 			categoryImageExists := a.imageExistsAnyFormat(branchName, categoryFinalPathBase) ||
-				a.fileExists(branchName, categoryStagingPath)
+				a.fileExists(branchName, categoryStagingPath) ||
+				a.fileExists(branchName, legacyCategoryStagingPath)
 			if !categoryImageExists {
 				// Image doesn't exist in either location - get child topics
 				topics, _ := a.gh.ListDirectory(branchName, categoryPath)
@@ -694,9 +702,11 @@ func (a *Agent) findPendingIndexImagePrompts(branchName string) ([]PendingIndexI
 
 				// Check if topic header image exists (check both staging and final locations, and both .png and .avif)
 				topicFinalPathBase := filepath.Join(topicPath, "_img", topicDir+"_header")
-				topicStagingPath := filepath.Join("Compendium/_incoming/indexes/topics", domainDir+"--"+categoryDir+"--"+topicDir+"_header.png")
+				topicStagingPath := filepath.Join("Compendium/_incoming/indexes/topics", domainDir, categoryDir, topicDir+"_header.png")
+				legacyTopicStagingPath := filepath.Join("Compendium/_incoming/indexes/topics", domainDir+"--"+categoryDir+"--"+topicDir+"_header.png")
 				topicImageExists := a.imageExistsAnyFormat(branchName, topicFinalPathBase) ||
-					a.fileExists(branchName, topicStagingPath)
+					a.fileExists(branchName, topicStagingPath) ||
+					a.fileExists(branchName, legacyTopicStagingPath)
 				if !topicImageExists {
 					// Image doesn't exist in either location - get child articles
 					articles, _ := a.gh.ListDirectory(branchName, topicPath)
@@ -854,10 +864,12 @@ func (a *Agent) findIndexImagesFromIncoming(branchName string) ([]PendingIndexIm
 	// Check categories
 	for _, info := range categories {
 		categoryFinalPathBase := filepath.Join("Compendium", info.DomainSlug, info.CategorySlug, "_img", info.CategorySlug+"_header")
-		categoryStagingPath := filepath.Join("Compendium/_incoming/indexes/categories", info.DomainSlug+"--"+info.CategorySlug+"_header.png")
+		categoryStagingPath := filepath.Join("Compendium/_incoming/indexes/categories", info.DomainSlug, info.CategorySlug+"_header.png")
+		legacyCategoryStagingPath := filepath.Join("Compendium/_incoming/indexes/categories", info.DomainSlug+"--"+info.CategorySlug+"_header.png")
 
 		categoryImageExists := a.imageExistsAnyFormat(branchName, categoryFinalPathBase) ||
-			a.fileExists(branchName, categoryStagingPath)
+			a.fileExists(branchName, categoryStagingPath) ||
+			a.fileExists(branchName, legacyCategoryStagingPath)
 
 		if !categoryImageExists {
 			// Collect child topics for this category
@@ -886,10 +898,12 @@ func (a *Agent) findIndexImagesFromIncoming(branchName string) ([]PendingIndexIm
 	// Check topics
 	for _, info := range topics {
 		topicFinalPathBase := filepath.Join("Compendium", info.DomainSlug, info.CategorySlug, info.TopicSlug, "_img", info.TopicSlug+"_header")
-		topicStagingPath := filepath.Join("Compendium/_incoming/indexes/topics", info.DomainSlug+"--"+info.CategorySlug+"--"+info.TopicSlug+"_header.png")
+		topicStagingPath := filepath.Join("Compendium/_incoming/indexes/topics", info.DomainSlug, info.CategorySlug, info.TopicSlug+"_header.png")
+		legacyTopicStagingPath := filepath.Join("Compendium/_incoming/indexes/topics", info.DomainSlug+"--"+info.CategorySlug+"--"+info.TopicSlug+"_header.png")
 
 		topicImageExists := a.imageExistsAnyFormat(branchName, topicFinalPathBase) ||
-			a.fileExists(branchName, topicStagingPath)
+			a.fileExists(branchName, topicStagingPath) ||
+			a.fileExists(branchName, legacyTopicStagingPath)
 
 		if !topicImageExists {
 			pending = append(pending, PendingIndexImagePrompt{
