@@ -68,27 +68,6 @@ func (s *Server) handleResearcherStart(w http.ResponseWriter, r *http.Request) {
 		config.Mode = ModeFull
 	}
 
-	// Ensure Ollama is running before starting a run (the run will otherwise fail/stall on LLM calls).
-	// Only attempt this when LLM_BASE_URL points at the local Ollama port.
-	baseURL := os.Getenv("LLM_BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:11434/v1"
-	}
-	if strings.Contains(baseURL, "localhost:11434") || strings.Contains(baseURL, "127.0.0.1:11434") || strings.Contains(baseURL, "[::1]:11434") {
-		oll := s.status.GetOllamaStatus()
-		if !oll.Running {
-			log.Printf("[Dashboard] Ollama not running, attempting auto-start...")
-			_ = StartOllama()
-			// Re-check after short delay
-			time.Sleep(1 * time.Second)
-			oll2 := s.status.GetOllamaStatus()
-			if !oll2.Running {
-				respondError(w, http.StatusServiceUnavailable, "Ollama is not running and could not be started. Start it from Dashboard > Services (or install/start native Ollama).")
-				return
-			}
-		}
-	}
-
 	if err := s.runner.Start(config); err != nil {
 		respondError(w, http.StatusConflict, err.Error())
 		return
@@ -133,55 +112,6 @@ func (s *Server) handleResearcherStop(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
 }
 
-// Service control handlers
-
-func (s *Server) handleDockerStart(w http.ResponseWriter, r *http.Request) {
-	if err := StartDocker(); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"status": "starting"})
-}
-
-func (s *Server) handleDockerStop(w http.ResponseWriter, r *http.Request) {
-	if err := StopDocker(); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
-}
-
-func (s *Server) handleOllamaStart(w http.ResponseWriter, r *http.Request) {
-	if err := StartOllama(); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"status": "starting"})
-}
-
-func (s *Server) handleOllamaStop(w http.ResponseWriter, r *http.Request) {
-	if err := StopOllama(); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
-}
-
-func (s *Server) handleComfyUIStart(w http.ResponseWriter, r *http.Request) {
-	if err := StartComfyUI(); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"status": "starting"})
-}
-
-func (s *Server) handleComfyUIStop(w http.ResponseWriter, r *http.Request) {
-	if err := StopComfyUI(); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
-}
 
 // Git handlers
 
@@ -338,7 +268,7 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 			groups[baseName] = &ImageGroup{
 				Name:   baseName,
 				Type:   "article",
-				Path:   "",
+				Path:   "_incoming",
 				Images: []string{},
 			}
 		}
@@ -357,25 +287,55 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 
 	for _, it := range indexTypes {
 		indexPath := filepath.Join(incomingPath, it.dir)
-		entries, err := os.ReadDir(indexPath)
-		if err != nil {
-			continue
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".png") {
-				continue
+		_ = filepath.Walk(indexPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info == nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".png") {
+				return nil
 			}
-
-			name := entry.Name()
+			name := info.Name()
 			baseName := extractImageBaseName(name)
-
-			key := it.dir + "/" + baseName
+			relDir, relErr := filepath.Rel(filepath.Join(s.repoPath, "Compendium"), filepath.Dir(path))
+			if relErr != nil {
+				return nil
+			}
+			relDir = filepath.ToSlash(relDir)
+			key := relDir + "/" + baseName
 			if _, exists := groups[key]; !exists {
 				groups[key] = &ImageGroup{
 					Name:   baseName,
 					Type:   it.typ,
-					Path:   it.dir,
+					Path:   relDir,
+					Images: []string{},
+				}
+			}
+			groups[key].Images = append(groups[key].Images, name)
+			return nil
+		})
+	}
+
+	// Scan organized Compendium/**/_img for candidate PNGs so images generated directly
+	// in organized topic folders are still reviewable in the UI.
+	for _, imgDir := range s.findOrganizedImageDirs() {
+		imgEntries, err := os.ReadDir(imgDir)
+		if err != nil {
+			continue
+		}
+		relDir, relErr := filepath.Rel(filepath.Join(s.repoPath, "Compendium"), imgDir)
+		if relErr != nil {
+			continue
+		}
+		relDir = filepath.ToSlash(relDir)
+		for _, entry := range imgEntries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".png") {
+				continue
+			}
+			name := entry.Name()
+			baseName := extractImageBaseName(name)
+			key := "organized/" + relDir + "/" + baseName
+			if _, exists := groups[key]; !exists {
+				groups[key] = &ImageGroup{
+					Name:   baseName,
+					Type:   "article",
+					Path:   relDir,
 					Images: []string{},
 				}
 			}
@@ -384,7 +344,7 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to slice and sort
-	var result []ImageGroup
+	result := make([]ImageGroup, 0)
 	for _, g := range groups {
 		// Sort images within group
 		sort.Strings(g.Images)
@@ -409,12 +369,12 @@ func (s *Server) handleGetImage(w http.ResponseWriter, r *http.Request) {
 
 	// Sanitize path to prevent directory traversal
 	imagePath = filepath.Clean(imagePath)
-	if strings.Contains(imagePath, "..") {
+	if strings.Contains(imagePath, "..") || filepath.IsAbs(imagePath) {
 		respondError(w, http.StatusBadRequest, "Invalid path")
 		return
 	}
 
-	fullPath := filepath.Join(s.repoPath, "Compendium", "_incoming", imagePath)
+	fullPath := filepath.Join(s.repoPath, "Compendium", imagePath)
 
 	// Check if file exists
 	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
@@ -461,6 +421,7 @@ func (s *Server) handleDeleteImageGroup(w http.ResponseWriter, r *http.Request) 
 		}
 	case "article":
 		searchPaths = []string{filepath.Join(s.repoPath, "Compendium", "_incoming")}
+		searchPaths = append(searchPaths, s.findOrganizedImageDirs()...)
 		promptBasePath = filepath.Join(s.repoPath, "Compendium", "_debug", "articles", groupName)
 	default:
 		log.Printf("[Delete Group] Invalid group type: %s", groupType)
@@ -472,43 +433,31 @@ func (s *Server) handleDeleteImageGroup(w http.ResponseWriter, r *http.Request) 
 
 	// Find and delete matching images
 	for _, searchPath := range searchPaths {
-		entries, err := os.ReadDir(searchPath)
-		if err != nil {
-			log.Printf("[Delete Group] Failed to read directory %s: %v", searchPath, err)
-			continue
-		}
-
-		log.Printf("[Delete Group] Found %d entries in %s", len(entries), searchPath)
-
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".png") {
-				continue
+		_ = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info == nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".png") {
+				return nil
 			}
 
-			// Check if this image belongs to the group
-			baseName := extractImageBaseName(entry.Name())
-			log.Printf("[Delete Group] Checking %s: baseName=%s, groupName=%s, match=%v", 
-				entry.Name(), baseName, groupName, baseName == groupName)
-			
-			if baseName == groupName {
-				imagePath := filepath.Join(searchPath, entry.Name())
-				if err := os.Remove(imagePath); err != nil {
-					errors = append(errors, fmt.Sprintf("Failed to delete %s: %v", entry.Name(), err))
-					log.Printf("[Delete Group] Failed to delete %s: %v", imagePath, err)
-				} else {
-					deletedCount++
-					log.Printf("[Delete Group] Deleted %s", imagePath)
+			baseName := extractImageBaseName(info.Name())
+			if baseName != groupName {
+				return nil
+			}
 
-					// Also delete corresponding prompt file
-					candidateIdx := extractCandidateIndex(entry.Name())
-					if candidateIdx > 0 {
-						promptFileName := fmt.Sprintf("header_image_prompt_%d.txt", candidateIdx)
-						promptPath := filepath.Join(promptBasePath, promptFileName)
-						os.Remove(promptPath) // Ignore error if doesn't exist
-					}
+			if err := os.Remove(path); err != nil {
+				errors = append(errors, fmt.Sprintf("Failed to delete %s: %v", info.Name(), err))
+				log.Printf("[Delete Group] Failed to delete %s: %v", path, err)
+			} else {
+				deletedCount++
+				log.Printf("[Delete Group] Deleted %s", path)
+				candidateIdx := extractCandidateIndex(info.Name())
+				if candidateIdx > 0 {
+					promptFileName := fmt.Sprintf("header_image_prompt_%d.txt", candidateIdx)
+					promptPath := filepath.Join(promptBasePath, promptFileName)
+					os.Remove(promptPath)
 				}
 			}
-		}
+			return nil
+		})
 	}
 
 	// Delete any prompt files in the debug directory for complete regeneration
@@ -545,12 +494,12 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 
 	// Sanitize path to prevent directory traversal
 	imagePath := filepath.Clean(req.Path)
-	if strings.Contains(imagePath, "..") {
+	if strings.Contains(imagePath, "..") || filepath.IsAbs(imagePath) {
 		respondError(w, http.StatusBadRequest, "Invalid path")
 		return
 	}
 
-	fullPath := filepath.Join(s.repoPath, "Compendium", "_incoming", imagePath)
+	fullPath := filepath.Join(s.repoPath, "Compendium", imagePath)
 
 	// Check if file exists
 	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
@@ -570,17 +519,32 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	candidateIdx := extractCandidateIndex(filename)
 
 	var promptPath string
-	if strings.HasPrefix(imagePath, "indexes/domains/") {
+	if strings.HasPrefix(imagePath, "_incoming/indexes/domains/") || strings.HasPrefix(imagePath, "indexes/domains/") {
 		promptPath = filepath.Join(s.repoPath, "Compendium", "_debug", "indexes", baseName)
-	} else if strings.HasPrefix(imagePath, "indexes/categories/") {
-		parts := strings.SplitN(baseName, "--", 2)
-		if len(parts) == 2 {
-			promptPath = filepath.Join(s.repoPath, "Compendium", "_debug", "indexes", parts[0], parts[1])
+	} else if strings.HasPrefix(imagePath, "_incoming/indexes/categories/") || strings.HasPrefix(imagePath, "indexes/categories/") {
+		parts := strings.Split(filepath.ToSlash(imagePath), "/")
+		// Nested form: .../categories/<domain>/<file>
+		if len(parts) >= 5 {
+			domain := parts[len(parts)-2]
+			promptPath = filepath.Join(s.repoPath, "Compendium", "_debug", "indexes", domain, baseName)
+		} else {
+			legacy := strings.SplitN(baseName, "--", 2)
+			if len(legacy) == 2 {
+				promptPath = filepath.Join(s.repoPath, "Compendium", "_debug", "indexes", legacy[0], legacy[1])
+			}
 		}
-	} else if strings.HasPrefix(imagePath, "indexes/topics/") {
-		parts := strings.SplitN(baseName, "--", 3)
-		if len(parts) == 3 {
-			promptPath = filepath.Join(s.repoPath, "Compendium", "_debug", "indexes", parts[0], parts[1], parts[2])
+	} else if strings.HasPrefix(imagePath, "_incoming/indexes/topics/") || strings.HasPrefix(imagePath, "indexes/topics/") {
+		parts := strings.Split(filepath.ToSlash(imagePath), "/")
+		// Nested form: .../topics/<domain>/<category>/<file>
+		if len(parts) >= 6 {
+			domain := parts[len(parts)-3]
+			category := parts[len(parts)-2]
+			promptPath = filepath.Join(s.repoPath, "Compendium", "_debug", "indexes", domain, category, baseName)
+		} else {
+			legacy := strings.SplitN(baseName, "--", 3)
+			if len(legacy) == 3 {
+				promptPath = filepath.Join(s.repoPath, "Compendium", "_debug", "indexes", legacy[0], legacy[1], legacy[2])
+			}
 		}
 	} else {
 		// Article image
@@ -766,7 +730,7 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	var pngFilesToConvert []string
 	
 	// Process article images in _incoming root
-	s.finalizeImageGroup(incomingPath, "", selections.Articles, &result, &pngFilesToConvert)
+	s.finalizeImageGroup(incomingPath, "_incoming", selections.Articles, &result, &pngFilesToConvert)
 	
 	// Process index images
 	indexPaths := []struct {
@@ -780,7 +744,16 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	
 	for _, idx := range indexPaths {
 		indexDir := filepath.Join(incomingPath, idx.dir)
-		s.finalizeImageGroup(indexDir, idx.dir, idx.selections, &result, &pngFilesToConvert)
+		s.finalizeImageGroupRecursive(indexDir, filepath.ToSlash(filepath.Join("_incoming", idx.dir)), idx.selections, &result, &pngFilesToConvert)
+	}
+
+	// Process organized candidate PNGs in Compendium/**/_img using article selections.
+	for _, imgDir := range s.findOrganizedImageDirs() {
+		relDir, err := filepath.Rel(filepath.Join(s.repoPath, "Compendium"), imgDir)
+		if err != nil {
+			continue
+		}
+		s.finalizeImageGroup(imgDir, filepath.ToSlash(relDir), selections.Articles, &result, &pngFilesToConvert)
 	}
 	
 	// Convert PNG files to AVIF
@@ -972,6 +945,21 @@ func (s *Server) finalizeImageGroup(dirPath, relativePath string, selections map
 	}
 }
 
+// finalizeImageGroupRecursive applies finalization to all directories under rootDir.
+func (s *Server) finalizeImageGroupRecursive(rootDir, relativeRoot string, selections map[string]string, result *FinalizeResult, pngFilesToConvert *[]string) {
+	_ = filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || !info.IsDir() {
+			return nil
+		}
+		rel := relativeRoot
+		if relPath, relErr := filepath.Rel(rootDir, path); relErr == nil && relPath != "." {
+			rel = filepath.ToSlash(filepath.Join(relativeRoot, relPath))
+		}
+		s.finalizeImageGroup(path, rel, selections, result, pngFilesToConvert)
+		return nil
+	})
+}
+
 // getCanonicalImageName removes the numeric suffix from an image filename
 // e.g., "turbocharging_header_3.png" -> "turbocharging_header.png"
 func (s *Server) getCanonicalImageName(filename string) string {
@@ -1049,17 +1037,6 @@ func (s *Server) organizeLocal() OrganizeResult {
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("Failed to read _incoming: %v", err))
 		return result
-	}
-	
-	type articleInfo struct {
-		filename     string
-		slug         string
-		domain       string
-		domainSlug   string
-		category     string
-		categorySlug string
-		topic        string
-		topicSlug    string
 	}
 	
 	var articles []articleInfo
@@ -1141,6 +1118,85 @@ func (s *Server) organizeLocal() OrganizeResult {
 			}
 		}
 	}
+
+	// Step 2b: Move finalized staged images for already-organized articles.
+	// Backfill review mode stages organized-article images in _incoming; after finalization,
+	// selected files are canonical *.avif in _incoming and should be moved to the article's _img folder.
+	organizedArticleDirs := s.buildOrganizedArticleDirIndex()
+	rootIncomingEntries, err := os.ReadDir(incomingPath)
+	if err == nil {
+		for _, entry := range rootIncomingEntries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if !(strings.HasSuffix(name, "_header.avif") || strings.HasSuffix(name, "_header-medium.avif")) {
+				continue
+			}
+
+			slug := strings.TrimSuffix(name, "_header.avif")
+			if slug == name {
+				slug = strings.TrimSuffix(name, "_header-medium.avif")
+			}
+			if slug == "" {
+				continue
+			}
+
+			targetArticleDir, ok := organizedArticleDirs[slug]
+			if !ok {
+				continue
+			}
+
+			targetImgDir := filepath.Join(targetArticleDir, "_img")
+			if err := os.MkdirAll(targetImgDir, 0755); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("Failed to create %s: %v", targetImgDir, err))
+				continue
+			}
+
+			srcPath := filepath.Join(incomingPath, name)
+			dstPath := filepath.Join(targetImgDir, name)
+			if err := os.Rename(srcPath, dstPath); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("Failed to move staged image %s: %v", name, err))
+				continue
+			}
+
+			// Update the article file with the image reference if it's missing or needs updating.
+			articlePath := filepath.Join(targetArticleDir, slug+".md")
+			if content, err := os.ReadFile(articlePath); err == nil {
+				updatedContent := s.updateImageReferences(string(content), slug)
+				// If it doesn't have a header reference at all, add it.
+				if !strings.Contains(updatedContent, "![Header]") {
+					lines := strings.Split(updatedContent, "\n")
+					dashCount := 0
+					insertIdx := -1
+					for i, line := range lines {
+						if strings.TrimSpace(line) == "---" {
+							dashCount++
+							if dashCount == 2 {
+								insertIdx = i + 1
+								break
+							}
+						}
+					}
+					if insertIdx > 0 {
+						imageRef := fmt.Sprintf("\n![Header](_img/%s_header.avif)", slug)
+						newLines := make([]string, 0, len(lines)+2)
+						newLines = append(newLines, lines[:insertIdx]...)
+						newLines = append(newLines, imageRef)
+						newLines = append(newLines, lines[insertIdx:]...)
+						updatedContent = strings.Join(newLines, "\n")
+					}
+				}
+				_ = os.WriteFile(articlePath, []byte(updatedContent), 0644)
+			}
+
+			relDst, relErr := filepath.Rel(s.repoPath, dstPath)
+			if relErr != nil {
+				relDst = dstPath
+			}
+			result.ImagesMoved = append(result.ImagesMoved, fmt.Sprintf("%s -> %s", name, filepath.ToSlash(relDst)))
+		}
+	}
 	
 	// Step 3: Move index images
 	indexMappings := []struct {
@@ -1215,7 +1271,13 @@ func (s *Server) organizeLocal() OrganizeResult {
 		}
 	}
 	
-	// Step 4: Clean up _incoming and _debug folders
+	// Step 4: Create/update index.md files up the chain
+	s.updateLocalIndexFiles(articles, &result)
+	
+	// Step 5: Add ![Header] references to articles that have images but no reference
+	s.addMissingImageReferences(articles, &result)
+	
+	// Step 6: Clean up _incoming and _debug folders
 	os.RemoveAll(incomingPath)
 	os.RemoveAll(filepath.Join(s.repoPath, "Compendium", "_debug"))
 	os.RemoveAll(filepath.Join(s.repoPath, "Compendium", "_config"))
@@ -1242,6 +1304,447 @@ func (s *Server) updateImageReferences(content, articleSlug string) string {
 	}
 	
 	return content
+}
+
+// updateLocalIndexFiles creates or updates index.md files at each level (root, domain, category, topic)
+// for articles that were just organized.
+func (s *Server) updateLocalIndexFiles(articles []articleInfo, result *OrganizeResult) {
+	compendiumPath := filepath.Join(s.repoPath, "Compendium")
+
+	domains := make(map[string]*domainInfo)
+
+	for _, article := range articles {
+		// Ensure domain
+		if _, ok := domains[article.domainSlug]; !ok {
+			domains[article.domainSlug] = &domainInfo{
+				name:       article.domain,
+				slug:       article.domainSlug,
+				categories: make(map[string]*categoryInfo),
+			}
+		}
+		d := domains[article.domainSlug]
+
+		// Ensure category
+		if _, ok := d.categories[article.categorySlug]; !ok {
+			d.categories[article.categorySlug] = &categoryInfo{
+				name:   article.category,
+				slug:   article.categorySlug,
+				topics: make(map[string]*topicInfo),
+			}
+		}
+		c := d.categories[article.categorySlug]
+
+		// Ensure topic
+		if _, ok := c.topics[article.topicSlug]; !ok {
+			c.topics[article.topicSlug] = &topicInfo{
+				name:     article.topic,
+				slug:     article.topicSlug,
+				articles: []string{},
+			}
+		}
+		t := c.topics[article.topicSlug]
+		t.articles = append(t.articles, article.slug)
+	}
+
+	// Now create/update index files at each level
+
+	// Root index: Compendium/index.md
+	s.updateLocalRootIndex(compendiumPath, domains, result)
+
+	// Domain, category, and topic indexes
+	for _, domain := range domains {
+		s.updateLocalDomainIndex(compendiumPath, domain, result)
+
+		for _, category := range domain.categories {
+			s.updateLocalCategoryIndex(compendiumPath, domain, category, result)
+
+			for _, topic := range category.topics {
+				s.updateLocalTopicIndex(compendiumPath, domain, category, topic, result)
+			}
+		}
+	}
+}
+
+// updateLocalRootIndex creates/updates Compendium/index.md with all domains listed
+func (s *Server) updateLocalRootIndex(compendiumPath string, newDomains map[string]*domainInfo, result *OrganizeResult) {
+	indexPath := filepath.Join(compendiumPath, "index.md")
+
+	// Read existing content to preserve frontmatter fields
+	existingContent, _ := os.ReadFile(indexPath)
+	existingIssueIDs := ""
+	if len(existingContent) > 0 {
+		existingIssueIDs = extractFrontmatterValue(string(existingContent), "github_issue_ids")
+	}
+
+	// List ALL domains from the filesystem (not just the new ones)
+	entries, _ := os.ReadDir(compendiumPath)
+	var allDomains []string
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), "_") && e.Name() != "img" {
+			allDomains = append(allDomains, e.Name())
+		}
+	}
+	sort.Strings(allDomains)
+
+	// Check for header image
+	hasHeaderImage := fileExistsLocal(filepath.Join(compendiumPath, "_img", "index_header.avif"))
+
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.WriteString("title: \"Encyclopedia Index\"\n")
+	if existingIssueIDs != "" {
+		sb.WriteString(fmt.Sprintf("github_issue_ids: %s\n", existingIssueIDs))
+	}
+	sb.WriteString("---\n\n")
+
+	if hasHeaderImage {
+		sb.WriteString("![Header](_img/index_header.avif)\n\n")
+	}
+
+	sb.WriteString("# Encyclopedia\n\n")
+	sb.WriteString("## Domains\n\n")
+
+	for _, slug := range allDomains {
+		// Try to get display name from existing index or new articles
+		displayName := slug
+		domainIndexPath := filepath.Join(compendiumPath, slug, "index.md")
+		if content, err := os.ReadFile(domainIndexPath); err == nil {
+			if title := extractFrontmatterValue(string(content), "title"); title != "" {
+				displayName = title
+			}
+		}
+		if d, ok := newDomains[slug]; ok && d.name != "" {
+			displayName = d.name
+		}
+		sb.WriteString(fmt.Sprintf("- [%s](%s/)\n", displayName, slug))
+	}
+
+	os.WriteFile(indexPath, []byte(sb.String()), 0644)
+	result.IndexesUpdated = append(result.IndexesUpdated, "Compendium/index.md")
+}
+
+// updateLocalDomainIndex creates/updates Compendium/<domain>/index.md
+func (s *Server) updateLocalDomainIndex(compendiumPath string, domain *domainInfo, result *OrganizeResult) {
+	domainPath := filepath.Join(compendiumPath, domain.slug)
+	indexPath := filepath.Join(domainPath, "index.md")
+
+	// Read existing to preserve issue IDs
+	existingContent, _ := os.ReadFile(indexPath)
+	existingIssueIDs := ""
+	if len(existingContent) > 0 {
+		existingIssueIDs = extractFrontmatterValue(string(existingContent), "github_issue_ids")
+	}
+
+	// List ALL categories from filesystem
+	entries, _ := os.ReadDir(domainPath)
+	var allCategories []string
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), "_") && e.Name() != "img" {
+			allCategories = append(allCategories, e.Name())
+		}
+	}
+	sort.Strings(allCategories)
+
+	// Check for header image (both simple and compound naming)
+	hasHeaderImage := fileExistsLocal(filepath.Join(domainPath, "_img", domain.slug+"_header.avif"))
+
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.WriteString(fmt.Sprintf("title: \"%s\"\n", domain.name))
+	sb.WriteString(fmt.Sprintf("domain: \"%s\"\n", domain.name))
+	sb.WriteString(fmt.Sprintf("domain-slug: \"%s\"\n", domain.slug))
+	if existingIssueIDs != "" {
+		sb.WriteString(fmt.Sprintf("github_issue_ids: %s\n", existingIssueIDs))
+	}
+	sb.WriteString("---\n\n")
+
+	if hasHeaderImage {
+		sb.WriteString(fmt.Sprintf("![Header](_img/%s_header.avif)\n\n", domain.slug))
+	}
+
+	sb.WriteString(fmt.Sprintf("# %s\n\n", domain.name))
+	sb.WriteString("## Categories\n\n")
+
+	for _, slug := range allCategories {
+		displayName := slug
+		catIndexPath := filepath.Join(domainPath, slug, "index.md")
+		if content, err := os.ReadFile(catIndexPath); err == nil {
+			if title := extractFrontmatterValue(string(content), "title"); title != "" {
+				displayName = title
+			}
+		}
+		if cat, ok := domain.categories[slug]; ok && cat.name != "" {
+			displayName = cat.name
+		}
+		sb.WriteString(fmt.Sprintf("- [%s](%s/)\n", displayName, slug))
+	}
+
+	os.MkdirAll(domainPath, 0755)
+	os.WriteFile(indexPath, []byte(sb.String()), 0644)
+	result.IndexesUpdated = append(result.IndexesUpdated, fmt.Sprintf("Compendium/%s/index.md", domain.slug))
+}
+
+// updateLocalCategoryIndex creates/updates Compendium/<domain>/<category>/index.md
+func (s *Server) updateLocalCategoryIndex(compendiumPath string, domain *domainInfo, category *categoryInfo, result *OrganizeResult) {
+	categoryPath := filepath.Join(compendiumPath, domain.slug, category.slug)
+	indexPath := filepath.Join(categoryPath, "index.md")
+
+	existingContent, _ := os.ReadFile(indexPath)
+	existingIssueIDs := ""
+	if len(existingContent) > 0 {
+		existingIssueIDs = extractFrontmatterValue(string(existingContent), "github_issue_ids")
+	}
+
+	// List ALL topics from filesystem
+	entries, _ := os.ReadDir(categoryPath)
+	var allTopics []string
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), "_") && e.Name() != "img" {
+			allTopics = append(allTopics, e.Name())
+		}
+	}
+	sort.Strings(allTopics)
+
+	// Check for header image (both compound and simple naming)
+	compoundImgName := fmt.Sprintf("%s--%s_header.avif", domain.slug, category.slug)
+	simpleImgName := fmt.Sprintf("%s_header.avif", category.slug)
+	imgDir := filepath.Join(categoryPath, "_img")
+	hasHeaderImage := false
+	headerImgRef := ""
+	if fileExistsLocal(filepath.Join(imgDir, compoundImgName)) {
+		hasHeaderImage = true
+		headerImgRef = fmt.Sprintf("_img/%s", compoundImgName)
+	} else if fileExistsLocal(filepath.Join(imgDir, simpleImgName)) {
+		hasHeaderImage = true
+		headerImgRef = fmt.Sprintf("_img/%s", simpleImgName)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.WriteString(fmt.Sprintf("title: \"%s\"\n", category.name))
+	sb.WriteString(fmt.Sprintf("domain: \"%s\"\n", domain.name))
+	sb.WriteString(fmt.Sprintf("domain-slug: \"%s\"\n", domain.slug))
+	sb.WriteString(fmt.Sprintf("category: \"%s\"\n", category.name))
+	sb.WriteString(fmt.Sprintf("category-slug: \"%s\"\n", category.slug))
+	if existingIssueIDs != "" {
+		sb.WriteString(fmt.Sprintf("github_issue_ids: %s\n", existingIssueIDs))
+	}
+	sb.WriteString("---\n\n")
+
+	if hasHeaderImage {
+		sb.WriteString(fmt.Sprintf("![Header](%s)\n\n", headerImgRef))
+	}
+
+	sb.WriteString(fmt.Sprintf("# %s\n\n", category.name))
+	sb.WriteString("## Topics\n\n")
+
+	for _, slug := range allTopics {
+		displayName := slug
+		topicIndexPath := filepath.Join(categoryPath, slug, "index.md")
+		if content, err := os.ReadFile(topicIndexPath); err == nil {
+			if title := extractFrontmatterValue(string(content), "title"); title != "" {
+				displayName = title
+			}
+		}
+		if topic, ok := category.topics[slug]; ok && topic.name != "" {
+			displayName = topic.name
+		}
+		sb.WriteString(fmt.Sprintf("- [%s](%s/)\n", displayName, slug))
+	}
+
+	os.MkdirAll(categoryPath, 0755)
+	os.WriteFile(indexPath, []byte(sb.String()), 0644)
+	result.IndexesUpdated = append(result.IndexesUpdated, fmt.Sprintf("Compendium/%s/%s/index.md", domain.slug, category.slug))
+}
+
+// updateLocalTopicIndex creates/updates Compendium/<domain>/<category>/<topic>/index.md
+func (s *Server) updateLocalTopicIndex(compendiumPath string, domain *domainInfo, category *categoryInfo, topic *topicInfo, result *OrganizeResult) {
+	topicPath := filepath.Join(compendiumPath, domain.slug, category.slug, topic.slug)
+	indexPath := filepath.Join(topicPath, "index.md")
+
+	existingContent, _ := os.ReadFile(indexPath)
+	existingIssueIDs := ""
+	if len(existingContent) > 0 {
+		existingIssueIDs = extractFrontmatterValue(string(existingContent), "github_issue_ids")
+	}
+
+	// List ALL articles from filesystem
+	entries, _ := os.ReadDir(topicPath)
+	var allArticles []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && e.Name() != "index.md" {
+			allArticles = append(allArticles, e.Name())
+		}
+	}
+	sort.Strings(allArticles)
+
+	// Check for header image (both compound and simple naming)
+	compoundImgName := fmt.Sprintf("%s--%s--%s_header.avif", domain.slug, category.slug, topic.slug)
+	simpleImgName := fmt.Sprintf("%s_header.avif", topic.slug)
+	imgDir := filepath.Join(topicPath, "_img")
+	hasHeaderImage := false
+	headerImgRef := ""
+	if fileExistsLocal(filepath.Join(imgDir, compoundImgName)) {
+		hasHeaderImage = true
+		headerImgRef = fmt.Sprintf("_img/%s", compoundImgName)
+	} else if fileExistsLocal(filepath.Join(imgDir, simpleImgName)) {
+		hasHeaderImage = true
+		headerImgRef = fmt.Sprintf("_img/%s", simpleImgName)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.WriteString(fmt.Sprintf("title: \"%s\"\n", topic.name))
+	sb.WriteString(fmt.Sprintf("domain: \"%s\"\n", domain.name))
+	sb.WriteString(fmt.Sprintf("domain-slug: \"%s\"\n", domain.slug))
+	sb.WriteString(fmt.Sprintf("category: \"%s\"\n", category.name))
+	sb.WriteString(fmt.Sprintf("category-slug: \"%s\"\n", category.slug))
+	sb.WriteString(fmt.Sprintf("topic: \"%s\"\n", topic.name))
+	sb.WriteString(fmt.Sprintf("topic-slug: \"%s\"\n", topic.slug))
+	if existingIssueIDs != "" {
+		sb.WriteString(fmt.Sprintf("github_issue_ids: %s\n", existingIssueIDs))
+	}
+	sb.WriteString("---\n\n")
+
+	if hasHeaderImage {
+		sb.WriteString(fmt.Sprintf("![Header](%s)\n\n", headerImgRef))
+	}
+
+	sb.WriteString(fmt.Sprintf("# %s\n\n", topic.name))
+	sb.WriteString("## Articles\n\n")
+
+	for _, articleFile := range allArticles {
+		slug := strings.TrimSuffix(articleFile, ".md")
+		// Try to get display name from frontmatter
+		displayName := strings.ReplaceAll(slug, "-", " ")
+		displayName = strings.Title(displayName)
+		articlePath := filepath.Join(topicPath, articleFile)
+		if content, err := os.ReadFile(articlePath); err == nil {
+			if title := extractFrontmatterValue(string(content), "article"); title != "" {
+				displayName = title
+			}
+		}
+		sb.WriteString(fmt.Sprintf("- [%s](%s)\n", displayName, articleFile))
+	}
+
+	os.MkdirAll(topicPath, 0755)
+	os.WriteFile(indexPath, []byte(sb.String()), 0644)
+	result.IndexesUpdated = append(result.IndexesUpdated, fmt.Sprintf("Compendium/%s/%s/%s/index.md", domain.slug, category.slug, topic.slug))
+}
+
+// addMissingImageReferences adds ![Header] references to articles that have images but no reference
+func (s *Server) addMissingImageReferences(articles []articleInfo, result *OrganizeResult) {
+	for _, article := range articles {
+		targetDir := filepath.Join(s.repoPath, "Compendium", article.domainSlug, article.categorySlug, article.topicSlug)
+		articlePath := filepath.Join(targetDir, article.filename)
+		imgPath := filepath.Join(targetDir, "_img", article.slug+"_header.avif")
+
+		// Check if image exists
+		if !fileExistsLocal(imgPath) {
+			continue
+		}
+
+		// Read article content
+		content, err := os.ReadFile(articlePath)
+		if err != nil {
+			continue
+		}
+
+		text := string(content)
+		if strings.Contains(text, "![Header]") {
+			continue // Already has image reference
+		}
+
+		// Find end of frontmatter and insert image reference
+		lines := strings.Split(text, "\n")
+		dashCount := 0
+		insertIdx := -1
+		for i, line := range lines {
+			if strings.TrimSpace(line) == "---" {
+				dashCount++
+				if dashCount == 2 {
+					insertIdx = i + 1
+					break
+				}
+			}
+		}
+
+		if insertIdx > 0 {
+			imageRef := fmt.Sprintf("\n![Header](_img/%s_header.avif)", article.slug)
+			newLines := make([]string, 0, len(lines)+2)
+			newLines = append(newLines, lines[:insertIdx]...)
+			newLines = append(newLines, imageRef)
+			newLines = append(newLines, lines[insertIdx:]...)
+			os.WriteFile(articlePath, []byte(strings.Join(newLines, "\n")), 0644)
+		}
+	}
+}
+
+// fileExistsLocal checks if a file exists on the local filesystem
+func fileExistsLocal(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// buildOrganizedArticleDirIndex maps article slug -> containing topic directory for
+// already-organized articles in Compendium/*/*/*/*.md (excluding index.md and _ dirs).
+func (s *Server) buildOrganizedArticleDirIndex() map[string]string {
+	index := make(map[string]string)
+	compendiumPath := filepath.Join(s.repoPath, "Compendium")
+
+	_ = filepath.Walk(compendiumPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if info.IsDir() {
+			if path != compendiumPath && strings.HasPrefix(info.Name(), "_") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if !strings.HasSuffix(info.Name(), ".md") || info.Name() == "index.md" {
+			return nil
+		}
+
+		slug := strings.TrimSuffix(info.Name(), ".md")
+		index[slug] = filepath.Dir(path)
+		return nil
+	})
+
+	return index
+}
+
+// articleInfo contains parsed frontmatter for local article organization
+type articleInfo struct {
+	filename     string
+	slug         string
+	domain       string
+	domainSlug   string
+	category     string
+	categorySlug string
+	topic        string
+	topicSlug    string
+}
+
+// domainInfo, categoryInfo, topicInfo are used by updateLocalIndexFiles
+type domainInfo struct {
+	name       string
+	slug       string
+	categories map[string]*categoryInfo
+}
+
+type categoryInfo struct {
+	name   string
+	slug   string
+	topics map[string]*topicInfo
+}
+
+type topicInfo struct {
+	name     string
+	slug     string
+	articles []string
 }
 
 // extractCandidateIndex extracts the candidate number from an image filename
@@ -1375,6 +1878,28 @@ func isNumeric(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+// findOrganizedImageDirs returns Compendium/**/_img directories excluding _incoming.
+func (s *Server) findOrganizedImageDirs() []string {
+	compendiumRoot := filepath.Join(s.repoPath, "Compendium")
+	incomingRoot := filepath.Join(compendiumRoot, "_incoming")
+	var dirs []string
+
+	_ = filepath.Walk(compendiumRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || !info.IsDir() {
+			return nil
+		}
+		if path == incomingRoot {
+			return filepath.SkipDir
+		}
+		if info.Name() == "_img" {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+
+	return dirs
 }
 
 // ============================================================
@@ -1643,20 +2168,35 @@ func (s *Server) handleGetBranchIssue(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, response)
 }
 
-// BranchInfo for listing branches
+// BranchListItem for listing branches with optional issue context
 type BranchListItem struct {
 	Name        string `json:"name"`
 	IssueNumber int    `json:"issueNumber,omitempty"`
 	IsResearch  bool   `json:"isResearch"`
+	Title       string `json:"title,omitempty"`    // Issue title, e.g. "Science > Physics > Quantum Mechanics"
+	Domain      string `json:"domain,omitempty"`   // Parsed from title
+	Category    string `json:"category,omitempty"` // Parsed from title
+	Topic       string `json:"topic,omitempty"`    // Parsed from title
 }
 
 // handleListBranches returns all branches, highlighting research branches
+// and enriching them with issue metadata (domain/category/topic) when available.
 func (s *Server) handleListBranches(w http.ResponseWriter, r *http.Request) {
 	// Get local branches using git command
 	output, err := s.gitMgr.RunGit("branch", "--list")
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list branches: %v", err))
 		return
+	}
+
+	// Build a lookup map of issue number -> title from topic issues (best-effort)
+	issueMap := map[int]string{}
+	if s.ghClient != nil {
+		if issues, err := s.ghClient.GetTopicIssues(); err == nil {
+			for _, iss := range issues {
+				issueMap[iss.GetNumber()] = iss.GetTitle()
+			}
+		}
 	}
 
 	var branches []BranchListItem
@@ -1678,6 +2218,23 @@ func (s *Server) handleListBranches(w http.ResponseWriter, r *http.Request) {
 			branch.IsResearch = true
 			if num, err := strconv.Atoi(matches[1]); err == nil {
 				branch.IssueNumber = num
+
+				// Enrich with issue title & parsed domain/category/topic
+				if title, ok := issueMap[num]; ok {
+					branch.Title = title
+					parts := strings.Split(title, " > ")
+					switch len(parts) {
+					case 1:
+						branch.Topic = strings.TrimSpace(parts[0])
+					case 2:
+						branch.Domain = strings.TrimSpace(parts[0])
+						branch.Topic = strings.TrimSpace(parts[1])
+					default: // 3+
+						branch.Domain = strings.TrimSpace(parts[0])
+						branch.Category = strings.TrimSpace(parts[1])
+						branch.Topic = strings.TrimSpace(parts[2])
+					}
+				}
 			}
 		}
 

@@ -9,10 +9,8 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -45,13 +43,25 @@ type GeneratedCandidate struct {
 	NegativeText  string
 }
 
-// GenerateImages runs the image generation process for all pending prompts
-// This should be called after the main research run, with Ollama stopped
+// GenerateImages runs the image generation process for all pending prompts.
+// By default, organized-article images are written directly to their final _img location.
 func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
+	return a.generateImages(ctx, branchName, false)
+}
+
+// GenerateImagesForReview runs image generation with all article headers staged in
+// Compendium/_incoming so they appear in the review UI before finalization.
+func (a *Agent) GenerateImagesForReview(ctx context.Context, branchName string) error {
+	return a.generateImages(ctx, branchName, true)
+}
+
+// generateImages runs the image generation process for all pending prompts.
+// This should be called after the main research run, with Ollama stopped.
+func (a *Agent) generateImages(ctx context.Context, branchName string, stageOrganizedInIncoming bool) error {
 	log.Println("[Image Generation] Starting image generation process...")
 
 	// Find all pending article image prompts
-	pending, err := a.findPendingImagePrompts(branchName)
+	pending, err := a.findPendingImagePrompts(branchName, stageOrganizedInIncoming)
 	if err != nil {
 		return fmt.Errorf("failed to find pending prompts: %w", err)
 	}
@@ -305,20 +315,17 @@ func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
 
 	// ============================================================
 	// PHASE 2: Generate images from the unique prompts
-	// Stop Ollama to free VRAM, start ComfyUI
+	// ComfyUI is expected to already be running externally
 	// ============================================================
 
-	// Stop Ollama to free VRAM
-	if err := a.stopOllama(); err != nil {
-		slog.Warn("Failed to stop Ollama", "error", err)
+	comfyURL := os.Getenv("COMFYUI_URL")
+	if comfyURL == "" {
+		comfyURL = "http://localhost:8188"
 	}
-
-	// Start ComfyUI
-	comfyClient, err := a.startComfyUI(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to start ComfyUI: %w", err)
+	comfyClient := comfyui.NewClient(comfyURL)
+	if !comfyClient.IsHealthy(ctx) {
+		return fmt.Errorf("ComfyUI is not available at %s – please start it externally", comfyURL)
 	}
-	defer a.stopComfyUI()
 
 	if len(negativePrompts) > 0 {
 		log.Printf("[Image Generation] Using negative prompt: %s", negativePromptText)
@@ -379,16 +386,13 @@ func (a *Agent) GenerateImages(ctx context.Context, branchName string) error {
 
 	log.Printf("[Image Generation] Completed: %d generated, %d errors", generatedCount, errorCount)
 
-	// Restart Ollama
-	if err := a.startOllama(); err != nil {
-		slog.Warn("Failed to restart Ollama", "error", err)
-	}
-
 	return nil
 }
 
-// findPendingImagePrompts finds all image prompts that haven't been generated yet
-func (a *Agent) findPendingImagePrompts(branchName string) ([]PendingImagePrompt, error) {
+// findPendingImagePrompts finds all image prompts that haven't been generated yet.
+// When stageOrganizedInIncoming is true, organized article header images are staged
+// under Compendium/_incoming for UI review.
+func (a *Agent) findPendingImagePrompts(branchName string, stageOrganizedInIncoming bool) ([]PendingImagePrompt, error) {
 	var pending []PendingImagePrompt
 
 	// List debug articles directory
@@ -408,7 +412,7 @@ func (a *Agent) findPendingImagePrompts(branchName string) ([]PendingImagePrompt
 			// Extract the actual prompt (after metadata comments)
 			promptText := extractPromptText(headerPromptContent)
 			if promptText != "" {
-				// Try to find the article - first in _incoming, then in organized location
+				// Try to find the article - first in _incoming, then in organized location.
 				articlePath := filepath.Join("Compendium/_incoming", articleDir+".md")
 				outputPath := filepath.Join("Compendium/_incoming", articleDir+"_header.png")
 				isOrganized := false
@@ -428,9 +432,13 @@ func (a *Agent) findPendingImagePrompts(branchName string) ([]PendingImagePrompt
 							category = orgCategory
 							topic = orgTopic
 							isOrganized = true
-							// For organized articles, output goes to _img directory in the topic folder
-							topicPath := filepath.Dir(articlePath)
-							outputPath = filepath.Join(topicPath, "_img", articleDir+"_header.png")
+							// By default organized articles output to their topic _img folder.
+							// For backfill-review mode, keep output in _incoming so the dashboard
+							// images page can review candidates consistently.
+							if !stageOrganizedInIncoming {
+								topicPath := filepath.Dir(articlePath)
+								outputPath = filepath.Join(topicPath, "_img", articleDir+"_header.png")
+							}
 						}
 					}
 				}
@@ -449,10 +457,18 @@ func (a *Agent) findPendingImagePrompts(branchName string) ([]PendingImagePrompt
 
 				// Check if image already exists (check both .png and .avif)
 				imageExists := false
-				if isOrganized {
+				if isOrganized && !stageOrganizedInIncoming {
 					topicPath := filepath.Dir(articlePath)
 					imagePathBase := filepath.Join(topicPath, "_img", articleDir+"_header")
 					imageExists = a.imageExistsAnyFormat(branchName, imagePathBase)
+				} else if isOrganized && stageOrganizedInIncoming {
+					// In review-staging mode, treat either final _img or staged _incoming
+					// canonical image as already present.
+					topicPath := filepath.Dir(articlePath)
+					finalPathBase := filepath.Join(topicPath, "_img", articleDir+"_header")
+					stagedPathBase := filepath.Join("Compendium/_incoming", articleDir+"_header")
+					imageExists = a.imageExistsAnyFormat(branchName, finalPathBase) ||
+						a.imageExistsAnyFormat(branchName, stagedPathBase)
 				} else {
 					_, _, err = a.gh.GetFile(branchName, outputPath)
 					imageExists = err == nil
@@ -1690,233 +1706,6 @@ func (a *Agent) findOrganizedArticle(branchName, articleSlug string) (path, doma
 	return "", "", "", ""
 }
 
-// runDockerComposeCmd runs a docker-compose command in the configured directory
-func (a *Agent) runDockerComposeCmd(cmdStr string) error {
-	if cmdStr == "" {
-		return nil
-	}
-
-	workDir := os.Getenv("DOCKER_COMPOSE_DIR")
-	if workDir == "" {
-		workDir = "infra"
-	}
-
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/C", cmdStr)
-	} else {
-		cmd = exec.Command("sh", "-c", cmdStr)
-	}
-	cmd.Dir = workDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
-}
-
-// stopOllama stops the Ollama service to free VRAM
-func (a *Agent) stopOllama() error {
-	log.Println("[VRAM] Stopping Ollama...")
-
-	stopCmd := os.Getenv("OLLAMA_STOP_CMD")
-	if stopCmd == "" {
-		stopCmd = "docker compose stop ollama"
-	}
-
-	if err := a.runDockerComposeCmd(stopCmd); err != nil {
-		// Not an error if it wasn't running
-		log.Println("[VRAM] Ollama stop command completed (may not have been running)")
-	}
-
-	// Wait for VRAM to be freed
-	time.Sleep(2 * time.Second)
-	return nil
-}
-
-// startOllama starts the Ollama service
-func (a *Agent) startOllama() error {
-	log.Println("[VRAM] Starting Ollama...")
-
-	startCmd := os.Getenv("OLLAMA_START_CMD")
-	if startCmd == "" {
-		startCmd = "docker compose start ollama"
-	}
-
-	if err := a.runDockerComposeCmd(startCmd); err != nil {
-		return fmt.Errorf("failed to start Ollama: %w", err)
-	}
-
-	// Wait for Ollama to be ready
-	time.Sleep(5 * time.Second)
-	return nil
-}
-
-// isDockerAvailable checks if Docker daemon is running and accessible
-func (a *Agent) isDockerAvailable() bool {
-	cmd := exec.Command("docker", "info")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run() == nil
-}
-
-// ensureDockerRunning checks if Docker is available and attempts to start Docker Desktop on Windows if not
-func (a *Agent) ensureDockerRunning() error {
-	if a.isDockerAvailable() {
-		return nil
-	}
-
-	log.Println("[Docker] Docker daemon not available, attempting to start...")
-
-	if runtime.GOOS == "windows" {
-		// Try to start Docker Desktop on Windows
-		dockerDesktopPath := os.Getenv("DOCKER_DESKTOP_PATH")
-		if dockerDesktopPath == "" {
-			dockerDesktopPath = `C:\Program Files\Docker\Docker\Docker Desktop.exe`
-		}
-
-		// Check if Docker Desktop executable exists
-		if _, err := os.Stat(dockerDesktopPath); os.IsNotExist(err) {
-			return fmt.Errorf("Docker Desktop not found at %s. Please install Docker Desktop or set DOCKER_DESKTOP_PATH", dockerDesktopPath)
-		}
-
-		log.Printf("[Docker] Starting Docker Desktop: %s", dockerDesktopPath)
-		cmd := exec.Command(dockerDesktopPath)
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("failed to start Docker Desktop: %w", err)
-		}
-
-		// Wait for Docker to be ready (up to 90 seconds)
-		log.Println("[Docker] Waiting for Docker Desktop to be ready...")
-		for i := 0; i < 45; i++ {
-			if a.isDockerAvailable() {
-				log.Println("[Docker] Docker Desktop is ready")
-				return nil
-			}
-			time.Sleep(2 * time.Second)
-		}
-
-		return fmt.Errorf("Docker Desktop did not become ready within 90 seconds")
-	}
-
-	// On Linux/macOS, Docker should be started via systemd or similar
-	return fmt.Errorf("Docker daemon not available. Please start Docker manually")
-}
-
-// startComfyUI starts the ComfyUI service and returns a client
-func (a *Agent) startComfyUI(ctx context.Context) (*comfyui.Client, error) {
-	log.Println("[VRAM] Starting ComfyUI...")
-
-	// ComfyUI URL from environment or default
-	comfyURL := os.Getenv("COMFYUI_URL")
-	if comfyURL == "" {
-		comfyURL = "http://localhost:8188"
-	}
-
-	client := comfyui.NewClient(comfyURL)
-
-	// Check if ComfyUI is already running and healthy
-	if client.IsHealthy(ctx) {
-		log.Println("[ComfyUI] Already running and healthy")
-		return client, nil
-	}
-
-	// Check if ComfyUI container exists and is running before restarting Docker
-	// This prevents unnecessary Docker restarts that kill the container
-	if a.isContainerRunning("comfyui") {
-		log.Println("[ComfyUI] Container is running but not healthy yet, waiting...")
-		// Don't restart Docker, just wait for it to become ready
-	} else {
-		// Ensure Docker is running before attempting to start ComfyUI
-		if err := a.ensureDockerRunning(); err != nil {
-			return nil, fmt.Errorf("Docker not available: %w", err)
-		}
-	}
-
-	// Retry logic - try up to 10 times to get ComfyUI running
-	maxRetries := 10
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if attempt > 1 {
-			log.Printf("[ComfyUI] Retry attempt %d/%d...", attempt, maxRetries)
-			// Restart the container on retry
-			log.Println("[ComfyUI] Restarting container...")
-			_ = a.runDockerComposeCmd("docker compose restart comfyui")
-			time.Sleep(5 * time.Second)
-		} else {
-			// First attempt - start the container
-			startCmd := os.Getenv("COMFYUI_START_CMD")
-			if startCmd == "" {
-				startCmd = "docker compose up -d comfyui"
-			}
-
-			log.Printf("[ComfyUI] Starting with command: %s", startCmd)
-			if err := a.runDockerComposeCmd(startCmd); err != nil {
-				slog.Warn("Failed to start ComfyUI", "error", err)
-				continue
-			}
-		}
-
-		// Wait for ComfyUI to be ready (up to 5 minutes per attempt for model loading)
-		log.Println("[ComfyUI] Waiting for ComfyUI to be ready...")
-		waitTime := 150 // 150 iterations * 2 seconds = 5 minutes per attempt
-		for i := 0; i < waitTime; i++ {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-			}
-
-			if client.IsHealthy(ctx) {
-				log.Println("[ComfyUI] Ready")
-				return client, nil
-			}
-
-			// Check container status every 10 iterations to see if it's still running
-			if i > 0 && i%10 == 0 {
-				log.Printf("[ComfyUI] Still waiting... (%d/%d seconds)", i*2, waitTime*2)
-				// Check if container is running
-				if !a.isContainerRunning("comfyui") {
-					log.Println("[ComfyUI] Container stopped unexpectedly, will retry")
-					break
-				}
-			}
-
-			time.Sleep(2 * time.Second)
-		}
-
-		if client.IsHealthy(ctx) {
-			log.Println("[ComfyUI] Ready")
-			return client, nil
-		}
-
-		log.Printf("[ComfyUI] Not ready after attempt %d", attempt)
-	}
-
-	return nil, fmt.Errorf("ComfyUI did not become ready after %d attempts", maxRetries)
-}
-
-// isContainerRunning checks if a Docker container is running
-func (a *Agent) isContainerRunning(containerName string) bool {
-	cmd := exec.Command("docker", "ps", "--filter", fmt.Sprintf("name=%s", containerName), "--filter", "status=running", "-q")
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	return len(strings.TrimSpace(string(output))) > 0
-}
-
-// stopComfyUI stops the ComfyUI service
-func (a *Agent) stopComfyUI() {
-	log.Println("[VRAM] Stopping ComfyUI...")
-
-	stopCmd := os.Getenv("COMFYUI_STOP_CMD")
-	if stopCmd == "" {
-		stopCmd = "docker compose stop comfyui"
-	}
-
-	if err := a.runDockerComposeCmd(stopCmd); err != nil {
-		slog.Warn("Failed to stop ComfyUI", "error", err)
-	}
-}
 
 // imageExistsAnyFormat checks if an image exists with any common extension (.png, .avif, .jpg, .webp)
 func (a *Agent) imageExistsAnyFormat(branchName, pathWithoutExt string) bool {

@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getStatus, getResearcherStatus, createWebSocket } from '../lib/api';
+import { getStatus, getResearcherStatus, listWorkers, getQueueStatus, createWebSocket } from '../lib/api';
 
 export function useStatus() {
   const [status, setStatus] = useState(null);
   const [researcherStatus, setResearcherStatus] = useState(null);
+  const [workers, setWorkers] = useState([]);
+  const [queueStatus, setQueueStatus] = useState(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
   const wsRef = useRef(null);
@@ -20,6 +22,10 @@ export function useStatus() {
           setStatus(data.payload);
         } else if (data.type === 'researcher') {
           setResearcherStatus(data.payload);
+        } else if (data.type === 'workers') {
+          setWorkers(data.payload || []);
+        } else if (data.type === 'queue') {
+          setQueueStatus(data.payload);
         }
       });
 
@@ -49,12 +55,16 @@ export function useStatus() {
   // Initial data fetch (fallback if WebSocket isn't available)
   const refresh = useCallback(async () => {
     try {
-      const [statusData, researcherData] = await Promise.all([
+      const [statusData, researcherData, workersData, queueData] = await Promise.all([
         getStatus(),
         getResearcherStatus(),
+        listWorkers().catch(() => []),
+        getQueueStatus().catch(() => null),
       ]);
       setStatus(statusData);
       setResearcherStatus(researcherData);
+      setWorkers(workersData || []);
+      setQueueStatus(queueData);
       setError(null);
     } catch (e) {
       setError(e.message);
@@ -81,6 +91,8 @@ export function useStatus() {
   return {
     status,
     researcherStatus,
+    workers,
+    queueStatus,
     connected,
     error,
     refresh,

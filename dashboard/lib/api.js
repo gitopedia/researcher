@@ -39,14 +39,6 @@ export const forceStopResearcher = () => fetchAPI('/researcher/stop', {
   body: JSON.stringify({ force: true }),
 });
 
-// Service control
-export const startDocker = () => fetchAPI('/services/docker/start', { method: 'POST' });
-export const stopDocker = () => fetchAPI('/services/docker/stop', { method: 'POST' });
-export const startOllama = () => fetchAPI('/services/ollama/start', { method: 'POST' });
-export const stopOllama = () => fetchAPI('/services/ollama/stop', { method: 'POST' });
-export const startComfyUI = () => fetchAPI('/services/comfyui/start', { method: 'POST' });
-export const stopComfyUI = () => fetchAPI('/services/comfyui/stop', { method: 'POST' });
-
 // Git operations
 export const getGitBranch = () => fetchAPI('/git/branch');
 export const cleanBranch = (options) => fetchAPI('/git/clean', {
@@ -91,6 +83,28 @@ export const organizeArticles = () => fetchAPI('/organize', { method: 'POST' });
 
 // Logs
 export const getResearcherLogs = (lines = 300) => fetchAPI(`/logs/researcher?lines=${encodeURIComponent(lines)}`);
+export const getLogSources = () => fetchAPI('/logs/sources');
+export const getLogsBySource = (source) => fetchAPI(`/logs/${encodeURIComponent(source)}`);
+
+// Workers
+export const listWorkers = () => fetchAPI('/workers');
+export const getWorker = (id) => fetchAPI(`/workers/${encodeURIComponent(id)}`);
+export const createWorker = (config) => fetchAPI('/workers', {
+  method: 'POST',
+  body: JSON.stringify(config),
+});
+export const deleteWorker = (id) => fetchAPI(`/workers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export const startWorker = (id) => fetchAPI(`/workers/${encodeURIComponent(id)}/start`, { method: 'POST' });
+export const stopWorker = (id) => fetchAPI(`/workers/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+export const pauseWorker = (id) => fetchAPI(`/workers/${encodeURIComponent(id)}/pause`, { method: 'POST' });
+export const resumeWorker = (id) => fetchAPI(`/workers/${encodeURIComponent(id)}/resume`, { method: 'POST' });
+export const configureWorker = (id, config) => fetchAPI(`/workers/${encodeURIComponent(id)}/configure`, {
+  method: 'PUT',
+  body: JSON.stringify(config),
+});
+
+// Queue
+export const getQueueStatus = () => fetchAPI('/queue/status');
 
 // GitHub Issues & Branch Management
 export const listTopicIssues = () => fetchAPI('/issues/topics');

@@ -8,12 +8,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	gh "github.com/gitopedia/researcher/internal/github"
+	"github.com/gitopedia/researcher/internal/queue"
+	"github.com/gitopedia/researcher/internal/worker"
 )
 
 // Server is the HTTP API server for the researcher dashboard
@@ -25,6 +28,11 @@ type Server struct {
 	config     *ConfigManager
 	gitMgr     *GitManager
 	ghClient   gh.GitHubClient
+
+	// Worker & queue systems
+	queueMgr      *queue.Manager
+	workerMgr     *worker.Manager
+	workerFactory *worker.Factory
 	
 	// WebSocket connections
 	wsClients   map[*websocket.Conn]bool
@@ -40,13 +48,18 @@ type StatusUpdate struct {
 	Payload interface{} `json:"payload"`
 }
 
-// NewServer creates a new API server
-func NewServer(repoPath string) (*Server, error) {
+// NewServer creates a new API server. queueMgr and workerMgr may be nil for
+// backward-compatible usage; when provided, workers and queue endpoints are
+// available.
+func NewServer(repoPath string, queueMgr *queue.Manager, workerMgr *worker.Manager, workerFactory *worker.Factory) (*Server, error) {
 	s := &Server{
 		router:      mux.NewRouter(),
 		wsClients:   make(map[*websocket.Conn]bool),
 		wsBroadcast: make(chan StatusUpdate, 100),
-		repoPath:    repoPath,
+		repoPath:      repoPath,
+		queueMgr:      queueMgr,
+		workerMgr:     workerMgr,
+		workerFactory: workerFactory,
 	}
 
 	// Initialize managers
@@ -88,14 +101,8 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/researcher/resume", s.handleResearcherResume).Methods("POST", "OPTIONS")
 	api.HandleFunc("/researcher/stop", s.handleResearcherStop).Methods("POST", "OPTIONS")
 
-	// Service control
+	// Service status (read-only health checks)
 	api.HandleFunc("/services/status", s.handleServicesStatus).Methods("GET", "OPTIONS")
-	api.HandleFunc("/services/docker/start", s.handleDockerStart).Methods("POST", "OPTIONS")
-	api.HandleFunc("/services/docker/stop", s.handleDockerStop).Methods("POST", "OPTIONS")
-	api.HandleFunc("/services/ollama/start", s.handleOllamaStart).Methods("POST", "OPTIONS")
-	api.HandleFunc("/services/ollama/stop", s.handleOllamaStop).Methods("POST", "OPTIONS")
-	api.HandleFunc("/services/comfyui/start", s.handleComfyUIStart).Methods("POST", "OPTIONS")
-	api.HandleFunc("/services/comfyui/stop", s.handleComfyUIStop).Methods("POST", "OPTIONS")
 
 	// Git operations
 	api.HandleFunc("/git/branch", s.handleGitBranch).Methods("GET", "OPTIONS")
@@ -122,7 +129,9 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/organize", s.handleOrganize).Methods("POST", "OPTIONS")
 
 	// Logs
+	api.HandleFunc("/logs/sources", s.handleListLogSources).Methods("GET", "OPTIONS")
 	api.HandleFunc("/logs/researcher", s.handleGetResearcherLogs).Methods("GET", "OPTIONS")
+	api.HandleFunc("/logs/{source}", s.handleGetLogs).Methods("GET", "OPTIONS")
 
 	// GitHub Issue & Branch Management
 	api.HandleFunc("/issues/topics", s.handleListTopicIssues).Methods("GET", "OPTIONS")
@@ -132,6 +141,20 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/branch/switch", s.handleSwitchBranch).Methods("POST", "OPTIONS")
 	api.HandleFunc("/branch/create", s.handleCreateBranch).Methods("POST", "OPTIONS")
 	api.HandleFunc("/branches", s.handleListBranches).Methods("GET", "OPTIONS")
+
+	// Workers
+	api.HandleFunc("/workers", s.handleListWorkers).Methods("GET", "OPTIONS")
+	api.HandleFunc("/workers", s.handleCreateWorker).Methods("POST", "OPTIONS")
+	api.HandleFunc("/workers/{id}", s.handleGetWorker).Methods("GET", "OPTIONS")
+	api.HandleFunc("/workers/{id}", s.handleDeleteWorker).Methods("DELETE", "OPTIONS")
+	api.HandleFunc("/workers/{id}/start", s.handleStartWorker).Methods("POST", "OPTIONS")
+	api.HandleFunc("/workers/{id}/stop", s.handleStopWorker).Methods("POST", "OPTIONS")
+	api.HandleFunc("/workers/{id}/pause", s.handlePauseWorker).Methods("POST", "OPTIONS")
+	api.HandleFunc("/workers/{id}/resume", s.handleResumeWorker).Methods("POST", "OPTIONS")
+	api.HandleFunc("/workers/{id}/configure", s.handleConfigureWorker).Methods("PUT", "OPTIONS")
+
+	// Queue status
+	api.HandleFunc("/queue/status", s.handleQueueStatus).Methods("GET", "OPTIONS")
 
 	// WebSocket
 	api.HandleFunc("/ws", s.handleWebSocket)
@@ -191,6 +214,16 @@ func (s *Server) Stop(ctx context.Context) error {
 	// Stop the research runner if running
 	s.runner.Stop()
 
+	// Stop all workers
+	if s.workerMgr != nil {
+		s.workerMgr.StopAll()
+	}
+
+	// Stop the queue
+	if s.queueMgr != nil {
+		s.queueMgr.Stop()
+	}
+
 	// Close all WebSocket connections
 	s.wsClientsMu.Lock()
 	for client := range s.wsClients {
@@ -213,14 +246,34 @@ func (s *Server) broadcastStatus(update StatusUpdate) {
 // runWebSocketBroadcaster handles broadcasting updates to all clients
 func (s *Server) runWebSocketBroadcaster() {
 	for update := range s.wsBroadcast {
-		s.wsClientsMu.RLock()
+		s.wsClientsMu.Lock()
+		deadClients := make([]*websocket.Conn, 0)
 		for client := range s.wsClients {
 			err := client.WriteJSON(update)
 			if err != nil {
-				log.Printf("[WebSocket] Error writing to client: %v", err)
+				// Check if it's a connection closure error (common and harmless)
+				errStr := err.Error()
+				isConnectionClosed := strings.Contains(errStr, "wsasend") ||
+					strings.Contains(errStr, "broken pipe") ||
+					strings.Contains(errStr, "connection reset") ||
+					strings.Contains(errStr, "use of closed network connection")
+				
+				if isConnectionClosed {
+					// Silently remove dead connections - client closed the connection
+					deadClients = append(deadClients, client)
+				} else {
+					// Log other errors (unexpected issues)
+					log.Printf("[WebSocket] Error writing to client: %v", err)
+					deadClients = append(deadClients, client)
+				}
 			}
 		}
-		s.wsClientsMu.RUnlock()
+		// Remove dead clients
+		for _, client := range deadClients {
+			delete(s.wsClients, client)
+			client.Close()
+		}
+		s.wsClientsMu.Unlock()
 	}
 }
 
@@ -239,6 +292,22 @@ func (s *Server) runStatusPoller(ctx context.Context) {
 				Type:    "status",
 				Payload: status,
 			})
+
+			// Broadcast worker status
+			if s.workerMgr != nil {
+				s.broadcastStatus(StatusUpdate{
+					Type:    "workers",
+					Payload: s.workerMgr.GetStatus(),
+				})
+			}
+
+			// Broadcast queue status
+			if s.queueMgr != nil {
+				s.broadcastStatus(StatusUpdate{
+					Type:    "queue",
+					Payload: s.queueMgr.GetStatus(),
+				})
+			}
 		}
 	}
 }

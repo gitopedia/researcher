@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,6 +72,33 @@ type runnerPIDFile struct {
 
 func (r *ResearchRunner) pidFilePath() string {
 	return filepath.Join(r.repoPath, "Compendium", "_debug", "dashboard_runner_pid.json")
+}
+
+func (r *ResearchRunner) pauseFlagPath() string {
+	if strings.TrimSpace(r.repoPath) == "" {
+		return ""
+	}
+	return filepath.Join(r.repoPath, "Compendium", "_debug", "dashboard_pause.flag")
+}
+
+func (r *ResearchRunner) setPauseFlagUnlocked() error {
+	p := r.pauseFlagPath()
+	if p == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		return err
+	}
+	// Contents are informational only; existence is what matters.
+	return os.WriteFile(p, []byte("paused\n"), 0644)
+}
+
+func (r *ResearchRunner) clearPauseFlagUnlocked() {
+	p := r.pauseFlagPath()
+	if p == "" {
+		return
+	}
+	_ = os.Remove(p)
 }
 
 func (r *ResearchRunner) writePIDFile(pid int, mode RunMode) {
@@ -220,6 +246,9 @@ func (r *ResearchRunner) Start(config RunConfig) error {
 		return fmt.Errorf("cannot start: runner is %s", r.state)
 	}
 
+	// Ensure we don't start in a paused state from a stale flag.
+	r.clearPauseFlagUnlocked()
+
 	// Build command based on mode
 	args := []string{"run", "."}
 	args = append(args, "--once")
@@ -296,6 +325,9 @@ func (r *ResearchRunner) runProcess() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Always clear pause flag when the process exits so the next run isn't blocked.
+	r.clearPauseFlagUnlocked()
+
 	if err != nil {
 		log.Printf("[Runner] Process exited with error: %v", err)
 		r.currentStep = fmt.Sprintf("Error: %v", err)
@@ -324,12 +356,14 @@ func (r *ResearchRunner) Pause() error {
 	}
 
 	if r.cmd != nil && r.cmd.Process != nil {
-		// On Unix, we could send SIGSTOP, but for cross-platform compatibility,
-		// we'll just mark as paused and let the process continue
-		// A future enhancement could implement proper pause/resume
+		// For cross-platform compatibility, we pause cooperatively via a shared flag file.
+		// The running agent checks this flag at safe boundaries and blocks until it's cleared.
+		if err := r.setPauseFlagUnlocked(); err != nil {
+			return fmt.Errorf("failed to set pause flag: %w", err)
+		}
 		r.state = StatePaused
 		r.broadcast("researcher", r.getStatusUnlocked())
-		log.Println("[Runner] Paused (note: process continues in background)")
+		log.Println("[Runner] Paused (cooperative pause flag set)")
 	}
 
 	return nil
@@ -344,6 +378,7 @@ func (r *ResearchRunner) Resume() error {
 		return fmt.Errorf("cannot resume: runner is %s", r.state)
 	}
 
+	r.clearPauseFlagUnlocked()
 	r.state = StateRunning
 	r.broadcast("researcher", r.getStatusUnlocked())
 	log.Println("[Runner] Resumed")
@@ -355,6 +390,9 @@ func (r *ResearchRunner) Resume() error {
 func (r *ResearchRunner) Stop() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Best-effort: never leave a stale pause flag behind.
+	r.clearPauseFlagUnlocked()
 
 	if r.state == StateIdle {
 		var killed int
@@ -414,6 +452,7 @@ func (r *ResearchRunner) Stop() error {
 			r.currentStep = "Stopped by user"
 			r.pid = 0
 			r.clearPIDFile()
+			r.clearPauseFlagUnlocked()
 			r.broadcast("researcher", r.getStatusUnlocked())
 		}
 	}()
@@ -429,6 +468,7 @@ func (r *ResearchRunner) ForceStop() StopResult {
 	defer r.mu.Unlock()
 
 	var killed []int
+	r.clearPauseFlagUnlocked()
 
 	// Kill PID recorded on disk (if present)
 	if pf, ok := r.readPIDFile(); ok {
@@ -598,251 +638,3 @@ func (r *ResearchRunner) broadcast(updateType string, payload interface{}) {
 	}
 }
 
-// Service control helpers
-
-// StartDocker attempts to start Docker Desktop
-func StartDocker() error {
-	if runtime.GOOS == "windows" {
-		dockerPath := os.Getenv("DOCKER_DESKTOP_PATH")
-		if dockerPath == "" {
-			dockerPath = `C:\Program Files\Docker\Docker\Docker Desktop.exe`
-		}
-
-		cmd := exec.Command(dockerPath)
-		return cmd.Start()
-	}
-	return fmt.Errorf("Docker auto-start not supported on %s", runtime.GOOS)
-}
-
-// StopDocker stops Docker Desktop (not commonly needed)
-func StopDocker() error {
-	if runtime.GOOS == "windows" {
-		cmd := exec.Command("taskkill", "/IM", "Docker Desktop.exe", "/F")
-		return cmd.Run()
-	}
-	return fmt.Errorf("Docker stop not supported on %s", runtime.GOOS)
-}
-
-// StartOllama starts the Ollama service
-func StartOllama() error {
-	// If something is already serving on the Ollama port, consider it started.
-	if runtime.GOOS == "windows" && isListening("127.0.0.1:11434") {
-		return nil
-	}
-
-	startCmd := os.Getenv("OLLAMA_START_CMD")
-	if startCmd == "" {
-		startCmd = "docker compose start ollama"
-	}
-
-	// Check if this is a native command (not docker compose)
-	if !strings.Contains(startCmd, "docker") && !strings.Contains(startCmd, "compose") {
-		// Best-effort native start
-		_ = runNativeCmd(startCmd)
-		if runtime.GOOS == "windows" {
-			// If port still isn't up, try starting native Ollama directly.
-			if !isListening("127.0.0.1:11434") {
-				_ = startNativeOllamaWindows()
-			}
-			if waitForListening("127.0.0.1:11434", 12*time.Second) {
-				return nil
-			}
-		}
-		// Non-windows or still not up
-		if waitForListening("127.0.0.1:11434", 8*time.Second) {
-			return nil
-		}
-		return fmt.Errorf("failed to start ollama with native command")
-	}
-
-	// Try docker compose start (best-effort). Even if it errors, we may still be able to start native Ollama.
-	dockerErr := runDockerComposeCmd(startCmd)
-
-	// If port is up after docker compose, we're done.
-	if waitForListening("127.0.0.1:11434", 6*time.Second) {
-		return nil
-	}
-
-	// On Windows, fall back to native Ollama if docker didn't bring it up (common when using native install).
-	if runtime.GOOS == "windows" {
-		_ = startNativeOllamaWindows()
-		if waitForListening("127.0.0.1:11434", 12*time.Second) {
-			return nil
-		}
-	}
-
-	if dockerErr != nil {
-		return fmt.Errorf("failed to start ollama: %v", dockerErr)
-	}
-	return fmt.Errorf("failed to start ollama: port 11434 did not become available")
-}
-
-// StopOllama stops the Ollama service
-func StopOllama() error {
-	stopCmd := os.Getenv("OLLAMA_STOP_CMD")
-	if stopCmd == "" {
-		stopCmd = "docker compose stop ollama"
-	}
-
-	// Check if this is a native command (not docker compose)
-	if !strings.Contains(stopCmd, "docker") && !strings.Contains(stopCmd, "compose") {
-		// Native stop command
-		_ = runNativeCmd(stopCmd)
-		// If something is still listening, also stop native Ollama on Windows.
-		if runtime.GOOS == "windows" && isListening("127.0.0.1:11434") {
-			_ = stopNativeOllamaWindows()
-			time.Sleep(500 * time.Millisecond)
-			if isListening("127.0.0.1:11434") {
-				return fmt.Errorf("ollama still listening on 11434 after stop")
-			}
-		}
-		return nil
-	}
-
-	// Try docker compose stop (best effort). If docker isn't running or no project is up,
-	// this may fail even though a native Ollama is running. We still want the Stop button
-	// to stop whichever Ollama is actually serving on localhost:11434.
-	dockerErr := runDockerComposeCmd(stopCmd)
-
-	// If something is still listening, stop native Ollama on Windows.
-	if runtime.GOOS == "windows" && isListening("127.0.0.1:11434") {
-		_ = stopNativeOllamaWindows()
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	// Decide success based on whether port is still listening.
-	if runtime.GOOS == "windows" && isListening("127.0.0.1:11434") {
-		if dockerErr != nil {
-			return fmt.Errorf("failed to stop ollama (docker compose error: %v) and native ollama is still listening on 11434", dockerErr)
-		}
-		return fmt.Errorf("failed to stop ollama: still listening on 11434")
-	}
-
-	// If docker compose errored but nothing is listening, treat stop as successful.
-	return nil
-}
-
-// StartComfyUI starts the ComfyUI service
-func StartComfyUI() error {
-	startCmd := os.Getenv("COMFYUI_START_CMD")
-	if startCmd == "" {
-		startCmd = "docker compose up -d comfyui"
-	}
-
-	return runDockerComposeCmd(startCmd)
-}
-
-// StopComfyUI stops the ComfyUI service
-func StopComfyUI() error {
-	stopCmd := os.Getenv("COMFYUI_STOP_CMD")
-	if stopCmd == "" {
-		stopCmd = "docker compose stop comfyui"
-	}
-
-	return runDockerComposeCmd(stopCmd)
-}
-
-func runDockerComposeCmd(cmdStr string) error {
-	workDir := os.Getenv("DOCKER_COMPOSE_DIR")
-	if workDir == "" {
-		workDir = "infra"
-	}
-
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/C", cmdStr)
-	} else {
-		cmd = exec.Command("sh", "-c", cmdStr)
-	}
-	cmd.Dir = workDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
-}
-
-// runNativeCmd runs a native command (not docker compose)
-func runNativeCmd(cmdStr string) error {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/C", cmdStr)
-	} else {
-		cmd = exec.Command("sh", "-c", cmdStr)
-	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
-}
-
-func isListening(addr string) bool {
-	c, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	_ = c.Close()
-	return true
-}
-
-func waitForListening(addr string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if isListening(addr) {
-			return true
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	return isListening(addr)
-}
-
-// startNativeOllamaWindows starts a native Windows Ollama server (not docker).
-// This attempts to launch `ollama.exe serve` detached.
-func startNativeOllamaWindows() error {
-	// Try PATH first
-	cmd := exec.Command("where.exe", "ollama")
-	out, err := cmd.CombinedOutput()
-	ollamaPath := ""
-	if err == nil {
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		if len(lines) > 0 {
-			ollamaPath = strings.TrimSpace(lines[0])
-		}
-	}
-	if ollamaPath == "" {
-		// Default install location
-		ollamaPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Ollama", "ollama.exe")
-	}
-	if _, statErr := os.Stat(ollamaPath); statErr != nil {
-		return fmt.Errorf("native ollama.exe not found at %s", ollamaPath)
-	}
-
-	// Use PowerShell Start-Process to detach
-	ps := fmt.Sprintf(`Start-Process -FilePath %q -ArgumentList 'serve' -WindowStyle Hidden`, ollamaPath)
-	out2, err2 := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput()
-	if err2 != nil {
-		return fmt.Errorf("failed to start native ollama: %v (%s)", err2, string(out2))
-	}
-	return nil
-}
-
-// stopNativeOllamaWindows stops a native Windows Ollama process (not docker).
-// It targets the PID that is actually listening on 11434.
-func stopNativeOllamaWindows() error {
-	// Get owning PID(s) for port 11434 and kill the process tree.
-	ps := `Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction SilentlyContinue | ` +
-		`Select-Object -ExpandProperty OwningProcess -Unique`
-	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to query Ollama listener PID: %w (%s)", err, string(out))
-	}
-	pids := strings.Fields(string(out))
-	if len(pids) == 0 {
-		// Fall back to killing by image name
-		_ = exec.Command("taskkill", "/F", "/IM", "ollama.exe").Run()
-		return nil
-	}
-	for _, pid := range pids {
-		_ = exec.Command("taskkill", "/F", "/T", "/PID", pid).Run()
-	}
-	return nil
-}

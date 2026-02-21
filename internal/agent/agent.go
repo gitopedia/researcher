@@ -426,6 +426,9 @@ func (a *Agent) processTopicOnExistingBranch(ctx context.Context, issue *gh.Issu
 
 	// Process each incomplete article
 	for _, article := range incompleteArticles {
+		if err := a.waitIfPaused(ctx); err != nil {
+			return err
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -451,6 +454,9 @@ func (a *Agent) processTopicOnExistingBranch(ctx context.Context, issue *gh.Issu
 
 		successCount := 0
 		for attempt := 1; attempt <= maxAttempts && successCount < minImprovements; attempt++ {
+			if err := a.waitIfPaused(ctx); err != nil {
+				return err
+			}
 			log.Printf("[Improvement %d/%d attempts, %d/%d successes] Improving '%s'",
 				attempt, maxAttempts, successCount, minImprovements, article.Name)
 
@@ -469,6 +475,9 @@ func (a *Agent) processTopicOnExistingBranch(ctx context.Context, issue *gh.Issu
 
 		// Generate image prompt for this article
 		domain, category, _ := extractCategoryContext(issue.GetTitle())
+		if err := a.waitIfPaused(ctx); err != nil {
+			return err
+		}
 		if err := a.generateHeaderImagePrompt(ctx, article.Name, branchName, domain, category); err != nil {
 			slog.Warn("Failed to generate image prompt", "article", article.Name, "error", err)
 		}
@@ -476,6 +485,9 @@ func (a *Agent) processTopicOnExistingBranch(ctx context.Context, issue *gh.Issu
 
 generateImages:
 	// Generate images from prompts
+	if err := a.waitIfPaused(ctx); err != nil {
+		return err
+	}
 	log.Println("Generating images from prompts...")
 	if err := a.GenerateImages(ctx, branchName); err != nil {
 		slog.Warn("Failed to generate images", "error", err)
@@ -627,4 +639,26 @@ func stripCodeFences(content string) string {
 // GetCurrentBranch returns the current git branch name
 func (a *Agent) GetCurrentBranch() (string, error) {
 	return a.gh.GetCurrentBranch()
+}
+
+// EnsureBackfillBranch returns the active branch for backfill operations.
+// If currently on main/master, it creates and switches to a dedicated
+// backfill branch so review workflows that depend on non-main branches work.
+func (a *Agent) EnsureBackfillBranch() (string, bool, error) {
+	currentBranch, err := a.gh.GetCurrentBranch()
+	if err != nil {
+		return "", false, err
+	}
+
+	if currentBranch != "main" && currentBranch != "master" {
+		return currentBranch, false, nil
+	}
+
+	timestamp := time.Now().UTC().Format("20060102-150405")
+	branchName := fmt.Sprintf("research/backfill-images-%s", timestamp)
+	if err := a.gh.CreateBranch(currentBranch, branchName); err != nil {
+		return "", false, fmt.Errorf("failed to create backfill branch %q from %q: %w", branchName, currentBranch, err)
+	}
+
+	return branchName, true, nil
 }

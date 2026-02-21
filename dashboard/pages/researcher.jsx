@@ -81,6 +81,9 @@ export default function ResearcherPage() {
         maxAttempts: config?.maxAttempts || 20,
       });
       refresh();
+      // Branch may be created/switched automatically at run start (e.g. backfill on main).
+      // Refresh branch info so the UI reflects the active branch.
+      await loadBranchData();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -208,6 +211,18 @@ export default function ResearcherPage() {
   const isIdle = researcherStatus?.state === 'idle';
   const isOnMain = branch?.isMain;
   const isRunActive = researcherStatus?.state === 'running' || researcherStatus?.state === 'paused';
+
+  // Keep branch info fresh during active runs, since branch can change server-side.
+  useEffect(() => {
+    if (!isRunActive) {
+      return undefined;
+    }
+    loadBranchData();
+    const timer = setInterval(() => {
+      loadBranchData();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [isRunActive, loadBranchData]);
 
   // Poll researcher logs while a run is active, then derive progress counters.
   useEffect(() => {

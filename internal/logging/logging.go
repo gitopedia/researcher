@@ -7,13 +7,21 @@ import (
 	stdlog "log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"log/slog"
 )
 
-// logFile holds a reference to the log file so it can be closed on shutdown
+// logFile holds a reference to the main log file so it can be closed on shutdown
 var logFile *os.File
+
+// namedLogFiles tracks log files opened for named loggers (e.g. "api", "queue", "worker-research-default")
+var (
+	namedLogFiles   = make(map[string]*os.File)
+	namedLogFilesMu sync.Mutex
+	namedLogDir     string // directory for per-component log files
+)
 
 // isTerminal checks if the writer is a terminal (TTY).
 // This allows us to disable colors when output is piped to files.
@@ -62,7 +70,7 @@ func colorForLevel(level slog.Level) []byte {
 type ColorHandler struct {
 	w        io.Writer
 	opts     *slog.HandlerOptions
-	prefix   string
+	attrs    []slog.Attr
 	groups   []string
 	useColor bool
 }
@@ -127,7 +135,15 @@ func (h *ColorHandler) Handle(ctx context.Context, r slog.Record) error {
 	buf = append(buf, []byte(r.Message)...)
 	buf = append(buf, '"')
 
-	// Attributes
+	// Pre-set attributes (from WithAttrs)
+	for _, a := range h.attrs {
+		buf = append(buf, ' ')
+		buf = append(buf, []byte(a.Key)...)
+		buf = append(buf, '=')
+		buf = append(buf, []byte(fmt.Sprintf("%v", a.Value.Any()))...)
+	}
+
+	// Record attributes
 	r.Attrs(func(a slog.Attr) bool {
 		buf = append(buf, ' ')
 		buf = append(buf, []byte(a.Key)...)
@@ -145,9 +161,16 @@ func (h *ColorHandler) Handle(ctx context.Context, r slog.Record) error {
 
 // WithAttrs returns a new handler with the given attributes.
 func (h *ColorHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	// For simplicity, we'll just add them to the current handler
-	// In a full implementation, you'd want to store them and include in Handle
-	return h
+	merged := make([]slog.Attr, len(h.attrs)+len(attrs))
+	copy(merged, h.attrs)
+	copy(merged[len(h.attrs):], attrs)
+	return &ColorHandler{
+		w:        h.w,
+		opts:     h.opts,
+		attrs:    merged,
+		groups:   h.groups,
+		useColor: h.useColor,
+	}
 }
 
 // WithGroup returns a new handler with the given group name.
@@ -237,4 +260,115 @@ func (w slogWriter) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// NamedLogger creates a slog.Logger that writes to both stderr and a
+// component-specific log file (e.g. logs/api.log, logs/queue.log,
+// logs/worker-research-default.log). The name is used for the file name.
+func NamedLogger(name string) *slog.Logger {
+	namedLogFilesMu.Lock()
+	defer namedLogFilesMu.Unlock()
+
+	if namedLogDir == "" {
+		namedLogDir = os.Getenv("LOG_DIR")
+		if namedLogDir == "" {
+			namedLogDir = "logs"
+		}
+		_ = os.MkdirAll(namedLogDir, 0755)
+	}
+
+	var writers []io.Writer
+	writers = append(writers, os.Stderr)
+
+	// Open or reuse per-component log file
+	if _, ok := namedLogFiles[name]; !ok {
+		fp := filepath.Join(namedLogDir, name+".log")
+		f, err := os.OpenFile(fp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not open component log file %s: %v\n", fp, err)
+		} else {
+			namedLogFiles[name] = f
+		}
+	}
+
+	if f, ok := namedLogFiles[name]; ok {
+		writers = append(writers, f)
+	}
+
+	// Also write to main log file if it's open
+	if logFile != nil {
+		writers = append(writers, logFile)
+	}
+
+	multi := io.MultiWriter(writers...)
+	handler := NewColorHandler(multi, &slog.HandlerOptions{Level: slog.LevelInfo})
+	return slog.New(handler).With("component", name)
+}
+
+// ListLogSources returns the names of all available log sources (from open
+// named log files) plus the default "researcher" source.
+func ListLogSources() []string {
+	namedLogFilesMu.Lock()
+	defer namedLogFilesMu.Unlock()
+
+	sources := []string{"researcher"}
+	for name := range namedLogFiles {
+		sources = append(sources, name)
+	}
+	return sources
+}
+
+// ReadNamedLog reads the last N bytes from a named log file.
+// If the name is "researcher" it reads from the main log file.
+func ReadNamedLog(name string, maxBytes int64) (string, error) {
+	namedLogFilesMu.Lock()
+	defer namedLogFilesMu.Unlock()
+
+	var fp string
+	if name == "researcher" {
+		fp = os.Getenv("LOG_FILE")
+		if fp == "" {
+			fp = "researcher.log"
+		}
+	} else {
+		dir := os.Getenv("LOG_DIR")
+		if dir == "" {
+			dir = "logs"
+		}
+		fp = filepath.Join(dir, name+".log")
+	}
+
+	info, err := os.Stat(fp)
+	if err != nil {
+		return "", fmt.Errorf("log file not found: %s", fp)
+	}
+
+	f, err := os.Open(fp)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	size := info.Size()
+	if maxBytes > 0 && size > maxBytes {
+		if _, err := f.Seek(-maxBytes, io.SeekEnd); err != nil {
+			return "", err
+		}
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// CloseNamed closes all named log files.
+func CloseNamed() {
+	namedLogFilesMu.Lock()
+	defer namedLogFilesMu.Unlock()
+	for name, f := range namedLogFiles {
+		f.Close()
+		delete(namedLogFiles, name)
+	}
 }

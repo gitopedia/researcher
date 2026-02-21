@@ -1,6 +1,5 @@
 import { useStatus } from '../hooks/useStatus';
 import StatusCard from '../components/StatusCard';
-import ServiceToggle from '../components/ServiceToggle';
 import ProgressBar from '../components/ProgressBar';
 import * as api from '../lib/api';
 
@@ -242,31 +241,50 @@ export default function Dashboard() {
           </div>
         </StatusCard>
 
-        {/* Services */}
+        {/* Services (read-only status) */}
         <StatusCard title="Services">
-          <ServiceToggle
-            name="Docker Desktop"
-            running={docker.running}
-            version={docker.version}
-            onStart={api.startDocker}
-            onStop={api.stopDocker}
-          />
-          <ServiceToggle
-            name="Ollama"
-            running={ollama.running}
-            extra={ollama.loadedModel ? `Loaded: ${ollama.loadedModel}` : null}
-            onStart={api.startOllama}
-            onStop={api.stopOllama}
-            disabled={!docker.running}
-          />
-          <ServiceToggle
-            name="ComfyUI"
-            running={comfyui.running}
-            version={comfyui.version}
-            onStart={api.startComfyUI}
-            onStop={api.stopComfyUI}
-            disabled={!docker.running}
-          />
+          {[
+            { name: 'Docker Desktop', running: docker.running, detail: docker.version },
+            { name: 'Ollama', running: ollama.running, detail: ollama.loadedModel ? `Loaded: ${ollama.loadedModel}` : null },
+            { name: 'ComfyUI', running: comfyui.running, detail: comfyui.version },
+          ].map((svc) => (
+            <div key={svc.name} style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '10px 0',
+              borderBottom: '1px solid var(--border-color)',
+            }}>
+              <div>
+                <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{svc.name}</span>
+                {svc.detail && (
+                  <span style={{
+                    marginLeft: 8,
+                    fontSize: '0.75rem',
+                    color: 'var(--text-muted)',
+                    fontFamily: 'JetBrains Mono, monospace',
+                  }}>
+                    {svc.detail}
+                  </span>
+                )}
+              </div>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: '0.8rem',
+                color: svc.running ? 'var(--accent-green)' : 'var(--text-muted)',
+              }}>
+                <span style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  backgroundColor: svc.running ? 'var(--accent-green)' : 'var(--text-muted)',
+                }} />
+                {svc.running ? 'Running' : 'Stopped'}
+              </span>
+            </div>
+          ))}
         </StatusCard>
 
         {/* Hardware */}

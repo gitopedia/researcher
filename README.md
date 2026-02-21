@@ -150,6 +150,36 @@ KB_API_URL=http://localhost:8081
 
 ## Running
 
+### Launch Dashboard & API Server
+
+The easiest way to launch both the dashboard (web UI) and API server:
+
+**Windows (PowerShell):**
+```powershell
+.\launch.ps1
+```
+
+**Windows (Batch):**
+```cmd
+launch.bat
+```
+
+**Linux/macOS:**
+```bash
+make launch
+# Or with custom repo path:
+make launch REPO_PATH=../gitopedia
+```
+
+This will:
+- Build the Go binary if needed
+- Install dashboard dependencies if needed
+- Start the API server on port 3001
+- Start the dashboard on port 3000
+- Open the dashboard at http://localhost:3000
+
+Press `Ctrl+C` to stop both services.
+
 ### Docker Compose (Recommended)
 
 ```bash
@@ -173,6 +203,9 @@ go run . --once
 
 # Merge-only mode (just merge pending PRs)
 go run . --merge-only
+
+# Server mode (for dashboard)
+go run . --server --repo-path "../gitopedia"
 
 # Local development (no GitHub push)
 go run . --once --repo-path "../gitopedia" --no-commit

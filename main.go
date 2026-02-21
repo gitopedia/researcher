@@ -14,7 +14,13 @@ import (
 
 	"github.com/gitopedia/researcher/internal/agent"
 	"github.com/gitopedia/researcher/internal/api"
+	"github.com/gitopedia/researcher/internal/llm"
 	"github.com/gitopedia/researcher/internal/logging"
+	"github.com/gitopedia/researcher/internal/queue"
+	"github.com/gitopedia/researcher/internal/repository"
+	"github.com/gitopedia/researcher/internal/search"
+	"github.com/gitopedia/researcher/internal/worker"
+	gh "github.com/gitopedia/researcher/internal/github"
 	"github.com/joho/godotenv"
 )
 
@@ -55,13 +61,45 @@ func main() {
 		log.Println("Starting in server mode (Dashboard API)...")
 		log.Printf("Repository path: %s", *repoPath)
 
-		server, err := api.NewServer(*repoPath)
+		// Create context for graceful shutdown
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Initialize queue manager with named logger
+		queueLogger := logging.NamedLogger("queue")
+		queueMgr := queue.NewManager(queueLogger)
+		queueMgr.Start(ctx)
+
+		// Initialize shared dependencies for workers
+		ghClient, err := gh.NewClient(ctx)
+		if err != nil {
+			log.Printf("GitHub client init failed (workers will run without GitHub features): %v", err)
+		}
+		repoMgr, err := repository.NewLocalGitManager(ctx, ghClient, *repoPath)
+		if err != nil {
+			log.Fatalf("Failed to create local git manager: %v", err)
+		}
+		llmClient, err := llm.NewClient()
+		if err != nil {
+			log.Fatalf("Failed to create LLM client: %v", err)
+		}
+		searcher := search.NewClient()
+
+		// Worker factory and manager with named logger
+		workerLogger := logging.NamedLogger("workers")
+		wf := &worker.Factory{
+			QueueMgr: queueMgr,
+			Logger:   workerLogger,
+			RepoMgr:  repoMgr,
+			Searcher: searcher,
+			LLMGen:   llmClient,
+		}
+		wm := worker.NewManager(queueMgr, workerLogger)
+		wm.CreateDefaultWorkers(*repoPath, wf.Create)
+
+		server, err := api.NewServer(*repoPath, queueMgr, wm, wf)
 		if err != nil {
 			log.Fatalf("Failed to create API server: %v", err)
 		}
-
-		// Create context for graceful shutdown
-		ctx, cancel := context.WithCancel(context.Background())
 
 		// Handle shutdown signals
 		sigChan := make(chan os.Signal, 1)
@@ -85,6 +123,7 @@ func main() {
 		}
 
 		log.Println("Server stopped gracefully")
+		logging.CloseNamed()
 		logging.Close()
 		return
 	}
@@ -150,11 +189,24 @@ func main() {
 			log.Fatal("--backfill-images and --generate-images require --repo-path")
 		}
 
-		// Get current branch
 		branchName, err := a.GetCurrentBranch()
 		if err != nil {
 			log.Fatalf("Failed to get current branch: %v", err)
 		}
+
+		// Backfill runs should never operate directly on main/master because
+		// review flows depend on branch-based changes.
+		if *backfillImages {
+			ensuredBranch, createdBranch, err := a.EnsureBackfillBranch()
+			if err != nil {
+				log.Fatalf("Failed to ensure backfill branch: %v", err)
+			}
+			branchName = ensuredBranch
+			if createdBranch {
+				log.Printf("Created and switched to backfill branch: %s", branchName)
+			}
+		}
+
 		log.Printf("Processing images on branch: %s", branchName)
 
 		if *backfillImages {
@@ -165,10 +217,27 @@ func main() {
 			}
 		}
 
+		// Organize articles before image generation so index.md files exist.
+		// This mirrors the full-run logic in processTopicWithIterations and ensures
+		// that findPendingIndexImagePrompts can detect missing index header images.
+		log.Println("Organizing articles (creating/updating index files)...")
+		if err := a.OrganizeArticlesOnBranch(branchName); err != nil {
+			log.Printf("Warning: Failed to organize articles before image generation: %v", err)
+			// Continue anyway - existing articles will still get images
+		}
+
 		// Generate images from prompts
 		log.Println("Generating images from prompts...")
-		if err := a.GenerateImages(ctx, branchName); err != nil {
-			log.Fatalf("Failed to generate images: %v", err)
+		if *backfillImages {
+			// In backfill mode, stage organized-article images in _incoming so the UI
+			// can review all generated candidates consistently.
+			if err := a.GenerateImagesForReview(ctx, branchName); err != nil {
+				log.Fatalf("Failed to generate images: %v", err)
+			}
+		} else {
+			if err := a.GenerateImages(ctx, branchName); err != nil {
+				log.Fatalf("Failed to generate images: %v", err)
+			}
 		}
 		log.Println("Image generation complete")
 

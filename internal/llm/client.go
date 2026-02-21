@@ -24,6 +24,7 @@ var promptsFS embed.FS
 type Client struct {
 	client                                   *openai.Client
 	httpClient                               *http.Client
+	provider                                 string // "ollama" (default), "openrouter", "openai"
 	modelGenerateArticle                     string
 	modelSuggestTopics                       string
 	modelSummarizePlain                      string
@@ -106,24 +107,51 @@ type ollamaChatResponse struct {
 
 // NewClient creates a new LLM client with default configuration
 func NewClient() (*Client, error) {
+	// Provider selection: "ollama" (default), "openrouter", "openai"
+	provider := strings.ToLower(os.Getenv("LLM_PROVIDER"))
+	if provider == "" {
+		provider = "ollama"
+	}
+
 	apiKey := os.Getenv("LLM_API_KEY")
 	baseUrl := os.Getenv("LLM_BASE_URL")
 
-	if apiKey == "" {
-		apiKey = "ollama" // Default for Ollama
+	// Provider-specific defaults
+	switch provider {
+	case "openrouter":
+		if apiKey == "" {
+			return nil, fmt.Errorf("LLM_API_KEY is required when LLM_PROVIDER=openrouter")
+		}
+		if baseUrl == "" {
+			baseUrl = "https://openrouter.ai/api/v1"
+		}
+	case "openai":
+		if apiKey == "" {
+			return nil, fmt.Errorf("LLM_API_KEY is required when LLM_PROVIDER=openai")
+		}
+		if baseUrl == "" {
+			baseUrl = "https://api.openai.com/v1"
+		}
+	default: // "ollama"
+		provider = "ollama"
+		if apiKey == "" {
+			apiKey = "ollama" // Default for Ollama
+		}
+		if baseUrl == "" {
+			// Use explicit IPv4 loopback to avoid environments where "localhost" resolves to ::1
+			// but Ollama is only listening on 127.0.0.1.
+			baseUrl = "http://127.0.0.1:11434/v1"
+		}
 	}
-	if baseUrl == "" {
-		// Use explicit IPv4 loopback to avoid environments where "localhost" resolves to ::1
-		// but Ollama is only listening on 127.0.0.1.
-		baseUrl = "http://127.0.0.1:11434/v1"
-	}
+
+	log.Printf("LLM provider: %s, base URL: %s", provider, baseUrl)
 
 	// Configure HTTP client with 15 minute timeout for large models
 	httpClient := &http.Client{
 		Timeout: 15 * time.Minute,
 	}
 
-	// Ollama base URL for native API (without /v1)
+	// Ollama base URL for native API (without /v1) -- only used when provider is ollama
 	ollamaBaseUrl := strings.TrimSuffix(baseUrl, "/v1")
 
 	// Determine thinking mode
@@ -131,6 +159,17 @@ func NewClient() (*Client, error) {
 
 	// Model selection
 	var modelGenerateArticle, modelSuggestTopics, modelSummarizePlain, modelSummarizeJSON string
+
+	// Default model names differ by provider
+	defaultModelFast := "qwen3:7b"
+	defaultModelArticle := "qwen3:32b"
+	if provider == "openrouter" {
+		defaultModelFast = "google/gemini-2.5-flash"
+		defaultModelArticle = "google/gemini-2.5-flash"
+	} else if provider == "openai" {
+		defaultModelFast = "gpt-4o-mini"
+		defaultModelArticle = "gpt-4o"
+	}
 
 	// Legacy fallback
 	if legacyModel := os.Getenv("LLM_MODEL"); legacyModel != "" {
@@ -150,14 +189,14 @@ func NewClient() (*Client, error) {
 			} else if legacy := os.Getenv("OPENAI_MODEL"); legacy != "" {
 				modelFast = legacy
 			} else {
-				modelFast = "qwen3:7b"
+				modelFast = defaultModelFast
 			}
 		}
 
 		// Article generation: large model for reliability
 		modelArticle := os.Getenv("LLM_MODEL_ARTICLE")
 		if modelArticle == "" {
-			modelArticle = "qwen3:32b"
+			modelArticle = defaultModelArticle
 		}
 
 		// Assign models to tasks
@@ -427,6 +466,7 @@ func NewClient() (*Client, error) {
 	return &Client{
 		client:                                   openai.NewClientWithConfig(config),
 		httpClient:                               httpClient,
+		provider:                                 provider,
 		modelGenerateArticle:                     modelGenerateArticle,
 		modelSuggestTopics:                       modelSuggestTopics,
 		modelSummarizePlain:                      modelSummarizePlain,
@@ -498,8 +538,16 @@ func (c *Client) chatNoThinking(ctx context.Context, model string, messages []ol
 	return c.chatOllama(ctx, model, messages, temperature, false, numPredict...)
 }
 
-// chatOllama is the core Ollama API call
+// chatOllama is the core LLM API call. For Ollama it uses the native API;
+// for other providers (openrouter, openai) it routes through the OpenAI-compatible client.
 func (c *Client) chatOllama(ctx context.Context, model string, messages []ollamaChatMessage, temperature float64, useThinking bool, numPredict ...int) (*ollamaChatResponse, error) {
+	// For non-Ollama providers, use the OpenAI-compatible client
+	if c.provider != "ollama" {
+		return c.chatOpenAICompat(ctx, model, messages, temperature, numPredict...)
+	}
+
+	// --- Ollama native API path ---
+
 	// Determine think parameter value
 	var thinkParam interface{} = false
 	if useThinking {
@@ -556,6 +604,86 @@ func (c *Client) chatOllama(ctx context.Context, model string, messages []ollama
 	}
 
 	return &chatResp, nil
+}
+
+// chatOpenAICompat routes calls through the OpenAI-compatible API (used for OpenRouter, OpenAI, etc.)
+func (c *Client) chatOpenAICompat(ctx context.Context, model string, messages []ollamaChatMessage, temperature float64, numPredict ...int) (*ollamaChatResponse, error) {
+	// Convert ollamaChatMessage to openai.ChatCompletionMessage
+	oaiMessages := make([]openai.ChatCompletionMessage, len(messages))
+	for i, m := range messages {
+		oaiMessages[i] = openai.ChatCompletionMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		}
+	}
+
+	req := openai.ChatCompletionRequest{
+		Model:       model,
+		Messages:    oaiMessages,
+		Temperature: float32(temperature),
+	}
+
+	// Map numPredict to MaxTokens
+	if len(numPredict) > 0 && numPredict[0] > 0 {
+		req.MaxTokens = numPredict[0]
+	}
+
+	resp, err := c.client.CreateChatCompletion(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("%s API error: %w", c.provider, err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("%s API returned no choices", c.provider)
+	}
+
+	content := resp.Choices[0].Message.Content
+
+	// Some reasoning models (e.g. deepseek-r1 on OpenRouter) embed thinking in <think> tags.
+	// Extract it so callers can access it via the Thinking field.
+	thinking, cleanContent := extractThinkingBlock(content)
+
+	return &ollamaChatResponse{
+		Model: model,
+		Message: struct {
+			Role     string `json:"role"`
+			Content  string `json:"content"`
+			Thinking string `json:"thinking,omitempty"`
+		}{
+			Role:     resp.Choices[0].Message.Role,
+			Content:  cleanContent,
+			Thinking: thinking,
+		},
+	}, nil
+}
+
+// extractThinkingBlock extracts <think>...</think> blocks from model output.
+// Some reasoning models (deepseek-r1, qwq, etc.) on OpenRouter/OpenAI wrap their
+// reasoning in these tags. Returns (thinking, content_without_thinking).
+func extractThinkingBlock(content string) (string, string) {
+	const openTag = "<think>"
+	const closeTag = "</think>"
+
+	startIdx := strings.Index(content, openTag)
+	if startIdx < 0 {
+		return "", content
+	}
+
+	endIdx := strings.Index(content, closeTag)
+	if endIdx < 0 {
+		// Unclosed think tag -- treat everything after <think> as thinking
+		thinking := strings.TrimSpace(content[startIdx+len(openTag):])
+		before := strings.TrimSpace(content[:startIdx])
+		return thinking, before
+	}
+
+	thinking := strings.TrimSpace(content[startIdx+len(openTag) : endIdx])
+	// Reassemble content without the think block
+	before := content[:startIdx]
+	after := content[endIdx+len(closeTag):]
+	cleanContent := strings.TrimSpace(before + after)
+
+	return thinking, cleanContent
 }
 
 // ThinkingEnabled returns true if thinking mode is enabled

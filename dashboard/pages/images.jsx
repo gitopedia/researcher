@@ -20,8 +20,8 @@ export default function ImagesPage() {
         api.listImages(),
         api.getImageSelections(),
       ]);
-      setGroups(imagesData);
-      setSelections(selectionsData);
+      setGroups(Array.isArray(imagesData) ? imagesData : []);
+      setSelections(selectionsData || {});
       setError(null);
     } catch (e) {
       setError(e.message);
@@ -317,12 +317,18 @@ export default function ImagesPage() {
             ) : groups.length === 0 ? (
               <div style={{
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
                 height: '100%',
                 color: 'var(--text-muted)',
+                gap: 12,
               }}>
-                No images found
+                <span style={{ fontSize: '2.5rem', opacity: 0.4 }}>🖼</span>
+                <span style={{ fontSize: '1rem', fontWeight: 500 }}>No images found</span>
+                <span style={{ fontSize: '0.85rem', opacity: 0.7 }}>
+                  Generated images will appear here once the image generation step runs
+                </span>
               </div>
             ) : (
               Object.entries(groupedByType).map(([type, typeGroups]) => (
